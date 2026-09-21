@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		E665232944194A91AAFA0C10 /* EndSessionSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1569EAC826C413FB40C7DBC /* EndSessionSheetTests.swift */; };
+		AD94258047874F11B85645D2 /* ConversationViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65BB55D9DE304E2898821F68 /* ConversationViewTests.swift */; };
 		2128529FFB4F496D96E6C386 /* SermivaUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88054569658846F789D6BDE7 /* SermivaUITests.swift */; };
 		80104374A189477291FF30DD /* SermivaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FD973B7E0BA4D5FB90CD3F2 /* SermivaApp.swift */; };
 		AAF85BCB7DEF44D794FB9796 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E38FE130F4484F90A3EA8A /* RootView.swift */; };
@@ -70,6 +71,7 @@
 		5477A7168B8245EBB2BA466C /* TestFakes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestFakes.swift; sourceTree = "<group>"; };
 		1B10254C1952402EB9C4CA44 /* SegmentAssemblerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentAssemblerTests.swift; sourceTree = "<group>"; };
 		E11DE6C6F5694D9E889849AB /* SessionStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStateMachineTests.swift; sourceTree = "<group>"; };
+		65BB55D9DE304E2898821F68 /* ConversationViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationViewTests.swift; sourceTree = "<group>"; };
 		DD6FFDA9C0C74A429864612A /* DemoFixtureLoaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoFixtureLoaderTests.swift; sourceTree = "<group>"; };
 		7836B2C424AD45E5892A6EE1 /* demo-data.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "demo-data.json"; path = "design/claude-handoff/demo-data.json"; sourceTree = "<group>"; };
 		3C08034A9F714A96AD95B1E9 /* Sermiva.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sermiva.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -135,6 +137,7 @@
 				F1569EAC826C413FB40C7DBC /* EndSessionSheetTests.swift */,
 				E11DE6C6F5694D9E889849AB /* SessionStateMachineTests.swift */,
 				DD6FFDA9C0C74A429864612A /* DemoFixtureLoaderTests.swift */,
+				65BB55D9DE304E2898821F68 /* ConversationViewTests.swift */,
 			);
 			path = SermivaTests;
 			sourceTree = "<group>";
@@ -326,6 +329,7 @@
 				E665232944194A91AAFA0C10 /* EndSessionSheetTests.swift in Sources */,
 				7655595F510E498DAE8E625F /* SessionStateMachineTests.swift in Sources */,
 				5B2919A77B4C472AA2635653 /* DemoFixtureLoaderTests.swift in Sources */,
+				AD94258047874F11B85645D2 /* ConversationViewTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

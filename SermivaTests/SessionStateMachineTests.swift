@@ -34,6 +34,7 @@ final class SessionStateMachineTests: XCTestCase {
         let mic = FakeMicPermissionProvider(granted: micGranted)
         let controller = DemoSessionController(
             events: makeEvents(),
+            isDemo: true,
             micPermission: mic,
             audioCapture: audio,
             scheduler: scheduler,
@@ -218,6 +219,7 @@ final class SessionStateMachineTests: XCTestCase {
         let audio = FakeAudioCapture()
         var controller: DemoSessionController? = DemoSessionController(
             events: makeEvents(),
+            isDemo: true,
             micPermission: FakeMicPermissionProvider(granted: true),
             audioCapture: audio,
             scheduler: ManualScheduler(),
@@ -240,6 +242,7 @@ final class SessionStateMachineTests: XCTestCase {
         let scheduler = ManualScheduler()
         let controller = DemoSessionController(
             events: makeEvents(),
+            isDemo: true,
             scheduler: scheduler,
             eventInterval: 0.01,
             translationDelay: 0.01

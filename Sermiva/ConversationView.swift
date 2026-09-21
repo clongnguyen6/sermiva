@@ -194,13 +194,18 @@ struct ConversationView: View {
     /// own `isDemo` flag into a text-computing call here.
     private var micDockText: String { controller.micDockText }
 
-    private var micDotColor: Color {
-        switch controller.micDotColorRole {
+    /// Pure so the role-to-color mapping is directly testable: demo must
+    /// never reach `.live` (the "listening" red), and this is the one place
+    /// that decides what color that role actually renders as.
+    static func micDotColor(for role: DemoSessionController.MicDotColorRole) -> Color {
+        switch role {
         case .neutral: return Tokens.text3
         case .warn: return Tokens.warn
         case .live: return Tokens.live
         }
     }
+
+    private var micDotColor: Color { Self.micDotColor(for: controller.micDotColorRole) }
 
     private var primaryLabel: String {
         switch controller.state {
@@ -233,6 +238,12 @@ struct ConversationView: View {
                 Image(systemName: controller.micIconName)
                     .font(.system(size: micDockTextSize))
                     .foregroundStyle(Tokens.text2)
+                    // SF Symbols carry their own VoiceOver label (e.g. "Tắt
+                    // Micrô" for mic.slash), which would announce this line
+                    // twice and read like a tappable control. The text next
+                    // to it already says the same state in words - hide the
+                    // icon from accessibility so the line is read once.
+                    .accessibilityHidden(true)
                 Text(micDockText)
                     .font(.system(size: micDockTextSize, weight: .semibold))
                     .foregroundStyle(Tokens.text)

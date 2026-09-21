@@ -39,7 +39,7 @@ final class DemoSessionController: ObservableObject {
 
     init(
         events: [DemoEvent],
-        isDemo: Bool = true,
+        isDemo: Bool,
         micPermission: MicPermissionProviding = AutoGrantedMicPermission(),
         audioCapture: AudioCapturing = NullAudioCapture(),
         scheduler: DemoScheduler = DispatchScheduler(),
