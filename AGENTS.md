@@ -41,13 +41,15 @@ xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
 ```
 
 The committed shared scheme sets `parallelizable = "NO"` on both test targets, which is what keeps
-the two test commands on the named Simulator instead of a clone. To confirm a given run actually used
-it: `xcrun simctl list devices` (the default device set) never shows parallel-testing clones - they
-live in a separate set (`xcrun simctl --set testing list devices`) - so check the run's own
-`.xcresult` bundle instead (path printed after "Test session results, code coverage, and logs:" in
-the `xcodebuild` output): `xcrun xcresulttool get test-results tests --path <bundle>` and read
-`deviceName`/`deviceId` under `devices` - it must match the named Simulator above, not a
-`Clone N of iPhone 17`.
+the two test commands on the named Simulator instead of a clone. To confirm a given run actually
+used it, check two things: the `xcodebuild` log must not contain `on 'Clone` (a clone run's lines
+read `... passed on 'Clone N of iPhone 17 - ...'`; a named-device run's lines carry no `on '...'` at
+all), and `xcrun simctl list devices` must still show the UDID above as `Booted` right after the run
+- a clone run leaves it `Shutdown`. Do not trust the run's own `.xcresult` bundle for this:
+`deviceName`/`deviceId` there report the named Simulator even on a run that actually happened on a
+clone. `xcrun simctl list devices` (the default device set) never lists the clones themselves either
+- they live in a separate set, `xcrun simctl --set testing list devices` - which is why this checks
+the base device's own state rather than looking for a clone entry.
 
 `build` proves "compiles". The `SermivaTests` run (state machine + segment assembly fixtures read
 from `demo-data.json`) proves "behaves" for what those fixtures cover - nothing more; it also
