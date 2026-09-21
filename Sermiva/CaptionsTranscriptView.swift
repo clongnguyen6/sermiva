@@ -43,6 +43,9 @@ struct CaptionsTranscriptView: View {
 
 private struct CurrentRow: View {
     let segment: Segment
+    @ScaledMetric(relativeTo: .body) private var metaSize: CGFloat = 13
+    @ScaledMetric(relativeTo: .body) private var srcSize: CGFloat = 16
+    @ScaledMetric(relativeTo: .body) private var tgtSize: CGFloat = 24
 
     var body: some View {
         HStack(spacing: 0) {
@@ -51,13 +54,13 @@ private struct CurrentRow: View {
                 .frame(width: 3)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
-                    SegmentMeta(segment: segment, fontSize: 13)
+                    SegmentMeta(segment: segment, fontSize: metaSize)
                     CurrentStatusTag(segment: segment)
                     Spacer(minLength: 0)
                 }
                 HStack(alignment: .bottom, spacing: 0) {
                     Text(segment.source)
-                        .font(.system(size: 16))
+                        .font(.system(size: srcSize))
                         .foregroundStyle(Tokens.text2)
                     if !segment.isFinal {
                         BlinkingCaret()
@@ -65,10 +68,10 @@ private struct CurrentRow: View {
                 }
                 if let target = segment.target {
                     Text(target)
-                        .font(.system(size: 24, weight: .semibold))
+                        .font(.system(size: tgtSize, weight: .semibold))
                         .foregroundStyle(Tokens.text)
                 } else if segment.isFinal {
-                    TranslatingPlaceholder(fontSize: 13)
+                    TranslatingPlaceholder(fontSize: metaSize)
                 }
             }
             .padding(.leading, 12)
@@ -83,24 +86,28 @@ private struct CurrentRow: View {
         // live inside the identified view itself, so it actually shows.
         .padding(.bottom, 16)
         .id(segment.id)
+        .accessibilityIdentifier("currentSegment")
     }
 }
 
 private struct HistoryRow: View {
     let segment: Segment
+    @ScaledMetric(relativeTo: .body) private var metaSize: CGFloat = 12
+    @ScaledMetric(relativeTo: .body) private var srcSize: CGFloat = 14
+    @ScaledMetric(relativeTo: .body) private var tgtSize: CGFloat = 17
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            SegmentMeta(segment: segment, fontSize: 12)
+            SegmentMeta(segment: segment, fontSize: metaSize)
             Text(segment.source)
-                .font(.system(size: 14))
+                .font(.system(size: srcSize))
                 .foregroundStyle(Tokens.text2)
             if let target = segment.target {
                 Text(target)
-                    .font(.system(size: 17, weight: .medium))
+                    .font(.system(size: tgtSize, weight: .medium))
                     .foregroundStyle(Tokens.text)
             } else if segment.isFinal {
-                TranslatingPlaceholder(fontSize: 12)
+                TranslatingPlaceholder(fontSize: metaSize)
             }
         }
     }
@@ -152,6 +159,8 @@ private struct SegmentMeta: View {
 /// on the current row - the prototype has no such tag on history rows.
 private struct CurrentStatusTag: View {
     let segment: Segment
+    @ScaledMetric(relativeTo: .body) private var tagSize: CGFloat = 13
+    @ScaledMetric(relativeTo: .body) private var checkmarkSize: CGFloat = 10
 
     var body: some View {
         if !segment.isFinal {
@@ -159,15 +168,15 @@ private struct CurrentStatusTag: View {
                 PulsingDot(color: Tokens.accent)
                 Text("Đang nhận dạng")
             }
-            .font(.system(size: 13, weight: .semibold))
+            .font(.system(size: tagSize, weight: .semibold))
             .foregroundStyle(Tokens.accent)
         } else if segment.target != nil {
             HStack(spacing: 4) {
                 Image(systemName: "checkmark")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: checkmarkSize, weight: .bold))
                 Text("Hoàn tất")
             }
-            .font(.system(size: 13, weight: .medium))
+            .font(.system(size: tagSize, weight: .medium))
             .foregroundStyle(Tokens.text3)
         }
     }

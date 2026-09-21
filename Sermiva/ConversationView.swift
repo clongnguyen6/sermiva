@@ -3,7 +3,8 @@ import UIKit
 
 /// HANDOFF.md section 2.2, "Phu de" display style only. Demo mode: the
 /// `DEMO` badge is the visible marker; see docs/demo-mic-status.md for why
-/// the mic dock line still says "Dang nghe" truthfully during playback.
+/// the mic dock line always says "Mic tat" here - demo never opens real
+/// hardware.
 struct ConversationView: View {
     @StateObject private var controller: DemoSessionController
     @State private var showEndSheet = false
@@ -41,15 +42,19 @@ struct ConversationView: View {
 
     // MARK: - Top bar
 
+    @ScaledMetric(relativeTo: .body) private var headerSize: CGFloat = 15
+    @ScaledMetric(relativeTo: .body) private var demoBadgeSize: CGFloat = 11
+    @ScaledMetric(relativeTo: .body) private var statusTextSize: CGFloat = 12.5
+
     private var topBar: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
                 Text("Tiếng Việt ↔ Tiếng Anh")
-                    .font(.system(size: 15, weight: .medium))
+                    .font(.system(size: headerSize, weight: .medium))
                     .foregroundStyle(Tokens.text)
                 if isDemo {
                     Text("DEMO")
-                        .font(.system(size: 11, weight: .bold))
+                        .font(.system(size: demoBadgeSize, weight: .bold))
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
                         .background(Tokens.warn.opacity(0.18))
@@ -69,7 +74,7 @@ struct ConversationView: View {
                     .fill(statusColor)
                     .frame(width: 8, height: 8)
                 Text(statusText)
-                    .font(.system(size: 12.5, weight: .semibold))
+                    .font(.system(size: statusTextSize, weight: .semibold))
                     .foregroundStyle(Tokens.text3)
             }
         }
@@ -107,12 +112,14 @@ struct ConversationView: View {
 
     // MARK: - Banner
 
+    @ScaledMetric(relativeTo: .body) private var bannerTextSize: CGFloat = 14
+
     private var micDeniedBanner: some View {
         HStack {
             Image(systemName: "exclamationmark.triangle")
                 .foregroundStyle(Tokens.danger)
             Text("Sermiva chưa được cấp quyền micro.")
-                .font(.system(size: 14))
+                .font(.system(size: bannerTextSize))
                 .foregroundStyle(Tokens.danger)
             Spacer()
             Button("Mở Cài đặt iPhone") {
@@ -120,7 +127,7 @@ struct ConversationView: View {
                     UIApplication.shared.open(url)
                 }
             }
-            .font(.system(size: 14, weight: .semibold))
+            .font(.system(size: bannerTextSize, weight: .semibold))
             .foregroundStyle(Tokens.danger)
         }
         .padding(10)
@@ -148,6 +155,9 @@ struct ConversationView: View {
     /// state AGENTS.md forbids.
     private var isEmptyListening: Bool { controller.isMicCapturing }
 
+    @ScaledMetric(relativeTo: .body) private var emptyTitleSize: CGFloat = 17
+    @ScaledMetric(relativeTo: .body) private var emptyBodySize: CGFloat = 14
+
     private var emptyState: some View {
         VStack(spacing: 8) {
             Spacer()
@@ -155,20 +165,20 @@ struct ConversationView: View {
                 HStack(spacing: 6) {
                     Circle().fill(Tokens.live).frame(width: 8, height: 8)
                     Text("Đang nghe…")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(size: emptyTitleSize, weight: .semibold))
                         .foregroundStyle(Tokens.text)
                 }
                 Text("Chưa có lời nói. Cứ nói tự nhiên, nguyên văn và bản dịch sẽ hiện ở đây.")
-                    .font(.system(size: 14))
+                    .font(.system(size: emptyBodySize))
                     .foregroundStyle(Tokens.text2)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
             } else {
                 Text("Sẵn sàng bắt đầu")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: emptyTitleSize, weight: .semibold))
                     .foregroundStyle(Tokens.text)
                 Text("Đặt iPhone giữa hai người và nhấn Bắt đầu một lần. App nghe liên tục và dịch hai chiều, không cần giữ nút hay chọn người nói.")
-                    .font(.system(size: 14))
+                    .font(.system(size: emptyBodySize))
                     .foregroundStyle(Tokens.text2)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
@@ -205,6 +215,9 @@ struct ConversationView: View {
 
     private var primaryIsOk: Bool { controller.state == .paused }
 
+    @ScaledMetric(relativeTo: .body) private var micDockTextSize: CGFloat = 12.5
+    @ScaledMetric(relativeTo: .body) private var pillButtonSize: CGFloat = 17
+
     private var bottomDock: some View {
         VStack(spacing: 10) {
             HStack(spacing: 8) {
@@ -212,7 +225,7 @@ struct ConversationView: View {
                     .fill(micOn ? Tokens.live : (controller.state == .connecting || controller.state == .requestingMic ? Tokens.warn : Tokens.text3))
                     .frame(width: 8, height: 8)
                 Text(micDockText)
-                    .font(.system(size: 12.5, weight: .semibold))
+                    .font(.system(size: micDockTextSize, weight: .semibold))
                     .foregroundStyle(Tokens.text)
                 Spacer()
             }
@@ -233,7 +246,7 @@ struct ConversationView: View {
                             .frame(minWidth: 44, minHeight: 50)
                     } else {
                         Text(primaryLabel)
-                            .font(.system(size: 17, weight: .semibold))
+                            .font(.system(size: pillButtonSize, weight: .semibold))
                             .frame(minWidth: 44, minHeight: 50)
                             .padding(.horizontal, 14)
                     }
@@ -243,10 +256,11 @@ struct ConversationView: View {
                 .clipShape(Capsule())
                 .disabled(primaryDisabled)
                 .opacity(primaryDisabled ? 0.4 : 1)
+                .accessibilityIdentifier("primaryButton")
 
                 Button(action: { showEndSheet = true }) {
                     Text("Kết thúc")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(size: pillButtonSize, weight: .semibold))
                         .frame(minWidth: 44, minHeight: 50)
                         .padding(.horizontal, 14)
                 }
@@ -268,6 +282,7 @@ private struct LabeledRoundButton: View {
     let systemImage: String
     let label: String
     let action: () -> Void
+    @ScaledMetric(relativeTo: .body) private var labelSize: CGFloat = 11
 
     var body: some View {
         Button(action: action) {
@@ -275,7 +290,7 @@ private struct LabeledRoundButton: View {
                 Image(systemName: systemImage)
                     .frame(width: 44, height: 44)
                 Text(label)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.system(size: labelSize, weight: .medium))
             }
         }
         .foregroundStyle(Tokens.text2)

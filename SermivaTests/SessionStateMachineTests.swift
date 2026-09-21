@@ -232,6 +232,26 @@ final class SessionStateMachineTests: XCTestCase {
         XCTAssertEqual(audio.stopCount, 1, "dropping the controller from the view tree must stop capture, not leave the mic open")
     }
 
+    // MARK: - Project owner decision: demo never opens real mic I/O
+
+    /// With no fakes injected - the exact wiring `ConversationView` uses -
+    /// the demo must still play, and must never claim to be capturing.
+    func test_productionDefaultsNeverOpenRealCaptureButStillPlayTheDemo() {
+        let scheduler = ManualScheduler()
+        let controller = DemoSessionController(
+            events: makeEvents(),
+            scheduler: scheduler,
+            eventInterval: 0.01,
+            translationDelay: 0.01
+        )
+
+        controller.primaryButtonTapped()
+
+        XCTAssertEqual(controller.state, .listening, "the production demo must still play even though it never opens real capture")
+        XCTAssertFalse(controller.isMicCapturing, "demo must never claim to be capturing - it never asks for or opens real audio")
+        XCTAssertEqual(controller.segments.count, 1)
+    }
+
     // MARK: - C1: mic display follows real capture, not session state
 
     func test_isMicCapturingTracksRealCaptureThroughPauseResumeAndEnd() {

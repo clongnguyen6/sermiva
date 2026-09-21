@@ -1,9 +1,11 @@
 import Foundation
 
 /// Drives the section-5 session state machine for offline demo playback of
-/// the `cafe_vi_en` fixture. No network and no Soniox: the only real I/O is
-/// the microphone permission prompt and, once granted, a genuinely attempted
-/// (and discarded) capture. Playback never depends on capture succeeding -
+/// the `cafe_vi_en` fixture. No network, no Soniox, and - per the project
+/// owner's decision - no real microphone I/O either: demo never asks for
+/// OS permission and never opens real capture, so it cannot look like a
+/// live session. Playback never depends on capture succeeding, which is
+/// what makes that possible without the state machine lying about it -
 /// see docs/demo-mic-status.md.
 @MainActor
 final class DemoSessionController: ObservableObject {
@@ -29,8 +31,8 @@ final class DemoSessionController: ObservableObject {
 
     init(
         events: [DemoEvent],
-        micPermission: MicPermissionProviding = SystemMicPermissionProvider(),
-        audioCapture: AudioCapturing = MicrophoneCapture(),
+        micPermission: MicPermissionProviding = AutoGrantedMicPermission(),
+        audioCapture: AudioCapturing = NullAudioCapture(),
         scheduler: DemoScheduler = DispatchScheduler(),
         eventInterval: TimeInterval = 0.9,
         translationDelay: TimeInterval = 1.4
@@ -155,12 +157,13 @@ final class DemoSessionController: ObservableObject {
         startCaptureAndPlayback()
     }
 
-    /// Starts real capture, then always starts playback - whether or not
-    /// capture actually opened. Microphone and session are separate states
-    /// (AGENTS.md): a capture failure (bad hardware, no input device) is not
-    /// a permission denial and must not silently stop the demo from
-    /// playing. `isMicCapturing` carries the honest signal instead; see
-    /// docs/demo-mic-status.md for the reasoning and its limits.
+    /// Attempts capture, then always starts playback regardless of whether
+    /// it opened. Microphone and session are separate states (AGENTS.md): a
+    /// capture failure is not a permission denial and must not silently
+    /// stop the demo from playing. In production this branch is taken on
+    /// purpose every time (`NullAudioCapture.start()` always throws), which
+    /// is what keeps `isMicCapturing` honestly false throughout a demo
+    /// session; see docs/demo-mic-status.md.
     private func startCaptureAndPlayback() {
         do {
             try audioCapture.start()

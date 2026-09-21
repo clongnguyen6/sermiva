@@ -18,26 +18,45 @@ Never report something as working without running it. If a step was skipped, say
 and paste the real output rather than describing it.
 
 The project is `Sermiva.xcodeproj` (hand-written `project.pbxproj`, no project generator), scheme
-`Sermiva`, targets `Sermiva` (app) and `SermivaTests` (XCTest). Deployment target iOS 17.0. These
-are the commands that were actually run and actually passed; run them again from the repo root
-before trusting a "compiles" or "behaves" claim:
+`Sermiva`, targets `Sermiva` (app), `SermivaTests` (XCTest) and `SermivaUITests` (one XCUITest smoke
+test). Deployment target iOS 17.0. Bundle id `com.clongnguyen6.sermiva` (`.SermivaTests` /
+`.SermivaUITests` for the test targets). These are the commands that were actually run; run them
+again from the repo root before trusting a "compiles" or "behaves" claim:
 
 ```
 xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
 
 xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:SermivaTests test
+
+xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:SermivaUITests test
 ```
 
-`build` proves "compiles". `test` runs `SermivaTests` (state machine + segment assembly fixtures
-read from `demo-data.json`) and proves "behaves" for what those fixtures cover - nothing more. The
-test target does launch `Sermiva.app` as its `TEST_HOST` process, so "test passed" implies the app
-itself launched without crashing, but that is a side effect of how `XCTest` hosts unit tests, not UI
-automation: nothing in `test` drives the UI or looks at a screen. "runs" needs a separate manual step
-(install + launch on a named Simulator, e.g. via `xcrun simctl install/launch`) and a description of
-what was actually observed on screen, not just an exit code. Nothing here reaches "works live" - that
-rung needs a real Soniox key on a real device, per Outcome 2.
+`build` proves "compiles". The `SermivaTests` run (state machine + segment assembly fixtures read
+from `demo-data.json`) proves "behaves" for what those fixtures cover - nothing more; it also
+launches `Sermiva.app` as its `TEST_HOST` process, which implies the app launched without crashing,
+but that is a side effect of how `XCTest` hosts unit tests, not UI automation - nothing in it drives
+the UI or looks at a screen.
+
+The `SermivaUITests` run is the one thing that does drive the UI: it taps into the real committed
+app (Setup -> demo -> Bat dau -> first fixture segment visible) with no hooks or shortcuts in product
+code, only accessibility identifiers. Passing is real "runs" evidence, repeatable, not a one-off
+screenshot - but it proves only that one path; it says nothing about any other display style, about
+Settings, or about anything needing Soniox. It requires the host Mac to have Developer Mode enabled
+(`DevToolsSecurity -status`; enable with `sudo DevToolsSecurity -enable`, a one-time interactive
+admin action) - `xcodebuild build` and the `SermivaTests` run do not need this, only XCUITest's
+debugger-based process attach does. If that command reports disabled and nobody with admin access to
+this machine can run the enable step, `SermivaUITests` cannot run here; say so plainly rather than
+reporting a guessed result.
+
+A plain "install and observe" pass (`xcrun simctl install` / `launch` / `io screenshot`, no taps) is
+weaker evidence than `SermivaUITests` - it cannot get past the Setup screen without tapping - but it
+still proves the app installs and launches, and is the fallback when `SermivaUITests` cannot run.
+
+Nothing here reaches "works live" - that rung needs a real Soniox key on a real device, per
+Outcome 2.
 
 State which rung your claim is on, every time:
 

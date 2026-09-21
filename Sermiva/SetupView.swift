@@ -9,6 +9,13 @@ struct SetupView: View {
     @State private var apiKey: String = ""
     @State private var isKeyVisible = false
 
+    @ScaledMetric(relativeTo: .body) private var titleSize: CGFloat = 20
+    @ScaledMetric(relativeTo: .body) private var bodySize: CGFloat = 15
+    @ScaledMetric(relativeTo: .body) private var buttonSize: CGFloat = 17
+    @ScaledMetric(relativeTo: .body) private var demoButtonSize: CGFloat = 15
+    @ScaledMetric(relativeTo: .body) private var footerSize: CGFloat = 13
+    @ScaledMetric(relativeTo: .body) private var fieldSize: CGFloat = 16
+
     var body: some View {
         ZStack {
             Tokens.bg.ignoresSafeArea()
@@ -20,11 +27,11 @@ struct SetupView: View {
                     .foregroundStyle(Tokens.accent)
 
                 Text("Kết nối Soniox")
-                    .font(.system(size: 20, weight: .bold))
+                    .font(.system(size: titleSize, weight: .bold))
                     .foregroundStyle(Tokens.text)
 
                 Text("Sermiva dùng Soniox để nhận dạng và dịch theo thời gian thực. Dán khóa API của bạn để bắt đầu.")
-                    .font(.system(size: 15))
+                    .font(.system(size: bodySize))
                     .foregroundStyle(Tokens.text2)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 24)
@@ -33,7 +40,7 @@ struct SetupView: View {
 
                 Button(action: {}) {
                     Text("Kiểm tra và tiếp tục")
-                        .font(.system(size: 17, weight: .semibold))
+                        .font(.system(size: buttonSize, weight: .semibold))
                         .frame(maxWidth: .infinity, minHeight: 52)
                 }
                 .background(Tokens.accent.opacity(0.5))
@@ -44,13 +51,14 @@ struct SetupView: View {
 
                 Button(action: onStartDemo) {
                     Text("Dùng thử bản demo (không nối Soniox)")
-                        .font(.system(size: 15, weight: .medium))
+                        .font(.system(size: demoButtonSize, weight: .medium))
                 }
                 .foregroundStyle(Tokens.accent)
                 .frame(minHeight: 44)
+                .accessibilityIdentifier("demoButton")
 
                 Text("Khóa chỉ lưu trên máy này.")
-                    .font(.system(size: 13))
+                    .font(.system(size: footerSize))
                     .foregroundStyle(Tokens.text3)
 
                 Spacer()
@@ -68,7 +76,7 @@ struct SetupView: View {
                     SecureField("sx_...", text: $apiKey)
                 }
             }
-            .font(.system(size: 16, design: .monospaced))
+            .font(.system(size: fieldSize, design: .monospaced))
             .foregroundStyle(Tokens.text)
             .autocorrectionDisabled()
             .textInputAutocapitalization(.never)
