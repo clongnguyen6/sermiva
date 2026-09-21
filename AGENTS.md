@@ -14,101 +14,31 @@ disagree, the handoff wins on what the app is, and this file wins on how work is
 
 ## Verify before handing back
 
-Never report something as working without running it. If a step was skipped, say which one and why,
-and paste the real output rather than describing it.
-
-The project is `Sermiva.xcodeproj` (hand-written `project.pbxproj`, no project generator), scheme
-`Sermiva` (a hand-written shared scheme committed at
-`Sermiva.xcodeproj/xcshareddata/xcschemes/Sermiva.xcscheme` - do not delete it: without a committed
-scheme, `xcodebuild` auto-generates one with parallel testing enabled, which runs tests on an
-ephemeral cloned Simulator instead of the named one below), targets `Sermiva` (app), `SermivaTests`
-(XCTest) and `SermivaUITests` (one XCUITest smoke test). Deployment target iOS 17.0. Bundle id
-`com.clongnguyen6.sermiva` (`.SermivaTests` / `.SermivaUITests` for the test targets). These are the
-commands that were actually run against the same Simulator - iPhone 17, UDID
-`2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD` - and actually passed; run them again from the repo root
-before trusting a "compiles", "runs" or "behaves" claim. None of this runs automatically - there is
-no CI and no pre-commit hook wired to any of it - so run it by hand every time. Boot the Simulator
-and let it settle first, every time, even if it looks already running:
+Never report something as working without running it; paste real output, not a description. Nothing here runs automatically - no CI, no pre-commit hook - so run it by hand every time:
 
 ```
-xcrun simctl boot 2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD
-xcrun simctl bootstatus 2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD -b
+./scripts/verify.sh
 ```
 
-`simctl boot` on an already-booted device returns `Unable to boot device in current state: Booted`
-with a non-zero exit; that is expected, not a failure, and `bootstatus -b` still exits 0 right after.
-
-Starting a test command against a Simulator that is `Shutdown` has been observed to fail with
-`Busy ("Application failed preflight checks")` on the named device itself, no clone involved, on 2
-of 3 cold-start attempts; the third attempt passed, but `xcodebuild` then shut the Simulator back
-down on its own, which would otherwise read as a false clone signal below. No cause deeper than
-"starting from `Shutdown` is unreliable" was established - boot and settle first and this does not
-come up.
-
-```
-xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
-  -destination 'platform=iOS Simulator,name=iPhone 17' build
-
-xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
-  -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:SermivaTests test
-
-xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
-  -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:SermivaUITests test
-```
-
-The committed shared scheme sets `parallelizable = "NO"` on both test targets, which is what keeps
-the two test commands on the named Simulator instead of a clone. To confirm a given run actually
-used it, check two things: the `xcodebuild` log must not contain `on 'Clone` (a clone run's lines
-read `... passed on 'Clone N of iPhone 17 - ...'`; a named-device run's lines carry no `on '...'` at
-all), and `xcrun simctl list devices` must still show the UDID above as `Booted` right after the run,
-since a clone run leaves it `Shutdown` instead (this is why the Simulator must already be booted and
-settled before the run - see above - otherwise a normal named-device run can also end `Shutdown` and
-look like a false clone signal). Do not trust the run's own `.xcresult` bundle for this:
-`deviceName`/`deviceId` there report the named Simulator even on a run that actually happened on a
-clone, and `xcrun simctl list devices` (the default device set) never lists the clones themselves
-either, since they live in a separate set, `xcrun simctl --set testing list devices`; that is why
-this check reads the base device's own state rather than looking for a clone entry in that list.
-
-`build` proves "compiles". The `SermivaTests` run (state machine + segment assembly fixtures read
-from `demo-data.json`) proves "behaves" for what those fixtures cover - nothing more; it also
-launches `Sermiva.app` as its `TEST_HOST` process, which implies the app launched without crashing,
-but that is a side effect of how `XCTest` hosts unit tests, not UI automation - nothing in it drives
-the UI or looks at a screen.
-
-The `SermivaUITests` run is the one thing that does drive the UI: it taps into the real committed
-app (Setup -> demo -> Bat dau -> first fixture segment's real content visible, then a later segment's
-content visible) with no hooks or shortcuts in product code, only accessibility identifiers. Passing
-is real "runs" evidence, repeatable, not a one-off screenshot, with the demo's actual content attached
-as screenshots in the test's result bundle. It proves only that one path - it says nothing about any
-other display style, about Settings, or about anything needing Soniox.
-
-A plain "install and observe" pass (`xcrun simctl install` / `launch` / `io screenshot`, no taps) is
-weaker evidence than `SermivaUITests` - it cannot get past the Setup screen without tapping - but it
-still proves the app installs and launches, and is a fallback if `SermivaUITests` cannot run for some
-other reason.
-
-Nothing here reaches "works live" - that rung needs a real Soniox key on a real device, per
-Outcome 2.
-
-State which rung your claim is on, every time:
+Run from the repo root. It boots the named Simulator (iPhone 17, UDID `2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD`),
+waits for it to settle, builds, runs `SermivaTests`, then `SermivaUITests`, exiting non-zero and
+naming the cause: build failure, test failure, or a run on a cloned Simulator instead of the named device.
 
 | Claim | What proves it |
 |---|---|
-| compiles | build output |
-| runs | launched on a named Simulator, and what you observed |
-| behaves | a fixture-driven test over state and segment handling |
-| works live | a real key on a real device, named, and what you heard |
+| compiles | the `build` step |
+| runs | `SermivaUITests`: drives the real UI, Setup -> demo -> Bat dau -> a fixture segment visible |
+| behaves | `SermivaTests`: state machine + segment assembly fixtures from `demo-data.json`, nothing beyond what those fixtures cover |
+| works live | a real Soniox key on a real device, named, and what you heard - not proven here, per Outcome 2 |
 
-A Simulator has no acoustic path, so echo, barge-in and the loudspeaker case are invisible there
-while everything looks correct. Demo mode passing is evidence about demo mode. Overlapping speech,
-per-segment language ID, `me`/`guest`/`target` routing and echo suppression are marked `[thật]` in
-the handoff: never describe any of them as verified without hardware and a real key.
+Not covered: Settings, any other display style, real audio hardware (echo, barge-in, overlapping
+speech, per-segment language ID, `me`/`guest`/`target` routing, the loudspeaker case - all marked
+`[thật]` in the handoff), and Soniox's own stream shape, kept behind a thin, untested adapter.
 
-What is testable now and what is not. The session state machine (`HANDOFF.md` §5) and the segment
-assembly rules (§6) are our own contract and already settled, so cover them with fixtures drawn from
-`demo-data.json`. The shape of Soniox's own stream is not ours and is not yet known, so keep it
-behind a thin adapter and do not write tests through that boundary. A test written around a contract
-nobody has confirmed forces a compatibility layer that never goes away.
+Do not delete the committed shared scheme at
+`Sermiva.xcodeproj/xcshareddata/xcschemes/Sermiva.xcscheme`: its `parallelizable = "NO"` keeps a run
+on the named Simulator. Without it, `xcodebuild` auto-generates a scheme with parallel testing
+enabled, silently moving tests onto a cloned Simulator instead - the failure mode `scripts/verify.sh` checks for.
 
 ## Source of truth
 
