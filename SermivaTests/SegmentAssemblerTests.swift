@@ -86,6 +86,15 @@ final class SegmentAssemblerTests: XCTestCase {
         XCTAssertTrue(segments.isEmpty)
     }
 
+    /// L1: a translation scheduled for one session's final segment must not
+    /// land on a same-id partial that "Phien moi" created for a new session
+    /// - the shape the project owner's review actually reproduced.
+    func test_fillTargetOnANonFinalSegmentIsANoOp() {
+        var segments = [Segment(id: 1, speaker: "A", lang: "vi", source: "Cho toi", target: nil, isFinal: false, startedAt: 0, overlap: false)]
+        SegmentAssembler.fillTarget(id: 1, target: "I'd like", in: &segments)
+        XCTAssertNil(segments[0].target, "a target meant for a previous session's final must not land on a new session's partial reusing the same id")
+    }
+
     func test_nilSpeakerStaysUnidentifiedAndIsNeverAutoAssigned() {
         // Segment 7 in the fixture has speaker: null in both its events.
         let events = events(forId: 7)

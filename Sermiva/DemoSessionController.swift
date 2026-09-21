@@ -138,14 +138,12 @@ final class DemoSessionController: ObservableObject {
     }
 
     /// Whether backend activity - recognition or translation - is genuinely
-    /// happening right now. The demo scheduler only ever advances playback
-    /// or fills a translation while `state == .listening`; every other
-    /// state (idle, paused, ended, or anything before the first tap) must
-    /// not claim an in-progress "Dang nhan dang" or "Dang dich..." for a
-    /// segment that merely has `isFinal == false` or no `target` yet - the
-    /// project owner's rule that an activity indicator only shows while
-    /// that activity is really running, not as a stale readout of a
-    /// segment's own shape. `CaptionsTranscriptView` reads this the same
+    /// happening right now, i.e. `state == .listening`. Pairs with the
+    /// translation lifecycle below: a pending translation is gated by the
+    /// same `playbackToken` pause/end/"Phien moi" already rotate, so by the
+    /// time this is false, no translation is actually landing in the
+    /// background either - the demo's own activity, not merely its display,
+    /// stops with the session. `CaptionsTranscriptView` reads this the same
     /// way it reads `micDockText` - a precomputed result, not a flag it
     /// re-derives itself.
     static func isActivityRunning(for state: SessionState) -> Bool {
@@ -153,6 +151,16 @@ final class DemoSessionController: ObservableObject {
     }
 
     var isActivityRunning: Bool { Self.isActivityRunning(for: state) }
+
+    /// What `CaptionsTranscriptView` actually reads: one `SegmentDisplay`
+    /// per segment, combining that segment with this controller's own
+    /// `isActivityRunning`. The view never sees `isActivityRunning` on its
+    /// own, so it cannot recombine it with a segment's shape itself at each
+    /// of its several render sites - see `SegmentDisplay`.
+    var displaySegments: [SegmentDisplay] {
+        let running = isActivityRunning
+        return segments.map { SegmentDisplay.make(for: $0, isActivityRunning: running) }
+    }
 
     /// Whether "Ket thuc" may open the confirmation sheet right now. A pure
     /// function of state so it is directly testable for states (like
@@ -255,6 +263,7 @@ final class DemoSessionController: ObservableObject {
         }
         state = .listening
         playbackToken = UUID()
+        rescheduleUntranslatedFinals(token: playbackToken)
         playNextEvent(token: playbackToken)
     }
 
@@ -298,16 +307,41 @@ final class DemoSessionController: ObservableObject {
         elapsed += eventInterval
         SegmentAssembler.apply(event, elapsed: elapsed, to: &segments)
         if event.type == .final, let target = event.tgt {
-            scheduler.schedule(after: translationDelay) { [weak self] in
-                self?.applyTarget(id: event.id, target: target)
-            }
+            scheduleTranslation(id: event.id, target: target, token: token)
         }
         scheduler.schedule(after: eventInterval) { [weak self] in
             self?.playNextEvent(token: token)
         }
     }
 
-    private func applyTarget(id: Int, target: String) {
+    /// Simulated translation is part of the session, not a background
+    /// process that outlives it: `token` is the `playbackToken` in force
+    /// when this was scheduled, and pause/end/"Phien moi" all rotate that
+    /// token before this fires, so `applyTarget` below silently declines to
+    /// land once the session that asked for it is no longer the current
+    /// one - the project owner's ruling this outcome implements.
+    private func scheduleTranslation(id: Int, target: String, token: UUID) {
+        scheduler.schedule(after: translationDelay) { [weak self] in
+            self?.applyTarget(id: id, target: target, token: token)
+        }
+    }
+
+    private func applyTarget(id: Int, target: String, token: UUID) {
+        guard token == playbackToken else { return }
         SegmentAssembler.fillTarget(id: id, target: target, in: &segments)
+    }
+
+    /// Resume must not leave a translation stuck forever: pause/end freeze
+    /// `applyTarget` from landing via the token check above, so any segment
+    /// still `isFinal` with no `target` when playback resumes had its
+    /// translation interrupted, not merely delayed. Reschedule it with a
+    /// fresh simulated delay under the new token, so "Dang dich..." -
+    /// gated on `isActivityRunning` - reflects a translation that is
+    /// genuinely running again, not a stale readout.
+    private func rescheduleUntranslatedFinals(token: UUID) {
+        for segment in segments where segment.isFinal && segment.target == nil {
+            guard let target = events.first(where: { $0.id == segment.id && $0.type == .final })?.tgt else { continue }
+            scheduleTranslation(id: segment.id, target: target, token: token)
+        }
     }
 }

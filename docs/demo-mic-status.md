@@ -94,11 +94,14 @@ Checked, not changed - already resolved structurally, no code change needed:
 - `mic.recognizing`/`mic.translating` ("Đang nhận dạng" / "Đang dịch", and the
   `updating`/`translatingTag` variants used in `CaptionsTranscriptView`): per-segment
   transcription/translation pipeline status, not a microphone-hardware claim - out of
-  scope for this rule regardless. A separate rule now covers them directly:
-  `DemoSessionController.isActivityRunning` (`state == .listening`) gates both, so a
-  segment's own `isFinal`/`target` shape alone no longer decides whether they show;
-  paused or ended must not keep claiming either is in progress. See AGENTS.md's "An
-  activity indicator only shows while that activity is genuinely running".
+  scope for this rule regardless. A separate rule now covers them directly, computed
+  once in `SegmentDisplay.make` from `DemoSessionController.isActivityRunning`
+  (`state == .listening`): a segment's own `isFinal`/`target` shape alone no longer
+  decides whether either shows. Pause and end do not merely hide these two any more -
+  the simulated translation behind "Đang dịch…" genuinely stops with the session too
+  (`applyTarget`'s `playbackToken` check), and resume reschedules it fresh, so the
+  indicator and the activity it claims stay in sync. See AGENTS.md's "An activity
+  indicator only shows while that activity is genuinely running".
 - `banner.denied` ("Sermiva chưa được cấp quyền micro."): asserts the opposite of
   mic access, not that it is active - out of scope for the rule regardless, and
   additionally unreachable in demo since `AutoGrantedMicPermission` never denies.

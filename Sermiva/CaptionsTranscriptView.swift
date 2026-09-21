@@ -5,28 +5,23 @@ import SwiftUI
 /// left-aligned, the current sentence on a raised surface with a 3pt accent
 /// bar, history rows smaller and separated by dividers.
 struct CaptionsTranscriptView: View {
-    let segments: [Segment]
-    /// Whether recognition/translation is genuinely running right now - see
-    /// `DemoSessionController.isActivityRunning`. Gates every "in progress"
-    /// indicator below; it does not affect what content is shown, only
-    /// whether the view claims something is actively happening.
-    let isActivityRunning: Bool
+    let displaySegments: [SegmentDisplay]
 
-    private var current: Segment? { segments.last }
-    private var history: ArraySlice<Segment> { segments.dropLast() }
+    private var current: SegmentDisplay? { displaySegments.last }
+    private var history: ArraySlice<SegmentDisplay> { displaySegments.dropLast() }
 
     var body: some View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    ForEach(Array(history), id: \.id) { segment in
-                        HistoryRow(segment: segment, isActivityRunning: isActivityRunning)
-                        if segment.id != history.last?.id {
+                    ForEach(Array(history), id: \.segment.id) { display in
+                        HistoryRow(display: display)
+                        if display.segment.id != history.last?.segment.id {
                             Rectangle().fill(Tokens.sep).frame(height: 0.5)
                         }
                     }
                     if let current {
-                        CurrentRow(segment: current, isActivityRunning: isActivityRunning)
+                        CurrentRow(display: current)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -36,8 +31,8 @@ struct CaptionsTranscriptView: View {
             // growing, a final locking, or a target arriving all change the
             // current row's height without changing its id, and the last
             // sentence must always show in full above the dock.
-            .onChange(of: segments) { _, newSegments in
-                guard let lastId = newSegments.last?.id else { return }
+            .onChange(of: displaySegments) { _, newDisplaySegments in
+                guard let lastId = newDisplaySegments.last?.segment.id else { return }
                 withAnimation(.easeOut(duration: 0.2)) {
                     proxy.scrollTo(lastId, anchor: .bottom)
                 }
@@ -47,8 +42,8 @@ struct CaptionsTranscriptView: View {
 }
 
 private struct CurrentRow: View {
-    let segment: Segment
-    let isActivityRunning: Bool
+    let display: SegmentDisplay
+    private var segment: Segment { display.segment }
     @ScaledMetric(relativeTo: .body) private var metaSize: CGFloat = 13
     @ScaledMetric(relativeTo: .body) private var srcSize: CGFloat = 16
     @ScaledMetric(relativeTo: .body) private var tgtSize: CGFloat = 24
@@ -60,15 +55,15 @@ private struct CurrentRow: View {
                 .frame(width: 3)
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
-                    SegmentMeta(segment: segment, fontSize: metaSize)
-                    CurrentStatusTag(segment: segment, isActivityRunning: isActivityRunning)
+                    SegmentMeta(display: display, fontSize: metaSize)
+                    CurrentStatusTag(display: display)
                     Spacer(minLength: 0)
                 }
                 HStack(alignment: .bottom, spacing: 0) {
                     Text(segment.source)
                         .font(.system(size: srcSize))
                         .foregroundStyle(Tokens.text2)
-                    if !segment.isFinal && isActivityRunning {
+                    if display.showsCaret {
                         BlinkingCaret()
                     }
                 }
@@ -76,7 +71,7 @@ private struct CurrentRow: View {
                     Text(target)
                         .font(.system(size: tgtSize, weight: .semibold))
                         .foregroundStyle(Tokens.text)
-                } else if segment.isFinal && isActivityRunning {
+                } else if display.showsTranslatingPlaceholder {
                     TranslatingPlaceholder(fontSize: metaSize)
                 }
             }
@@ -99,20 +94,20 @@ private struct CurrentRow: View {
         // individually to VoiceOver, so nothing it reads changes.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("currentSegment")
-        .accessibilityAddTraits((segment.isFinal || !isActivityRunning) ? [] : .updatesFrequently)
+        .accessibilityAddTraits(display.updatesFrequently ? .updatesFrequently : [])
     }
 }
 
 private struct HistoryRow: View {
-    let segment: Segment
-    let isActivityRunning: Bool
+    let display: SegmentDisplay
+    private var segment: Segment { display.segment }
     @ScaledMetric(relativeTo: .body) private var metaSize: CGFloat = 12
     @ScaledMetric(relativeTo: .body) private var srcSize: CGFloat = 14
     @ScaledMetric(relativeTo: .body) private var tgtSize: CGFloat = 17
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            SegmentMeta(segment: segment, fontSize: metaSize)
+            SegmentMeta(display: display, fontSize: metaSize)
             Text(segment.source)
                 .font(.system(size: srcSize))
                 .foregroundStyle(Tokens.text2)
@@ -120,7 +115,7 @@ private struct HistoryRow: View {
                 Text(target)
                     .font(.system(size: tgtSize, weight: .medium))
                     .foregroundStyle(Tokens.text)
-            } else if segment.isFinal && isActivityRunning {
+            } else if display.showsTranslatingPlaceholder {
                 TranslatingPlaceholder(fontSize: metaSize)
             }
         }
@@ -133,13 +128,16 @@ private struct HistoryRow: View {
 /// (`CurrentStatusTag`) and which the prototype explicitly keeps out of the
 /// uppercase transform.
 private struct SegmentMeta: View {
-    let segment: Segment
+    let display: SegmentDisplay
     let fontSize: CGFloat
+    private var segment: Segment { display.segment }
 
     var body: some View {
         HStack(spacing: 6) {
             speakerLabel
-            Text(languageText)
+            if let languageText = display.languageText {
+                Text(languageText)
+            }
             if segment.overlap {
                 Text("Nói chồng")
                     .foregroundStyle(Tokens.warn)
@@ -162,10 +160,6 @@ private struct SegmentMeta: View {
             Text("Chưa xác định")
         }
     }
-
-    private var languageText: String {
-        segment.lang.map(LanguageNames.display) ?? "Đang nhận diện ngôn ngữ"
-    }
 }
 
 /// "Dang nhan dang" (pulsing dot) while partial and genuinely running,
@@ -174,20 +168,19 @@ private struct SegmentMeta: View {
 /// `isActivityRunning`. Explicitly not uppercase, and only ever shown on
 /// the current row - the prototype has no such tag on history rows.
 private struct CurrentStatusTag: View {
-    let segment: Segment
-    let isActivityRunning: Bool
+    let display: SegmentDisplay
     @ScaledMetric(relativeTo: .body) private var tagSize: CGFloat = 13
     @ScaledMetric(relativeTo: .body) private var checkmarkSize: CGFloat = 10
 
     var body: some View {
-        if !segment.isFinal && isActivityRunning {
+        if display.showsRecognizingTag {
             HStack(spacing: 5) {
                 PulsingDot(color: Tokens.accent)
                 Text("Đang nhận dạng")
             }
             .font(.system(size: tagSize, weight: .semibold))
             .foregroundStyle(Tokens.accent)
-        } else if segment.target != nil {
+        } else if display.segment.target != nil {
             HStack(spacing: 4) {
                 Image(systemName: "checkmark")
                     .font(.system(size: checkmarkSize, weight: .bold))

@@ -144,7 +144,7 @@ struct ConversationView: View {
             emptyState
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
-            CaptionsTranscriptView(segments: controller.segments, isActivityRunning: controller.isActivityRunning)
+            CaptionsTranscriptView(displaySegments: controller.displaySegments)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }

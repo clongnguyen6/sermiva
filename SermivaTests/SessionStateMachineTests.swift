@@ -417,4 +417,97 @@ final class SessionStateMachineTests: XCTestCase {
 
         scheduler.drainAll()
     }
+
+    // MARK: - L1: simulated translation is part of the session, not a
+    // background process that outlives it - it stops and resumes with
+    // pause/resume/end/"Phien moi", the same as the demo playback it comes
+    // from.
+
+    func test_pendingTranslationDoesNotLandWhilePaused() {
+        let (controller, _, scheduler, _) = makeController()
+        controller.primaryButtonTapped() // -> listening, applies event 1 (partial id 1)
+        scheduler.drainOnce() // fires the queued advance -> applies final id 1, schedules its translation
+        XCTAssertTrue(controller.segments[0].isFinal)
+        XCTAssertNil(controller.segments[0].target)
+
+        controller.primaryButtonTapped() // -> paused
+        scheduler.drainAll() // fires the translation scheduled before the pause, among others
+
+        XCTAssertNil(controller.segments[0].target, "a translation scheduled before pause must not land while paused")
+    }
+
+    func test_resumeReschedulesAnInterruptedTranslationWithAFreshDelay() {
+        let (controller, _, scheduler, _) = makeController()
+        controller.primaryButtonTapped() // -> listening, applies event 1 (partial id 1)
+        scheduler.drainOnce() // -> final id 1 applied, translation scheduled
+        XCTAssertNil(controller.segments[0].target)
+
+        controller.primaryButtonTapped() // -> paused
+        scheduler.drainAll() // the interrupted translation must not land here
+        XCTAssertNil(controller.segments[0].target)
+
+        controller.primaryButtonTapped() // -> listening again: resume must reschedule it
+        scheduler.drainAll()
+
+        XCTAssertEqual(
+            controller.segments[0].target,
+            finalTargetForSegment1(),
+            "resume must reschedule a translation interrupted by pause, not leave it stuck forever"
+        )
+    }
+
+    func test_endSessionCancelsAPendingTranslationPermanently() {
+        let (controller, _, scheduler, _) = makeController()
+        controller.primaryButtonTapped() // -> listening, applies event 1 (partial id 1)
+        scheduler.drainOnce() // -> final id 1 applied, translation scheduled
+        XCTAssertNil(controller.segments[0].target)
+
+        controller.endSession()
+        scheduler.drainAll() // the pending translation must not land after ending
+
+        XCTAssertEqual(controller.state, .ended)
+        XCTAssertNil(controller.segments[0].target, "ending the session must cancel a pending translation, not let it land later")
+    }
+
+    /// The exact shape the project owner's review reproduced: a translation
+    /// scheduled by a previous session, still sitting in the scheduler
+    /// queue when "Phien moi" starts a new session that reuses the same
+    /// segment id, must not land on that new session's fresh partial.
+    func test_newSessionDoesNotReceiveThePreviousSessionsPendingTranslation() {
+        let (controller, _, scheduler, _) = makeController()
+        controller.primaryButtonTapped() // -> listening, session 1
+        scheduler.drainOnce() // -> session 1's final id 1 applied, its translation scheduled (not yet fired)
+
+        controller.endSession()
+        controller.primaryButtonTapped() // "Phien moi": fresh session 2, new partial id 1
+
+        XCTAssertFalse(controller.segments[0].isFinal, "session 2's first segment is a fresh partial, not session 1's old final")
+        XCTAssertNil(controller.segments[0].target)
+
+        // Fire session 1's stale translation closure directly - it is still
+        // sitting first in the queue, scheduled before "endSession" and
+        // never removed, just no longer matching the current token.
+        let staleTranslation = scheduler.pending[0]
+        staleTranslation()
+
+        XCTAssertNil(controller.segments[0].target, "a previous session's pending translation must not land on a new session's partial reusing the same id")
+        XCTAssertFalse(controller.segments[0].isFinal, "firing the stale translation must not affect isFinal either")
+    }
+
+    // MARK: - L2: `controller.displaySegments` is what `CaptionsTranscriptView`
+    // actually reads - a regression there, not only in `SegmentDisplay.make`
+    // itself, must turn this red too.
+
+    func test_instanceDisplaySegmentsHideIndicatorsWhilePausedOnAStillPartialSegment() {
+        let (controller, _, scheduler, _) = makeController()
+        controller.primaryButtonTapped() // -> listening, applies event 1 (a partial)
+        XCTAssertEqual(controller.displaySegments.last?.showsRecognizingTag, true)
+        XCTAssertEqual(controller.displaySegments.last?.showsCaret, true)
+
+        controller.primaryButtonTapped() // -> paused, segment still partial
+        XCTAssertEqual(controller.displaySegments.last?.showsRecognizingTag, false, "paused must not claim recognition is running")
+        XCTAssertEqual(controller.displaySegments.last?.showsCaret, false, "paused must not claim recognition is running")
+
+        scheduler.drainAll()
+    }
 }

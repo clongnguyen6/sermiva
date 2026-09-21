@@ -37,9 +37,13 @@ enum SegmentAssembler {
     }
 
     /// Fills `target` for an already-final segment. A no-op if the segment
-    /// is missing or already has a target, so a stray replay can't clobber it.
+    /// is missing, not yet final, or already has a target, so a stray
+    /// replay - or a translation scheduled by a previous session landing
+    /// late, after "Phien moi" reused the same id for a fresh partial -
+    /// can't clobber wording that either isn't locked yet or was never
+    /// meant to receive this target.
     static func fillTarget(id: Int, target: String, in segments: inout [Segment]) {
-        guard let index = segments.firstIndex(where: { $0.id == id }), segments[index].target == nil else {
+        guard let index = segments.firstIndex(where: { $0.id == id }), segments[index].isFinal, segments[index].target == nil else {
             return
         }
         segments[index].target = target

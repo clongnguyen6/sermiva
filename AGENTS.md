@@ -134,8 +134,9 @@ WebView. Rebuild the interface in SwiftUI.
 - Add a dependency, or introduce a package manager or a project generator.
 - Signing, device provisioning, TestFlight, or publishing anything.
 - Change anything outside this repository: system settings, security or privacy configuration,
-  machine-wide tool configuration, or another project. The one exception is the Simulator: creating,
-  booting, deleting, and restarting the Simulator service is routine.
+  machine-wide tool configuration, or another project. The one exception is the Simulator itself -
+  any operation on it (creating, booting, shutting down, erasing, deleting, changing its settings,
+  restarting its service) is routine, not a change this rule covers.
 
 ## Scope discipline
 
