@@ -15,10 +15,25 @@ disagree, the handoff wins on what the app is, and this file wins on how work is
 Never report something as working without running it. If a step was skipped, say which one and why,
 and paste the real output rather than describing it.
 
-**There is no build yet, so this section carries no commands. Do not invent any.** The change that
-first produces an Xcode project must replace this paragraph with the scheme name and the exact
-`xcodebuild` invocations that were actually run, and must say which of them nothing runs
-automatically.
+The project is `Sermiva.xcodeproj` (hand-written `project.pbxproj`, no project generator), scheme
+`Sermiva`, targets `Sermiva` (app) and `SermivaTests` (XCTest). Deployment target iOS 17.0. These
+are the commands that were actually run and actually passed; run them again from the repo root
+before trusting a "compiles" or "behaves" claim:
+
+```
+xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
+
+xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test
+```
+
+`build` proves "compiles". `test` runs `SermivaTests` (state machine + segment assembly fixtures
+read from `demo-data.json`) and proves "behaves" for what those fixtures cover - nothing more.
+Neither command launches the app or drives the UI; "runs" needs a separate manual step (install +
+launch on a named Simulator, e.g. via `xcrun simctl install/launch`) and a description of what was
+actually observed on screen, not just an exit code. Nothing here reaches "works live" - that rung
+needs a real Soniox key on a real device, per Outcome 2.
 
 State which rung your claim is on, every time:
 

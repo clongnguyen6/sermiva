@@ -1,0 +1,457 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		80104374A189477291FF30DD /* SermivaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FD973B7E0BA4D5FB90CD3F2 /* SermivaApp.swift */; };
+		AAF85BCB7DEF44D794FB9796 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E38FE130F4484F90A3EA8A /* RootView.swift */; };
+		F29826DC545440A098837ACB /* Segment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77463B8CEC7F489DB8C119AC /* Segment.swift */; };
+		E5283C2EFBD140D6B819933E /* SessionState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AC162BFF6A14D0D97C6C585 /* SessionState.swift */; };
+		3C1EAF8648C4406C838DCE16 /* DemoEvent.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB1580BB4DBF4B4390424A43 /* DemoEvent.swift */; };
+		0B92E7A8581A4ADC85181F34 /* SegmentAssembler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B156933F5D84A9C8FB8DB83 /* SegmentAssembler.swift */; };
+		E1D4C986B9B94F32A4E2A4AB /* DemoFixtureLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA5D0676BB194D3BB18A2A4E /* DemoFixtureLoader.swift */; };
+		56E56A795947416A8316BB05 /* MicPermissionProviding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D91128D81AD4FD8A0E68753 /* MicPermissionProviding.swift */; };
+		0D7A57F170F444FCB465A3AD /* AudioCapturing.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B0A8CAE3C604B9684316722 /* AudioCapturing.swift */; };
+		18CE727FD53348219D7505D3 /* DemoScheduler.swift in Sources */ = {isa = PBXBuildFile; fileRef = B21EF89E962946AB8F6B2BCA /* DemoScheduler.swift */; };
+		4675B951C0714C43B2DC1546 /* DemoSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58477C0F02E34939AEA8F411 /* DemoSessionController.swift */; };
+		6CFE5FC72D3A433886A86A92 /* DesignTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0B94046409A4298A4F49259 /* DesignTokens.swift */; };
+		AD594F1D7D1840198ED54076 /* SetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 491B5590936E493283DF2B86 /* SetupView.swift */; };
+		5A7CC37470874BC386794F72 /* ConversationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 69BE3416B76347A0A7DBDBC6 /* ConversationView.swift */; };
+		072BD63256C6434687589E20 /* CaptionsTranscriptView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDF9915E7B9045E5806EA8F0 /* CaptionsTranscriptView.swift */; };
+		ECB91888A5DC4C11BC80A4D7 /* EndSessionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BD8D81A4C9A4B4EB3976598 /* EndSessionSheet.swift */; };
+		45D7B0E4CD4849E3AA6C3999 /* TestFakes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5477A7168B8245EBB2BA466C /* TestFakes.swift */; };
+		B6FA4224D3D4442792C8584D /* SegmentAssemblerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B10254C1952402EB9C4CA44 /* SegmentAssemblerTests.swift */; };
+		7655595F510E498DAE8E625F /* SessionStateMachineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E11DE6C6F5694D9E889849AB /* SessionStateMachineTests.swift */; };
+		5B2919A77B4C472AA2635653 /* DemoFixtureLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD6FFDA9C0C74A429864612A /* DemoFixtureLoaderTests.swift */; };
+		85F695C7713B42D7B2AE77BE /* demo-data.json in Resources */ = {isa = PBXBuildFile; fileRef = 7836B2C424AD45E5892A6EE1 /* demo-data.json */; };
+		C06795C17D9046929C083F8E /* demo-data.json in Resources */ = {isa = PBXBuildFile; fileRef = 7836B2C424AD45E5892A6EE1 /* demo-data.json */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		D16100A124B04AB9AABA7B65 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 2EE82402CA554C0AA3C172F6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 8082FC92B8984761A99379C5;
+			remoteInfo = Sermiva;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		9FD973B7E0BA4D5FB90CD3F2 /* SermivaApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SermivaApp.swift; sourceTree = "<group>"; };
+		D2E38FE130F4484F90A3EA8A /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		77463B8CEC7F489DB8C119AC /* Segment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Segment.swift; sourceTree = "<group>"; };
+		3AC162BFF6A14D0D97C6C585 /* SessionState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionState.swift; sourceTree = "<group>"; };
+		AB1580BB4DBF4B4390424A43 /* DemoEvent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoEvent.swift; sourceTree = "<group>"; };
+		5B156933F5D84A9C8FB8DB83 /* SegmentAssembler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentAssembler.swift; sourceTree = "<group>"; };
+		CA5D0676BB194D3BB18A2A4E /* DemoFixtureLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoFixtureLoader.swift; sourceTree = "<group>"; };
+		9D91128D81AD4FD8A0E68753 /* MicPermissionProviding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MicPermissionProviding.swift; sourceTree = "<group>"; };
+		5B0A8CAE3C604B9684316722 /* AudioCapturing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioCapturing.swift; sourceTree = "<group>"; };
+		B21EF89E962946AB8F6B2BCA /* DemoScheduler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoScheduler.swift; sourceTree = "<group>"; };
+		58477C0F02E34939AEA8F411 /* DemoSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoSessionController.swift; sourceTree = "<group>"; };
+		A0B94046409A4298A4F49259 /* DesignTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignTokens.swift; sourceTree = "<group>"; };
+		491B5590936E493283DF2B86 /* SetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SetupView.swift; sourceTree = "<group>"; };
+		69BE3416B76347A0A7DBDBC6 /* ConversationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConversationView.swift; sourceTree = "<group>"; };
+		EDF9915E7B9045E5806EA8F0 /* CaptionsTranscriptView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CaptionsTranscriptView.swift; sourceTree = "<group>"; };
+		5BD8D81A4C9A4B4EB3976598 /* EndSessionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EndSessionSheet.swift; sourceTree = "<group>"; };
+		5477A7168B8245EBB2BA466C /* TestFakes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestFakes.swift; sourceTree = "<group>"; };
+		1B10254C1952402EB9C4CA44 /* SegmentAssemblerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SegmentAssemblerTests.swift; sourceTree = "<group>"; };
+		E11DE6C6F5694D9E889849AB /* SessionStateMachineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionStateMachineTests.swift; sourceTree = "<group>"; };
+		DD6FFDA9C0C74A429864612A /* DemoFixtureLoaderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoFixtureLoaderTests.swift; sourceTree = "<group>"; };
+		7836B2C424AD45E5892A6EE1 /* demo-data.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; name = "demo-data.json"; path = "design/claude-handoff/demo-data.json"; sourceTree = "<group>"; };
+		3C08034A9F714A96AD95B1E9 /* Sermiva.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Sermiva.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		603A83ABF413480AB31EFA06 /* SermivaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SermivaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		9D952F5A178045759DBA20E9 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		0032B72D8D284335A761C81A /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		6199C227827B402AADD7C509 /* Sermiva */ = {
+			isa = PBXGroup;
+			children = (
+				9FD973B7E0BA4D5FB90CD3F2 /* SermivaApp.swift */,
+				D2E38FE130F4484F90A3EA8A /* RootView.swift */,
+				77463B8CEC7F489DB8C119AC /* Segment.swift */,
+				3AC162BFF6A14D0D97C6C585 /* SessionState.swift */,
+				AB1580BB4DBF4B4390424A43 /* DemoEvent.swift */,
+				5B156933F5D84A9C8FB8DB83 /* SegmentAssembler.swift */,
+				CA5D0676BB194D3BB18A2A4E /* DemoFixtureLoader.swift */,
+				9D91128D81AD4FD8A0E68753 /* MicPermissionProviding.swift */,
+				5B0A8CAE3C604B9684316722 /* AudioCapturing.swift */,
+				B21EF89E962946AB8F6B2BCA /* DemoScheduler.swift */,
+				58477C0F02E34939AEA8F411 /* DemoSessionController.swift */,
+				A0B94046409A4298A4F49259 /* DesignTokens.swift */,
+				491B5590936E493283DF2B86 /* SetupView.swift */,
+				69BE3416B76347A0A7DBDBC6 /* ConversationView.swift */,
+				EDF9915E7B9045E5806EA8F0 /* CaptionsTranscriptView.swift */,
+				5BD8D81A4C9A4B4EB3976598 /* EndSessionSheet.swift */,
+			);
+			path = Sermiva;
+			sourceTree = "<group>";
+		};
+		380C23011EBC4E5C986E85E4 /* SermivaTests */ = {
+			isa = PBXGroup;
+			children = (
+				5477A7168B8245EBB2BA466C /* TestFakes.swift */,
+				1B10254C1952402EB9C4CA44 /* SegmentAssemblerTests.swift */,
+				E11DE6C6F5694D9E889849AB /* SessionStateMachineTests.swift */,
+				DD6FFDA9C0C74A429864612A /* DemoFixtureLoaderTests.swift */,
+			);
+			path = SermivaTests;
+			sourceTree = "<group>";
+		};
+		97431B19B7494CFEAC7718A2 /* Design */ = {
+			isa = PBXGroup;
+			children = (
+				7836B2C424AD45E5892A6EE1 /* demo-data.json */,
+			);
+			name = Design;
+			sourceTree = "<group>";
+		};
+		184879969E1C4FA0819F34C7 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				3C08034A9F714A96AD95B1E9 /* Sermiva.app */,
+				603A83ABF413480AB31EFA06 /* SermivaTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		832240E5DD0B4B73BADE7A93 = {
+			isa = PBXGroup;
+			children = (
+				6199C227827B402AADD7C509 /* Sermiva */,
+				380C23011EBC4E5C986E85E4 /* SermivaTests */,
+				97431B19B7494CFEAC7718A2 /* Design */,
+				184879969E1C4FA0819F34C7 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		8082FC92B8984761A99379C5 /* Sermiva */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B0C99F90136040118E1E1758 /* Build configuration list for PBXNativeTarget "Sermiva" */;
+			buildPhases = (
+				0A3DAB6821A7453F9FB54000 /* Sources */,
+				9D952F5A178045759DBA20E9 /* Frameworks */,
+				BAA73FCF6A374BA5BA0E11F4 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Sermiva;
+			productName = Sermiva;
+			productReference = 3C08034A9F714A96AD95B1E9 /* Sermiva.app */;
+			productType = "com.apple.product-type.application";
+		};
+		81C76D103DBD46E3BD7AD01B /* SermivaTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E928D8889EC74C3CB860DFB0 /* Build configuration list for PBXNativeTarget "SermivaTests" */;
+			buildPhases = (
+				80ED08573A4F44339627E43D /* Sources */,
+				0032B72D8D284335A761C81A /* Frameworks */,
+				26F0D291055F472088C7C8BF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				4FDE6FA4D6324D01B2CF58C4 /* PBXTargetDependency */,
+			);
+			name = SermivaTests;
+			productName = SermivaTests;
+			productReference = 603A83ABF413480AB31EFA06 /* SermivaTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		2EE82402CA554C0AA3C172F6 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1500;
+				LastUpgradeCheck = 1500;
+				TargetAttributes = {
+					8082FC92B8984761A99379C5 = {
+						CreatedOnToolsVersion = 15.0;
+					};
+					81C76D103DBD46E3BD7AD01B = {
+						CreatedOnToolsVersion = 15.0;
+						TestTargetID = 8082FC92B8984761A99379C5;
+					};
+				};
+			};
+			buildConfigurationList = BC3596746D66469694664505 /* Build configuration list for PBXProject "Sermiva" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = vi;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				vi,
+				Base,
+			);
+			mainGroup = 832240E5DD0B4B73BADE7A93;
+			productRefGroup = 184879969E1C4FA0819F34C7 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				8082FC92B8984761A99379C5 /* Sermiva */,
+				81C76D103DBD46E3BD7AD01B /* SermivaTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		BAA73FCF6A374BA5BA0E11F4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				85F695C7713B42D7B2AE77BE /* demo-data.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		26F0D291055F472088C7C8BF /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C06795C17D9046929C083F8E /* demo-data.json in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		0A3DAB6821A7453F9FB54000 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				80104374A189477291FF30DD /* SermivaApp.swift in Sources */,
+				AAF85BCB7DEF44D794FB9796 /* RootView.swift in Sources */,
+				F29826DC545440A098837ACB /* Segment.swift in Sources */,
+				E5283C2EFBD140D6B819933E /* SessionState.swift in Sources */,
+				3C1EAF8648C4406C838DCE16 /* DemoEvent.swift in Sources */,
+				0B92E7A8581A4ADC85181F34 /* SegmentAssembler.swift in Sources */,
+				E1D4C986B9B94F32A4E2A4AB /* DemoFixtureLoader.swift in Sources */,
+				56E56A795947416A8316BB05 /* MicPermissionProviding.swift in Sources */,
+				0D7A57F170F444FCB465A3AD /* AudioCapturing.swift in Sources */,
+				18CE727FD53348219D7505D3 /* DemoScheduler.swift in Sources */,
+				4675B951C0714C43B2DC1546 /* DemoSessionController.swift in Sources */,
+				6CFE5FC72D3A433886A86A92 /* DesignTokens.swift in Sources */,
+				AD594F1D7D1840198ED54076 /* SetupView.swift in Sources */,
+				5A7CC37470874BC386794F72 /* ConversationView.swift in Sources */,
+				072BD63256C6434687589E20 /* CaptionsTranscriptView.swift in Sources */,
+				ECB91888A5DC4C11BC80A4D7 /* EndSessionSheet.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		80ED08573A4F44339627E43D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				45D7B0E4CD4849E3AA6C3999 /* TestFakes.swift in Sources */,
+				B6FA4224D3D4442792C8584D /* SegmentAssemblerTests.swift in Sources */,
+				7655595F510E498DAE8E625F /* SessionStateMachineTests.swift in Sources */,
+				5B2919A77B4C472AA2635653 /* DemoFixtureLoaderTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		4FDE6FA4D6324D01B2CF58C4 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 8082FC92B8984761A99379C5 /* Sermiva */;
+			targetProxy = D16100A124B04AB9AABA7B65 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		5DF456F3792D44638F958D36 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		4F7C0A6B5A114BF395977739 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		C3BC315048024756976A3017 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Sermiva;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Sermiva can listen to translate a conversation. This build never sends audio anywhere.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sermiva.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		B091C8D7DA9E4DF28296CAD9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Sermiva;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Sermiva can listen to translate a conversation. This build never sends audio anywhere.";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sermiva.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+		8E51C25A13C34333BC7D90E1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sermiva.app.SermivaTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Sermiva.app/Sermiva";
+			};
+			name = Debug;
+		};
+		B9B0A5CD983E4D1BB2594BC2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.sermiva.app.SermivaTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Sermiva.app/Sermiva";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		BC3596746D66469694664505 /* Build configuration list for PBXProject "Sermiva" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5DF456F3792D44638F958D36 /* Debug */,
+				4F7C0A6B5A114BF395977739 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B0C99F90136040118E1E1758 /* Build configuration list for PBXNativeTarget "Sermiva" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C3BC315048024756976A3017 /* Debug */,
+				B091C8D7DA9E4DF28296CAD9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E928D8889EC74C3CB860DFB0 /* Build configuration list for PBXNativeTarget "SermivaTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				8E51C25A13C34333BC7D90E1 /* Debug */,
+				B9B0A5CD983E4D1BB2594BC2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 2EE82402CA554C0AA3C172F6 /* Project object */;
+}
