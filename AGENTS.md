@@ -27,7 +27,20 @@ ephemeral cloned Simulator instead of the named one below), targets `Sermiva` (a
 commands that were actually run against the same Simulator - iPhone 17, UDID
 `2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD` - and actually passed; run them again from the repo root
 before trusting a "compiles", "runs" or "behaves" claim. None of this runs automatically - there is
-no CI and no pre-commit hook wired to any of it - so run it by hand every time:
+no CI and no pre-commit hook wired to any of it - so run it by hand every time. Boot the Simulator
+and let it settle first, every time, even if it looks already running:
+
+```
+xcrun simctl boot 2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD
+xcrun simctl bootstatus 2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD -b
+```
+
+Starting a test command against a Simulator that is `Shutdown` has been observed to fail with
+`Busy ("Application failed preflight checks")` on the named device itself, no clone involved, on 2
+of 3 cold-start attempts; the third attempt passed but only because `xcodebuild` booted and then
+shut the Simulator back down on its own, which would otherwise read as a false clone signal below.
+No cause deeper than "starting from `Shutdown` is unreliable" was established - boot and settle
+first and this does not come up.
 
 ```
 xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
@@ -44,12 +57,14 @@ The committed shared scheme sets `parallelizable = "NO"` on both test targets, w
 the two test commands on the named Simulator instead of a clone. To confirm a given run actually
 used it, check two things: the `xcodebuild` log must not contain `on 'Clone` (a clone run's lines
 read `... passed on 'Clone N of iPhone 17 - ...'`; a named-device run's lines carry no `on '...'` at
-all), and `xcrun simctl list devices` must still show the UDID above as `Booted` right after the run
-- a clone run leaves it `Shutdown`. Do not trust the run's own `.xcresult` bundle for this:
+all), and `xcrun simctl list devices` must still show the UDID above as `Booted` right after the run,
+since a clone run leaves it `Shutdown` instead (this is why the Simulator must already be booted and
+settled before the run - see above - otherwise a normal named-device run can also end `Shutdown` and
+look like a false clone signal). Do not trust the run's own `.xcresult` bundle for this:
 `deviceName`/`deviceId` there report the named Simulator even on a run that actually happened on a
-clone. `xcrun simctl list devices` (the default device set) never lists the clones themselves either
-- they live in a separate set, `xcrun simctl --set testing list devices` - which is why this checks
-the base device's own state rather than looking for a clone entry.
+clone, and `xcrun simctl list devices` (the default device set) never lists the clones themselves
+either, since they live in a separate set, `xcrun simctl --set testing list devices`; that is why
+this check reads the base device's own state rather than looking for a clone entry in that list.
 
 `build` proves "compiles". The `SermivaTests` run (state machine + segment assembly fixtures read
 from `demo-data.json`) proves "behaves" for what those fixtures cover - nothing more; it also
