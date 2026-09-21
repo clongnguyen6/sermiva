@@ -1,0 +1,19 @@
+# Xcode
+build/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
+.swiftpm/
+
+# macOS
+.DS_Store
+
+# Secrets: keys are entered in the app and stored in Keychain, never in a file here.
+*.xcconfig.local
+.env
+
+# Per-round briefs and handoffs, written by the human and the Lead. Not part of the repository's
+# history. Appended from paseo-room/templates/gitignore.fragment.
+.slp-brief-*.md
+.slp-handoff-*.md
