@@ -77,6 +77,11 @@ private struct CurrentRow: View {
         .padding(.trailing, 12)
         .background(Tokens.surface)
         .clipShape(RoundedRectangle(cornerRadius: 14))
+        // `scrollTo(anchor: .bottom)` aligns this view's own bottom edge to
+        // the viewport - trailing space added by the outer VStack's padding
+        // sits past that edge and never becomes visible. The margin has to
+        // live inside the identified view itself, so it actually shows.
+        .padding(.bottom, 16)
         .id(segment.id)
     }
 }

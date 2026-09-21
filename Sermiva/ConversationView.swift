@@ -143,9 +143,10 @@ struct ConversationView: View {
         }
     }
 
-    private var isEmptyListening: Bool {
-        controller.state == .listening || controller.state == .connecting || controller.state == .requestingMic
-    }
+    /// Real capture, not session progress: showing "Dang nghe..." here
+    /// while the mic never actually opened would be exactly the kind of
+    /// state AGENTS.md forbids.
+    private var isEmptyListening: Bool { controller.isMicCapturing }
 
     private var emptyState: some View {
         VStack(spacing: 8) {
@@ -180,17 +181,10 @@ struct ConversationView: View {
     // MARK: - Bottom dock
 
     private var micDockText: String {
-        switch controller.state {
-        case .listening: return "Đang nghe"
-        case .paused: return "Đã tạm dừng"
-        case .requestingMic, .connecting: return "Đang mở mic…"
-        case .reconnecting: return "Mic giữ, chờ mạng"
-        case .micDenied: return "Chưa có quyền mic"
-        case .idle, .ended, .authError: return "Mic tắt"
-        }
+        DemoSessionController.micDockText(isMicCapturing: controller.isMicCapturing, state: controller.state)
     }
 
-    private var micOn: Bool { controller.state == .listening }
+    private var micOn: Bool { controller.isMicCapturing }
 
     private var primaryLabel: String {
         switch controller.state {

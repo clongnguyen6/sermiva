@@ -90,23 +90,24 @@ final class SessionStateMachineTests: XCTestCase {
         XCTAssertEqual(controller.state, .micDenied)
     }
 
-    func test_audioEngineFailureReturnsToIdleWithoutMisreportingPermissionDenial() {
+    /// C1: a capture failure is not a permission denial, and must not stop
+    /// the one concrete outcome this slice exists to prove - the demo plays
+    /// the sample conversation - from happening. It only makes the mic line
+    /// honestly report itself as off.
+    func test_captureFailureStillPlaysBackTheFixtureWithMicReportedOff() {
         let audio = FakeAudioCapture()
         audio.failNextStart = true
-        let (controller, _, _, mic) = makeController(audio: audio)
+        let (controller, _, scheduler, _) = makeController(audio: audio)
 
         controller.primaryButtonTapped()
 
-        XCTAssertEqual(controller.state, .idle, "an engine failure is not a permission denial; section 5 has no dedicated mic-error state to report instead")
+        XCTAssertEqual(controller.state, .listening, "a capture failure must not stop the demo from playing")
+        XCTAssertFalse(controller.isMicCapturing, "the mic line must honestly report that capture did not open")
+        XCTAssertEqual(controller.segments.count, 1, "the fixture must still be advancing")
 
-        // Retry: permission is already granted, so this should not need to
-        // ask again in spirit, though it does re-check (harmless - the OS
-        // answers instantly once already decided), and should now succeed.
-        let requestsBeforeRetry = mic.requestCount
-        controller.primaryButtonTapped()
+        scheduler.drainAll()
 
-        XCTAssertEqual(controller.state, .listening, "a transient engine failure must not leave the controller stuck")
-        XCTAssertGreaterThan(mic.requestCount, requestsBeforeRetry)
+        XCTAssertEqual(controller.segments.count, 2, "playback must run to completion even though the mic never opened")
     }
 
     func test_pauseStopsCaptureAndHaltsPlayback() {
@@ -191,6 +192,7 @@ final class SessionStateMachineTests: XCTestCase {
 
         audio.simulateExternalStop() // e.g. backgrounding, a call, media services reset
 
+        XCTAssertFalse(controller.isMicCapturing)
         XCTAssertEqual(controller.state, .paused, "the dock must never keep saying 'Dang nghe' once capture has stopped for a reason outside the user's own pause tap")
 
         scheduler.drainAll()
@@ -228,5 +230,44 @@ final class SessionStateMachineTests: XCTestCase {
         controller = nil
 
         XCTAssertEqual(audio.stopCount, 1, "dropping the controller from the view tree must stop capture, not leave the mic open")
+    }
+
+    // MARK: - C1: mic display follows real capture, not session state
+
+    func test_isMicCapturingTracksRealCaptureThroughPauseResumeAndEnd() {
+        let (controller, _, _, _) = makeController()
+        XCTAssertFalse(controller.isMicCapturing)
+
+        controller.primaryButtonTapped() // -> listening
+        XCTAssertTrue(controller.isMicCapturing)
+
+        controller.primaryButtonTapped() // -> paused
+        XCTAssertFalse(controller.isMicCapturing)
+
+        controller.primaryButtonTapped() // -> listening again
+        XCTAssertTrue(controller.isMicCapturing)
+
+        controller.endSession()
+        XCTAssertFalse(controller.isMicCapturing)
+    }
+
+    /// The dock text is a pure function of `(isMicCapturing, state)`, not of
+    /// `state` alone: `isMicCapturing: true` must say "Dang nghe" no matter
+    /// what `state` is, proving the text really follows capture rather than
+    /// session progress. `listening` with capture off falls back to "Mic
+    /// tat" - the one string among the six that stays true when the session
+    /// is genuinely running but the mic never opened.
+    func test_micDockTextFollowsCaptureNotSession() {
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: true, state: .paused), "Đang nghe")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: true, state: .idle), "Đang nghe")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: true, state: .micDenied), "Đang nghe")
+
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .listening), "Mic tắt", "session running with capture off must not claim any of the other five strings")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .idle), "Mic tắt")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .paused), "Đã tạm dừng")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .requestingMic), "Đang mở mic…")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .connecting), "Đang mở mic…")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .micDenied), "Chưa có quyền mic")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .reconnecting), "Mic giữ, chờ mạng")
     }
 }

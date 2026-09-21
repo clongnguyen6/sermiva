@@ -2,11 +2,18 @@ import Foundation
 
 /// Drives the section-5 session state machine for offline demo playback of
 /// the `cafe_vi_en` fixture. No network and no Soniox: the only real I/O is
-/// the microphone permission prompt and, once granted, a genuinely open
-/// (but discarded) capture - see docs/demo-mic-status.md.
+/// the microphone permission prompt and, once granted, a genuinely attempted
+/// (and discarded) capture. Playback never depends on capture succeeding -
+/// see docs/demo-mic-status.md.
 @MainActor
 final class DemoSessionController: ObservableObject {
     @Published private(set) var state: SessionState = .idle
+    /// Whether the mic is genuinely capturing right now. Deliberately a
+    /// separate published value, not derived from `state`: HANDOFF.md
+    /// section 5's mic-dock line and the "Dang nghe..." empty state must
+    /// reflect real capture, not session progress - see
+    /// docs/demo-mic-status.md.
+    @Published private(set) var isMicCapturing = false
     @Published private(set) var segments: [Segment] = []
     @Published private(set) var elapsed: TimeInterval = 0
 
@@ -42,6 +49,25 @@ final class DemoSessionController: ObservableObject {
     deinit {
         // The mic must not stay open once this controller leaves the view tree.
         audioCapture.stop()
+    }
+
+    /// The six HANDOFF.md section 5 mic-dock strings, chosen from real
+    /// capture state first - "Dang nghe" only when `isMicCapturing`, never
+    /// as a function of `state` alone - so the claim that this text follows
+    /// capture, not session progress, is directly testable. See
+    /// docs/demo-mic-status.md for why `listening` falls back to "Mic tat"
+    /// rather than a dedicated error string.
+    static func micDockText(isMicCapturing: Bool, state: SessionState) -> String {
+        if isMicCapturing {
+            return "Đang nghe"
+        }
+        switch state {
+        case .paused: return "Đã tạm dừng"
+        case .requestingMic, .connecting: return "Đang mở mic…"
+        case .reconnecting: return "Mic giữ, chờ mạng"
+        case .micDenied: return "Chưa có quyền mic"
+        case .idle, .ended, .authError, .listening: return "Mic tắt"
+        }
     }
 
     /// Whether "Ket thuc" may open the confirmation sheet right now. A pure
@@ -104,6 +130,7 @@ final class DemoSessionController: ObservableObject {
         guard canEnd else { return }
         playbackToken = UUID()
         audioCapture.stop()
+        isMicCapturing = false
         state = .ended
     }
 
@@ -128,35 +155,41 @@ final class DemoSessionController: ObservableObject {
         startCaptureAndPlayback()
     }
 
-    /// Starts real capture and, on success, playback. A capture failure
-    /// here is an engine/hardware problem, not a permission denial - HANDOFF
-    /// section 5 has no dedicated mic-error state and the design has no
-    /// banner for it, so this returns to `idle` ("Mic tat") rather than
-    /// inventing one. Flagged as a gap for the project owner in the handoff
-    /// report.
+    /// Starts real capture, then always starts playback - whether or not
+    /// capture actually opened. Microphone and session are separate states
+    /// (AGENTS.md): a capture failure (bad hardware, no input device) is not
+    /// a permission denial and must not silently stop the demo from
+    /// playing. `isMicCapturing` carries the honest signal instead; see
+    /// docs/demo-mic-status.md for the reasoning and its limits.
     private func startCaptureAndPlayback() {
         do {
             try audioCapture.start()
-            state = .listening
-            playbackToken = UUID()
-            playNextEvent(token: playbackToken)
+            isMicCapturing = true
         } catch {
-            state = .idle
+            isMicCapturing = false
         }
+        state = .listening
+        playbackToken = UUID()
+        playNextEvent(token: playbackToken)
     }
 
     private func pause() {
         playbackToken = UUID()
         audioCapture.stop()
+        isMicCapturing = false
         state = .paused
     }
 
     /// Capture stopped itself for a reason outside the user's own pause tap
     /// (backgrounding, a phone call, media services reset - see
-    /// `AudioCapturing`). The dock must never keep saying "Dang nghe" once
-    /// that has happened, so this mirrors `pause()` without calling
-    /// `audioCapture.stop()` again (it already stopped).
+    /// `AudioCapturing`). `isMicCapturing` drops immediately either way. The
+    /// session also moves to `paused`, not left "listening" against a dead
+    /// mic, so playback does not keep silently advancing while the app is
+    /// not even in the foreground - a reasonable choice within section 5's
+    /// vocabulary, not the only one; written down here since it is a
+    /// judgment call.
     private func handleCaptureStoppedExternally() {
+        isMicCapturing = false
         guard state == .listening else { return }
         playbackToken = UUID()
         state = .paused
