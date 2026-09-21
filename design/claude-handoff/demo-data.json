@@ -1,0 +1,425 @@
+{
+  "note": "Dữ liệu mô phỏng. Không chứa khóa API thật. Kiểu event: partial (cập nhật tại chỗ theo id) / final (khóa source, sau đó điền target). speaker null = Chưa xác định. overlap chỉ hiển thị khi API có tín hiệu.",
+  "demoKey": "sx_demo_7f3aK9qL2mZ8 (giả; hợp lệ khi khớp ^sx_[A-Za-z0-9]{10,}$)",
+  "defaultLanguageConfig": {
+    "me": "vi",
+    "guest": "auto",
+    "target": "en"
+  },
+  "languages": [
+    {
+      "code": "vi",
+      "vi": "Tiếng Việt",
+      "en": "Vietnamese",
+      "native": "Tiếng Việt"
+    },
+    {
+      "code": "en",
+      "vi": "Tiếng Anh",
+      "en": "English",
+      "native": "English"
+    },
+    {
+      "code": "zh",
+      "vi": "Tiếng Trung",
+      "en": "Chinese",
+      "native": "中文"
+    },
+    {
+      "code": "ja",
+      "vi": "Tiếng Nhật",
+      "en": "Japanese",
+      "native": "日本語"
+    },
+    {
+      "code": "ko",
+      "vi": "Tiếng Hàn",
+      "en": "Korean",
+      "native": "한국어"
+    },
+    {
+      "code": "fr",
+      "vi": "Tiếng Pháp",
+      "en": "French",
+      "native": "Français"
+    },
+    {
+      "code": "de",
+      "vi": "Tiếng Đức",
+      "en": "German",
+      "native": "Deutsch"
+    },
+    {
+      "code": "es",
+      "vi": "Tiếng Tây Ban Nha",
+      "en": "Spanish",
+      "native": "Español"
+    },
+    {
+      "code": "th",
+      "vi": "Tiếng Thái",
+      "en": "Thai",
+      "native": "ไทย"
+    },
+    {
+      "code": "id",
+      "vi": "Tiếng Indonesia",
+      "en": "Indonesian",
+      "native": "Bahasa Indonesia"
+    },
+    {
+      "code": "ru",
+      "vi": "Tiếng Nga",
+      "en": "Russian",
+      "native": "Русский"
+    },
+    {
+      "code": "pt",
+      "vi": "Tiếng Bồ Đào Nha",
+      "en": "Portuguese",
+      "native": "Português"
+    }
+  ],
+  "scenarios": {
+    "cafe_vi_en": {
+      "config": {
+        "me": "vi",
+        "guest": "en",
+        "target": "en"
+      },
+      "events": [
+        {
+          "type": "partial",
+          "id": 1,
+          "speaker": "A",
+          "lang": "vi",
+          "src": "Cho tôi một cà phê"
+        },
+        {
+          "type": "partial",
+          "id": 1,
+          "src": "Cho tôi một cà phê sữa đá, ít đường"
+        },
+        {
+          "type": "final",
+          "id": 1,
+          "src": "Cho tôi một cà phê sữa đá, ít đường nhé.",
+          "tgt": "I'd like an iced Vietnamese coffee with less sugar, please."
+        },
+        {
+          "type": "partial",
+          "id": 2,
+          "speaker": "B",
+          "lang": "en",
+          "src": "Would you like"
+        },
+        {
+          "type": "final",
+          "id": 2,
+          "src": "Would you like anything to eat?",
+          "tgt": "Bạn có muốn ăn thêm gì không?"
+        },
+        {
+          "type": "partial",
+          "id": 3,
+          "speaker": "A",
+          "lang": "vi",
+          "src": "Có món nào không có"
+        },
+        {
+          "type": "final",
+          "id": 3,
+          "src": "Có món nào không có đậu phộng không?",
+          "tgt": "Do you have anything without peanuts?"
+        },
+        {
+          "type": "partial",
+          "id": 4,
+          "speaker": "B",
+          "lang": "en",
+          "src": "Yes, we have a grilled chicken bánh mì"
+        },
+        {
+          "type": "partial",
+          "id": 4,
+          "src": "Yes, we have a grilled chicken bánh mì and a fresh spring roll plate; both are made without peanuts"
+        },
+        {
+          "type": "final",
+          "id": 4,
+          "src": "Yes, we have a grilled chicken bánh mì and a fresh spring roll plate; both are made without peanuts, but the peanut sauce is served on the side, so just let us know and we will leave it off.",
+          "tgt": "Có, chúng tôi có bánh mì gà nướng và một phần gỏi cuốn tươi; cả hai đều không dùng đậu phộng, nhưng nước chấm đậu phộng được để riêng, nên anh chỉ cần báo là chúng tôi sẽ bỏ ra."
+        },
+        {
+          "type": "partial",
+          "id": 5,
+          "speaker": "A",
+          "lang": "en",
+          "src": "Perfect, one bánh mì then"
+        },
+        {
+          "type": "final",
+          "id": 5,
+          "src": "Perfect, one bánh mì then. No sauce.",
+          "tgt": "Tuyệt, vậy cho tôi một bánh mì. Không nước chấm."
+        },
+        {
+          "type": "partial",
+          "id": 6,
+          "speaker": "B",
+          "lang": "en",
+          "src": "Do you want it to"
+        },
+        {
+          "type": "partial",
+          "id": 6,
+          "src": "Do you want it toasted"
+        },
+        {
+          "type": "final",
+          "id": 6,
+          "src": "Would you like it toasted, or as it is?",
+          "tgt": "Bạn muốn nướng nóng hay để nguyên?"
+        },
+        {
+          "type": "partial",
+          "id": 7,
+          "speaker": null,
+          "lang": "vi",
+          "src": "Cho thêm một ly"
+        },
+        {
+          "type": "final",
+          "id": 7,
+          "src": "Cho thêm một ly nước lọc nữa.",
+          "tgt": "One more glass of water, please."
+        },
+        {
+          "type": "partial",
+          "id": 8,
+          "speaker": "B",
+          "lang": "en",
+          "src": "Sure, for here or",
+          "overlap": true
+        },
+        {
+          "type": "partial",
+          "id": 9,
+          "speaker": null,
+          "lang": "vi",
+          "src": "À mà, khoan",
+          "overlap": true
+        },
+        {
+          "type": "partial",
+          "id": 8,
+          "src": "Sure, for here or to go?"
+        },
+        {
+          "type": "final",
+          "id": 9,
+          "src": "À mà, khoan đã, mang đi nhé.",
+          "tgt": "Oh wait, actually, to go please."
+        },
+        {
+          "type": "final",
+          "id": 8,
+          "src": "Sure, for here or to go?",
+          "tgt": "Được, dùng tại đây hay mang đi?"
+        },
+        {
+          "type": "partial",
+          "id": 10,
+          "speaker": "A",
+          "lang": "vi",
+          "src": "Mang đi. Bao lâu thì"
+        },
+        {
+          "type": "final",
+          "id": 10,
+          "src": "Mang đi. Bao lâu thì xong vậy?",
+          "tgt": "To go. How long will it take?"
+        },
+        {
+          "type": "partial",
+          "id": 11,
+          "speaker": "B",
+          "lang": "en",
+          "src": "About ten minutes"
+        },
+        {
+          "type": "final",
+          "id": 11,
+          "src": "About ten minutes. The coffee will be ready first, you can wait by the window.",
+          "tgt": "Khoảng mười phút. Cà phê sẽ xong trước, anh có thể ngồi chờ ở bên cửa sổ."
+        },
+        {
+          "type": "partial",
+          "id": 12,
+          "speaker": "A",
+          "lang": "vi",
+          "src": "Ở đây có wifi"
+        },
+        {
+          "type": "final",
+          "id": 12,
+          "src": "Ở đây có wifi không? Tôi cần gửi một email nhanh.",
+          "tgt": "Do you have wifi here? I need to send a quick email."
+        },
+        {
+          "type": "partial",
+          "id": 13,
+          "speaker": "B",
+          "lang": "en",
+          "src": "Yes, the network is"
+        },
+        {
+          "type": "final",
+          "id": 13,
+          "src": "Yes, the network is “Cafe Sáng”, the password is printed on the receipt.",
+          "tgt": "Có, mạng tên “Cafe Sáng”, mật khẩu in trên hóa đơn."
+        },
+        {
+          "type": "partial",
+          "id": 14,
+          "speaker": "A",
+          "lang": "vi",
+          "src": "Cảm ơn. Cho tôi hóa đơn"
+        },
+        {
+          "type": "final",
+          "id": 14,
+          "src": "Cảm ơn. Cho tôi hóa đơn luôn nhé, tôi trả bằng thẻ.",
+          "tgt": "Thanks. I’ll take the receipt now, I’m paying by card."
+        },
+        {
+          "type": "partial",
+          "id": 15,
+          "speaker": "B",
+          "lang": "vi",
+          "src": "Dạ, tổng cộng"
+        },
+        {
+          "type": "final",
+          "id": 15,
+          "src": "Dạ, tổng cộng chín mươi lăm nghìn. Anh chạm thẻ ở đây.",
+          "tgt": "Sure, that’s ninety-five thousand in total. Tap your card here."
+        },
+        {
+          "type": "partial",
+          "id": 16,
+          "speaker": "A",
+          "lang": "en",
+          "src": "Done. Thank you"
+        },
+        {
+          "type": "final",
+          "id": 16,
+          "src": "Done. Thank you so much, see you next time.",
+          "tgt": "Xong rồi. Cảm ơn nhiều, hẹn gặp lại lần sau."
+        }
+      ]
+    },
+    "guest_japanese": {
+      "config": {
+        "me": "vi",
+        "guest": "auto",
+        "target": "en"
+      },
+      "note": "tgtJa dùng khi target = ja",
+      "events": [
+        {
+          "type": "partial",
+          "id": 101,
+          "speaker": "B",
+          "lang": "ja",
+          "src": "いらっしゃいませ。"
+        },
+        {
+          "type": "partial",
+          "id": 101,
+          "src": "いらっしゃいませ。ご注文は"
+        },
+        {
+          "type": "final",
+          "id": 101,
+          "src": "いらっしゃいませ。ご注文はお決まりですか？",
+          "tgt": "Xin chào quý khách. Anh/chị đã chọn món chưa?"
+        },
+        {
+          "type": "partial",
+          "id": 102,
+          "speaker": "A",
+          "lang": "vi",
+          "src": "Cho tôi một cà phê"
+        },
+        {
+          "type": "final",
+          "id": 102,
+          "src": "Cho tôi một cà phê sữa đá, ít đường nhé.",
+          "tgt": "I'd like an iced Vietnamese coffee with less sugar, please.",
+          "tgtJa": "アイスのベトナムコーヒーを、砂糖控えめでお願いします。"
+        },
+        {
+          "type": "partial",
+          "id": 103,
+          "speaker": "B",
+          "lang": "ja",
+          "src": "はい、アイスコーヒー"
+        },
+        {
+          "type": "partial",
+          "id": 103,
+          "src": "はい、アイスコーヒーですね。お砂糖は"
+        },
+        {
+          "type": "final",
+          "id": 103,
+          "src": "はい、アイスコーヒーですね。お砂糖は控えめにします。少々お待ちください。",
+          "tgt": "Vâng, cà phê đá ạ. Tôi sẽ cho ít đường. Xin chờ một chút."
+        },
+        {
+          "type": "partial",
+          "id": 104,
+          "speaker": "A",
+          "lang": "vi",
+          "src": "Có món nào không có"
+        },
+        {
+          "type": "final",
+          "id": 104,
+          "src": "Có món nào không có đậu phộng không?",
+          "tgt": "Do you have anything without peanuts?",
+          "tgtJa": "ピーナッツを使っていない料理はありますか？"
+        },
+        {
+          "type": "partial",
+          "id": 105,
+          "speaker": null,
+          "lang": "ja",
+          "src": "ピーナッツ抜きなら"
+        },
+        {
+          "type": "final",
+          "id": 105,
+          "src": "ピーナッツ抜きなら、鶏肉のバインミーがおすすめです。",
+          "tgt": "Nếu không dùng đậu phộng thì tôi gợi ý bánh mì gà."
+        },
+        {
+          "type": "partial",
+          "id": 106,
+          "speaker": "A",
+          "lang": "vi",
+          "src": "Vậy cho tôi một cái"
+        },
+        {
+          "type": "final",
+          "id": 106,
+          "src": "Vậy cho tôi một cái, mang đi nhé.",
+          "tgt": "Then one of those please, to go.",
+          "tgtJa": "では、それを一つ、持ち帰りでお願いします。"
+        }
+      ]
+    }
+  }
+}

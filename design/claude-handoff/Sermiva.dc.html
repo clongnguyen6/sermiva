@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+<title>Sermiva</title>
+<template id="__bundler_thumbnail"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200"><rect width="200" height="200" rx="44" fill="#007AFF"/><g fill="none" stroke="#fff" stroke-width="10" stroke-linecap="round" stroke-linejoin="round"><path d="M62 70h44M84 60v10M70 90c6 16 18 30 34 40M96 90c-8 20-22 36-40 48"/><path d="M104 150l20-52 20 52M111 132h26"/></g></svg></template>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+html,body{margin:0;padding:0;background:#E8E8ED;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;-webkit-font-smoothing:antialiased;color:#111}
+a{color:#0A66C2;text-decoration:none}a:hover{text-decoration:underline}
+button{font-family:inherit}
+[data-theme="light"]{--bg:#F2F2F7;--surface:#FFFFFF;--surface2:#E5E5EA;--text:#000000;--text2:rgba(60,60,67,0.78);--text3:rgba(60,60,67,0.55);--sep:rgba(60,60,67,0.24);--accent:#007AFF;--onaccent:#FFFFFF;--spA:#0E7C6B;--spB:#5352C9;--danger:#D70015;--ok:#248A3D;--warn:#C93400;--live:#FF3B30;--scrim:rgba(0,0,0,0.32)}
+[data-theme="dark"]{--bg:#000000;--surface:#1C1C1E;--surface2:#2C2C2E;--text:#FFFFFF;--text2:rgba(235,235,245,0.78);--text3:rgba(235,235,245,0.55);--sep:rgba(84,84,88,0.6);--accent:#0A84FF;--onaccent:#FFFFFF;--spA:#5FD2BF;--spB:#9D9BFF;--danger:#FF453A;--ok:#30D158;--warn:#FF9F0A;--live:#FF453A;--scrim:rgba(0,0,0,0.55)}
+@keyframes snPulse{0%,100%{opacity:1}50%{opacity:.35}}
+@keyframes snBlink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes snSpin{to{transform:rotate(360deg)}}
+@keyframes snUp{from{transform:translateY(24px);opacity:0}to{transform:translateY(0);opacity:1}}
+input[type=range].sn-range{-webkit-appearance:none;appearance:none;height:28px;background:transparent;width:100%;margin:0}
+input[type=range].sn-range::-webkit-slider-runnable-track{height:4px;border-radius:2px;background:var(--surface2)}
+input[type=range].sn-range::-webkit-slider-thumb{-webkit-appearance:none;width:28px;height:28px;border-radius:50%;background:#fff;border:0.5px solid rgba(0,0,0,.08);box-shadow:0 2px 6px rgba(0,0,0,.2);margin-top:-12px}
+input[type=range].sn-range::-moz-range-track{height:4px;border-radius:2px;background:var(--surface2)}
+input[type=range].sn-range::-moz-range-thumb{width:28px;height:28px;border-radius:50%;background:#fff;border:0.5px solid rgba(0,0,0,.08);box-shadow:0 2px 6px rgba(0,0,0,.2)}
+.sn-scroll{scrollbar-width:none}.sn-scroll::-webkit-scrollbar{display:none}
+</style>
+</helmet>
+
+<div style="display:flex;flex-wrap:wrap;gap:32px;align-items:flex-start;justify-content:center;padding:36px 28px 56px;max-width:1360px;margin:0 auto">
+
+  <!-- ─── Left: brief + phone ─── -->
+  <div style="display:flex;flex-direction:column;gap:20px;flex:0 1 auto;min-width:0">
+    <div style="max-width:560px;display:flex;flex-direction:column;gap:8px">
+      <div style="font-size:13px;color:#6b6b70;letter-spacing:.02em">Prototype iPhone · 393 × 852 · dữ liệu mô phỏng</div>
+      <h1 style="margin:0;font-size:28px;font-weight:700;letter-spacing:-.01em">Sermiva</h1>
+      <p style="margin:0;font-size:14px;line-height:1.5;color:#3a3a3f;text-wrap:pretty">Hai người, một iPhone đặt giữa, nhấn Bắt đầu một lần. App nghe liên tục, hiện nguyên văn và bản dịch theo thời gian thực. Bốn kiểu hiển thị dùng chung một phiên; Settings, theme và ngôn ngữ giao diện đều thay đổi prototype thật.</p>
+      <details style="font-size:13px;line-height:1.5;color:#3a3a3f">
+        <summary style="cursor:pointer;color:#111;font-weight:600">Giả định</summary>
+        <ul style="margin:6px 0 0;padding-left:18px;display:flex;flex-direction:column;gap:3px">
+          <li>Bản dịch hiện sau khi câu hoàn tất (~0,5 s), nguyên văn stream theo từng cụm. Tránh bản dịch nhảy liên tục theo partial.</li>
+          <li>V1 chỉ có một cặp ngôn ngữ; nhận dạng ngôn ngữ tự động theo từng đoạn.</li>
+          <li>Nhãn người nói chỉ hiện khi API trả về; đoạn không có nhãn hiện “Chưa xác định”. Nhãn “Nói chồng” chỉ hiện khi bật tín hiệu hỗ trợ trong bảng mô phỏng.</li>
+          <li>Thoát Sân khấu quay về kiểu hiển thị dùng trước đó. Vào Settings không ngắt phiên.</li>
+          <li>Khóa API luôn là khóa giả dạng <code>sx_…</code>; kết quả kiểm tra được mô phỏng.</li>
+        </ul>
+      </details>
+    </div>
+
+    <x-import component-from-global-scope="IOSDevice" from="./ios-frame.jsx" width="{{ devW }}" height="{{ devH }}" dark="{{ isDark }}" hint-size="393px,852px">
+    <div style="{{ rootStyle }}">
+    <div data-theme="{{ themeName }}" style="position:relative;height:100%;background:var(--bg);color:var(--text);display:flex;flex-direction:column;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',system-ui,sans-serif">
+
+      <!-- ═══════ SETUP ═══════ -->
+      <sc-if value="{{ isSetup }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Setup" style="flex:1;min-height:0;display:flex;flex-direction:column;padding:70px 24px 40px;gap:16px;overflow:auto" class="sn-scroll">
+        <div style="width:56px;height:56px;border-radius:16px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:var(--onaccent)">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h9M8.5 3v2M6 9c1 3 3.5 6 7 8M11 9C9.5 13 6.5 16 3 18M13 21l4-10 4 10M14.5 17.5h5"></path></svg>
+        </div>
+        <h2 style="margin:8px 0 0;font-size:calc(28px*var(--fs));line-height:1.2;font-weight:700;letter-spacing:-.01em">{{ t.setup.title }}</h2>
+        <p style="margin:0;font-size:calc(16px*var(--fs));line-height:1.4;color:var(--text2);text-wrap:pretty">{{ t.setup.body }}</p>
+        <div style="display:flex;flex-direction:column;gap:10px;margin-top:8px">
+          <label style="font-size:13px;color:var(--text3);font-weight:600;letter-spacing:.02em;text-transform:uppercase">{{ t.s.key }}</label>
+          <div style="display:flex;align-items:center;gap:4px;background:var(--surface);border-radius:14px;padding:0 4px 0 14px;min-height:50px">
+            <input type="{{ keyInputType }}" value="{{ apiKey }}" onChange="{{ onKeyChange }}" placeholder="{{ t.s.keyPh }}" aria-label="{{ t.s.key }}" autocomplete="off" spellcheck="false" style="flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--text);font-size:17px;font-family:ui-monospace,Menlo,monospace;padding:12px 0"></input>
+            <button onClick="{{ toggleKeyVisible }}" aria-label="{{ keyVisLabel }}" style="width:44px;height:44px;border:0;background:transparent;color:var(--accent);display:flex;align-items:center;justify-content:center;cursor:pointer;border-radius:12px">
+              <sc-if value="{{ keyVisible }}" hint-placeholder-val="{{ false }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle><path d="M4 4l16 16"></path></svg></sc-if>
+              <sc-if value="{{ keyHidden }}" hint-placeholder-val="{{ true }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg></sc-if>
+            </button>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <button onClick="{{ pasteKey }}" style="min-height:36px;padding:0 12px;border:0;border-radius:10px;background:var(--surface);color:var(--accent);font-size:15px;font-weight:500;cursor:pointer">{{ t.setup.pasteDemo }}</button>
+            <div style="{{ keyStatusStyle }}">
+              <sc-if value="{{ keyChecking }}" hint-placeholder-val="{{ false }}"><span style="width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-top-color:transparent;animation:snSpin .8s linear infinite;display:inline-block"></span></sc-if>
+              <span>{{ keyStatusText }}</span>
+            </div>
+          </div>
+        </div>
+        <div style="flex:1"></div>
+        <button onClick="{{ setupCheck }}" disabled="{{ checkDisabled }}" style="{{ primaryBtnStyle }}">{{ t.setup.check }}</button>
+        <button onClick="{{ setupDemo }}" style="min-height:44px;border:0;background:transparent;color:var(--accent);font-size:16px;font-weight:500;cursor:pointer;border-radius:12px">{{ t.setup.demo }}</button>
+        <p style="margin:0;text-align:center;font-size:12px;color:var(--text3)">{{ t.setup.foot }}</p>
+      </div>
+      </sc-if>
+
+      <!-- ═══════ TALK ═══════ -->
+      <sc-if value="{{ isTalk }}" hint-placeholder-val="{{ true }}">
+      <div data-screen-label="Conversation" style="flex:1;min-height:0;display:flex;flex-direction:column;position:relative">
+
+        <!-- Normal chrome top bar -->
+        <sc-if value="{{ notStage }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:56px 12px 6px 20px;gap:8px">
+          <div style="display:flex;flex-direction:column;gap:2px;min-width:0;flex:1">
+            <div style="display:flex;align-items:center;gap:8px;min-width:0"><div style="font-size:17px;font-weight:600;letter-spacing:-.01em;line-height:1.2;flex:1;min-width:0;overflow-wrap:anywhere;text-wrap:balance">{{ pairLabel }}</div><sc-if value="{{ isDemo }}" hint-placeholder-val="{{ false }}"><span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;padding:2px 6px;border-radius:5px;background:var(--warn);color:#fff;flex-shrink:0">DEMO</span></sc-if></div>
+            <div style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text2)"><span style="{{ statusDotStyle }}"></span><span>{{ statusText }}</span></div>
+          </div>
+          <button onClick="{{ goSettings }}" aria-label="{{ t.settings }}" style="width:44px;height:44px;border-radius:22px;border:0;background:var(--surface);color:var(--text);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg>
+          </button>
+        </div>
+        </sc-if>
+
+        <!-- Stage chrome top bar -->
+        <sc-if value="{{ isStage }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:56px 12px 4px 16px;gap:8px">
+          <div style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 12px;border-radius:22px;background:var(--surface);font-size:14px;font-weight:600;color:var(--text)"><span style="{{ micDotStyle }}"></span><span>{{ micLabel }}</span></div>
+          <div style="display:flex;gap:6px">
+            <button onClick="{{ onMain }}" disabled="{{ mainDisabled }}" aria-label="{{ mainLabel }}" style="min-width:44px;height:44px;padding:0 14px;border-radius:22px;border:0;background:var(--accent);color:var(--onaccent);display:flex;align-items:center;gap:6px;justify-content:center;cursor:pointer;font-size:15px;font-weight:600">
+              <sc-if value="{{ showPauseIcon }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1.5"></rect><rect x="14" y="4" width="5" height="16" rx="1.5"></rect></svg></sc-if>
+              <sc-if value="{{ showPlayIcon }}" hint-placeholder-val="{{ true }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.9l12-7.5a1 1 0 0 0 0-1.7l-12-7.5A1 1 0 0 0 7 4.5z"></path></svg></sc-if>
+              <span style="white-space:nowrap">{{ mainLabel }}</span>
+            </button>
+            <button onClick="{{ exitStage }}" aria-label="{{ t.exitStage }}" style="width:44px;height:44px;border-radius:22px;border:0;background:var(--surface);color:var(--text);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+          </div>
+        </div>
+        </sc-if>
+
+        <!-- Banner -->
+        <sc-if value="{{ showBanner }}" hint-placeholder-val="{{ false }}">
+        <div role="status" style="{{ bannerStyle }}">
+          <sc-if value="{{ isBannerNet }}" hint-placeholder-val="{{ false }}"><span style="width:16px;height:16px;border-radius:50%;border:2px solid currentColor;border-top-color:transparent;animation:snSpin .9s linear infinite;flex-shrink:0"></span></sc-if>
+          <sc-if value="{{ isBannerWarn }}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M12 3L2 20h20L12 3z"></path><path d="M12 10v4M12 17.5v.5"></path></svg></sc-if>
+          <sc-if value="{{ isBannerInfo }}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5M12 7.5v.5"></path></svg></sc-if>
+          <span style="flex:1;min-width:0;font-size:14px;line-height:1.35">{{ bannerText }}</span>
+          <sc-if value="{{ hasBannerAction }}" hint-placeholder-val="{{ false }}"><button onClick="{{ bannerAction }}" style="min-height:36px;padding:0 12px;border:0;border-radius:10px;background:var(--surface);color:var(--accent);font-size:14px;font-weight:600;cursor:pointer;flex-shrink:0">{{ bannerActionLabel }}</button></sc-if>
+        </div>
+        </sc-if>
+
+        <!-- ═══ Content ═══ -->
+        <div style="{{ contentWrapStyle }}">
+
+          <!-- Empty states -->
+          <sc-if value="{{ showEmpty }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px 32px;gap:10px">
+            <sc-if value="{{ emptyListening }}" hint-placeholder-val="{{ false }}"><span style="width:12px;height:12px;border-radius:50%;background:var(--live);animation:snPulse 1.4s ease-in-out infinite;animation-duration:var(--pulse)"></span></sc-if>
+            <div style="font-size:calc(20px*var(--fs));font-weight:600;line-height:1.25">{{ emptyTitle }}</div>
+            <div style="font-size:calc(15px*var(--fs));line-height:1.45;color:var(--text2);max-width:320px;text-wrap:pretty">{{ emptyBody }}</div>
+          </div>
+          </sc-if>
+
+          <!-- CAPTIONS: everything left-aligned; speaker label + language label identify the segment -->
+          <sc-if value="{{ showCaptions }}" hint-placeholder-val="{{ true }}">
+          <div data-sn-scroll="1" ref="{{ scrollRef }}" onScroll="{{ onScroll }}" class="sn-scroll" style="{{ capScrollStyle }}">
+            <sc-for list="{{ histSegs }}" as="seg" hint-placeholder-count="2">
+              <div style="display:flex;flex-direction:column;gap:3px;padding-bottom:14px;border-bottom:0.5px solid var(--sep)">
+                <div style="display:flex;align-items:center;gap:4px 8px;font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--text3);flex-wrap:wrap">
+                  <sc-if value="{{ seg.showSpeaker }}" hint-placeholder-val="{{ true }}"><span style="{{ seg.labelStyle }}">{{ seg.speakerLabel }}</span></sc-if>
+                  <span style="white-space:nowrap">{{ seg.langLabel }}</span>
+                  <sc-if value="{{ seg.showOverlap }}" hint-placeholder-val="{{ false }}"><span style="color:var(--warn)">{{ t.overlapTag }}</span></sc-if>
+                </div>
+                <div style="font-size:calc(14px*var(--fs));line-height:1.35;color:var(--text2);overflow-wrap:anywhere">{{ seg.src }}</div>
+                <sc-if value="{{ seg.hasTgt }}" hint-placeholder-val="{{ true }}"><div style="font-size:calc(17px*var(--fs));line-height:1.3;font-weight:500;color:var(--text);overflow-wrap:anywhere">{{ seg.tgt }}</div></sc-if>
+                <sc-if value="{{ seg.isTranslating }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:6px;font-size:12px;font-weight:500;color:var(--text3);min-height:20px;white-space:nowrap"><span style="width:9px;height:9px;border-radius:50%;border:1.5px solid currentColor;border-top-color:transparent;animation:snSpin .9s linear infinite;display:inline-block"></span>{{ t.translatingTag }}</div></sc-if>
+              </div>
+            </sc-for>
+            <sc-if value="{{ hasCur }}" hint-placeholder-val="{{ true }}">
+            <div style="{{ curSeg.capCurStyle }}">
+              <div style="display:flex;align-items:center;gap:6px 8px;font-size:13px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--text3);flex-wrap:wrap;min-height:18px">
+                <sc-if value="{{ curSeg.showSpeaker }}" hint-placeholder-val="{{ true }}"><span style="{{ curSeg.labelStyle }}">{{ curSeg.speakerLabel }}</span></sc-if>
+                <span style="white-space:nowrap">{{ curSeg.langLabel }}</span>
+                <sc-if value="{{ curSeg.showOverlap }}" hint-placeholder-val="{{ false }}"><span style="color:var(--warn)">{{ t.overlapTag }}</span></sc-if>
+                <sc-if value="{{ curSeg.isPartial }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:5px;color:var(--accent);text-transform:none;letter-spacing:0;font-weight:600;white-space:nowrap"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);animation:snPulse 1s ease-in-out infinite;animation-duration:var(--pulse)"></span>{{ t.updating }}</span></sc-if>
+                <sc-if value="{{ curSeg.isDone }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:4px;color:var(--text3);text-transform:none;letter-spacing:0;font-weight:500;white-space:nowrap"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"></path></svg>{{ t.doneTag }}</span></sc-if>
+              </div>
+              <div style="{{ curSeg.capCurSrcStyle }}">{{ curSeg.src }}<sc-if value="{{ curSeg.isPartial }}" hint-placeholder-val="{{ false }}"><span aria-hidden="true" style="display:inline-block;width:2px;height:.9em;background:var(--accent);margin-left:3px;vertical-align:-0.1em;animation:snBlink 1s step-end infinite;animation-duration:var(--pulse)"></span></sc-if></div>
+              <sc-if value="{{ curSeg.hasTgt }}" hint-placeholder-val="{{ true }}"><div style="{{ curSeg.capCurTgtStyle }}">{{ curSeg.tgt }}</div></sc-if>
+              <sc-if value="{{ curSeg.isTranslating }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:500;color:var(--text3);min-height:22px;white-space:nowrap"><span style="width:10px;height:10px;border-radius:50%;border:1.5px solid currentColor;border-top-color:transparent;animation:snSpin .9s linear infinite;display:inline-block"></span>{{ t.translatingTag }}</div></sc-if>
+            </div>
+            </sc-if>
+          </div>
+          </sc-if>
+
+          <!-- FACING STAGE: two reading zones, top one rotated 180° for the person opposite -->
+          <sc-if value="{{ showFacing }}" hint-placeholder-val="{{ false }}">
+          <div style="flex:1;min-height:0;display:flex;flex-direction:column">
+            <!-- Top pane: outer wrapper holds the status-bar safe area (un-rotated); the inner box rotates 180° and scrolls -->
+            <div style="{{ faceTopWrapStyle }}">
+            <div class="sn-scroll" style="flex:1;min-height:0;overflow-y:auto;transform:rotate(180deg);padding:12px 22px 12px;display:flex;flex-direction:column">
+              <div style="margin:auto 0;display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:4px 8px;font-size:13px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--text3);flex-wrap:wrap">
+                <span style="white-space:nowrap">{{ faceTop.readerLabel }}</span>
+                <sc-if value="{{ faceTop.showSpeaker }}" hint-placeholder-val="{{ false }}"><span style="{{ faceTop.labelStyle }}">{{ faceTop.speakerLabel }}</span></sc-if>
+                <sc-if value="{{ faceTop.isPartial }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:5px;color:var(--accent);text-transform:none;letter-spacing:0;white-space:nowrap"><span style="width:7px;height:7px;border-radius:50%;background:var(--accent);animation:snPulse 1s ease-in-out infinite;animation-duration:var(--pulse)"></span>{{ t.updating }}</span></sc-if>
+                
+              </div>
+              <sc-if value="{{ faceTop.hasBig }}" hint-placeholder-val="{{ true }}"><div style="font-size:calc(30px*var(--fs));line-height:1.2;font-weight:600;letter-spacing:-.01em;color:var(--text);overflow-wrap:anywhere;text-wrap:pretty">{{ faceTop.big }}</div></sc-if>
+              <sc-if value="{{ faceTop.isTranslating }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text3);font-weight:600;min-height:24px;white-space:nowrap"><span style="width:12px;height:12px;border-radius:50%;border:2px solid currentColor;border-top-color:transparent;animation:snSpin .9s linear infinite;display:inline-block;flex-shrink:0"></span><span>{{ t.translatingTag }}</span></div></sc-if>
+              <div style="font-size:calc(15px*var(--fs));line-height:1.35;color:var(--text2);overflow-wrap:anywhere">{{ faceTop.small }}</div>
+              </div>
+            </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;padding:6px 10px;border-top:0.5px solid var(--sep);border-bottom:0.5px solid var(--sep);background:var(--surface);flex-shrink:0;position:relative;z-index:2">
+              <div role="status" style="display:flex;align-items:center;gap:6px;min-height:44px;padding:0 8px;font-size:12px;font-weight:600;color:var(--text2);flex:1;min-width:0"><span style="{{ micDotStyle }}"></span><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ micLabel }}</span></div>
+              <button onClick="{{ onMain }}" disabled="{{ mainDisabled }}" aria-label="{{ mainLabel }}" style="height:44px;min-width:44px;padding:0 14px;border-radius:22px;border:0;background:var(--accent);color:var(--onaccent);display:flex;align-items:center;gap:6px;justify-content:center;cursor:pointer;font-size:14px;font-weight:600">
+                <sc-if value="{{ showPauseIcon }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1.5"></rect><rect x="14" y="4" width="5" height="16" rx="1.5"></rect></svg></sc-if>
+                <sc-if value="{{ showPlayIcon }}" hint-placeholder-val="{{ true }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.9l12-7.5a1 1 0 0 0 0-1.7l-12-7.5A1 1 0 0 0 7 4.5z"></path></svg></sc-if>
+                <span style="white-space:nowrap">{{ mainLabel }}</span>
+              </button>
+              <button onClick="{{ swapFacing }}" aria-label="{{ t.facing.swap }}" title="{{ t.facing.swap }}" style="width:44px;height:44px;border-radius:22px;border:0;background:var(--surface2);color:var(--text);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v16M7 20l-3-3M7 20l3-3M17 20V4M17 4l-3 3M17 4l3 3"></path></svg></button>
+              <button onClick="{{ exitStage }}" aria-label="{{ t.exitStage }}" style="width:44px;height:44px;border-radius:22px;border:0;background:var(--surface2);color:var(--text);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button>
+            </div>
+            <div style="{{ faceBottomWrapStyle }}">
+            <div class="sn-scroll" style="flex:1;min-height:0;overflow-y:auto;padding:12px 22px 12px;display:flex;flex-direction:column">
+              <div style="margin:auto 0;display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;align-items:center;gap:4px 8px;font-size:13px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--text3);flex-wrap:wrap">
+                <span style="white-space:nowrap">{{ faceBottom.readerLabel }}</span>
+                <sc-if value="{{ faceBottom.showSpeaker }}" hint-placeholder-val="{{ false }}"><span style="{{ faceBottom.labelStyle }}">{{ faceBottom.speakerLabel }}</span></sc-if>
+                <sc-if value="{{ faceBottom.isPartial }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:5px;color:var(--accent);text-transform:none;letter-spacing:0;white-space:nowrap"><span style="width:7px;height:7px;border-radius:50%;background:var(--accent);animation:snPulse 1s ease-in-out infinite;animation-duration:var(--pulse)"></span>{{ t.updating }}</span></sc-if>
+                
+              </div>
+              <sc-if value="{{ faceBottom.hasBig }}" hint-placeholder-val="{{ true }}"><div style="font-size:calc(30px*var(--fs));line-height:1.2;font-weight:600;letter-spacing:-.01em;color:var(--text);overflow-wrap:anywhere;text-wrap:pretty">{{ faceBottom.big }}</div></sc-if>
+              <sc-if value="{{ faceBottom.isTranslating }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:8px;font-size:14px;color:var(--text3);font-weight:600;min-height:24px;white-space:nowrap"><span style="width:12px;height:12px;border-radius:50%;border:2px solid currentColor;border-top-color:transparent;animation:snSpin .9s linear infinite;display:inline-block;flex-shrink:0"></span><span>{{ t.translatingTag }}</span></div></sc-if>
+              <div style="font-size:calc(15px*var(--fs));line-height:1.35;color:var(--text2);overflow-wrap:anywhere">{{ faceBottom.small }}</div>
+              </div>
+            </div>
+            </div>
+          </div>
+          </sc-if>
+
+          <!-- BUBBLES -->
+          <sc-if value="{{ showBubbles }}" hint-placeholder-val="{{ false }}">
+          <div data-sn-scroll="1" ref="{{ scrollRef }}" onScroll="{{ onScroll }}" class="sn-scroll" style="{{ bubScrollStyle }}">
+            <sc-for list="{{ segs }}" as="seg" hint-placeholder-count="3">
+              <div style="{{ seg.bubbleStyle }}">
+                <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--text3);flex-wrap:wrap">
+                  <sc-if value="{{ seg.showSpeaker }}" hint-placeholder-val="{{ true }}"><span style="{{ seg.labelStyle }}">{{ seg.speakerLabel }}</span></sc-if>
+                  <span style="white-space:nowrap">{{ seg.langLabel }}</span>
+                  <sc-if value="{{ seg.showOverlap }}" hint-placeholder-val="{{ false }}"><span style="color:var(--warn)">{{ t.overlapTag }}</span></sc-if>
+                    <sc-if value="{{ seg.isPartial }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:5px;color:var(--accent);text-transform:none;letter-spacing:0;white-space:nowrap"><span style="width:6px;height:6px;border-radius:50%;background:var(--accent);animation:snPulse 1s ease-in-out infinite;animation-duration:var(--pulse)"></span>{{ t.updating }}</span></sc-if>
+                </div>
+                <div style="font-size:calc(14px*var(--fs));line-height:1.35;color:var(--text2);overflow-wrap:anywhere">{{ seg.src }}</div>
+                <sc-if value="{{ seg.hasTgt }}" hint-placeholder-val="{{ true }}"><div style="font-size:calc(18px*var(--fs));line-height:1.3;font-weight:600;color:var(--text);overflow-wrap:anywhere;text-wrap:pretty">{{ seg.tgt }}</div></sc-if>
+                <sc-if value="{{ seg.isTranslating }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text3);font-weight:500;min-height:20px;white-space:nowrap"><span style="width:9px;height:9px;border-radius:50%;border:1.5px solid currentColor;border-top-color:transparent;animation:snSpin .9s linear infinite;display:inline-block"></span>{{ t.translatingTag }}</div></sc-if>
+              </div>
+            </sc-for>
+          </div>
+          </sc-if>
+
+          <!-- STAGE -->
+          <sc-if value="{{ showStage }}" hint-placeholder-val="{{ false }}">
+          <div data-sn-scroll="1" ref="{{ scrollRef }}" onScroll="{{ onScroll }}" class="sn-scroll" style="{{ stageScrollStyle }}">
+            <div style="display:flex;align-items:center;gap:10px;font-size:calc(15px*var(--fs));font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--text3);flex-wrap:wrap">
+              <sc-if value="{{ stageSeg.showSpeaker }}" hint-placeholder-val="{{ true }}"><span style="{{ stageSeg.labelStyle }}">{{ stageSeg.speakerLabel }}</span></sc-if>
+              <span>{{ stageSeg.langLabel }}</span>
+              <sc-if value="{{ stageSeg.isPartial }}" hint-placeholder-val="{{ false }}"><span style="display:inline-flex;align-items:center;gap:6px;color:var(--text2);text-transform:none;letter-spacing:0"><span style="width:8px;height:8px;border-radius:50%;background:var(--accent);animation:snPulse 1s ease-in-out infinite;animation-duration:var(--pulse)"></span>{{ t.updating }}</span></sc-if>
+            </div>
+            <div style="font-size:calc(22px*var(--fs));line-height:1.3;color:var(--text2);overflow-wrap:anywhere;text-wrap:pretty">{{ stageSeg.src }}</div>
+            <sc-if value="{{ stageSeg.hasTgt }}" hint-placeholder-val="{{ true }}"><div style="font-size:calc(40px*var(--fs));line-height:1.15;font-weight:600;letter-spacing:-.015em;color:var(--text);overflow-wrap:anywhere;text-wrap:pretty">{{ stageSeg.tgt }}</div></sc-if>
+            <sc-if value="{{ stageSeg.isTranslating }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:8px;font-size:15px;color:var(--text3);font-weight:600;min-height:24px;white-space:nowrap"><span style="width:12px;height:12px;border-radius:50%;border:2px solid currentColor;border-top-color:transparent;animation:snSpin .9s linear infinite;display:inline-block"></span>{{ t.translatingTag }}</div></sc-if>
+          </div>
+          </sc-if>
+
+          <!-- SCRIPT -->
+          <sc-if value="{{ showScript }}" hint-placeholder-val="{{ false }}">
+          <div data-sn-scroll="1" ref="{{ scrollRef }}" onScroll="{{ onScroll }}" class="sn-scroll" style="{{ scriptScrollStyle }}">
+            <sc-for list="{{ segs }}" as="seg" hint-placeholder-count="3">
+              <div style="display:grid;grid-template-columns:44px minmax(0,1fr);gap:0 12px;padding:12px 4px;border-bottom:0.5px solid var(--sep)">
+                <div style="font-size:12px;font-variant-numeric:tabular-nums;color:var(--text3);padding-top:3px;font-weight:500">{{ seg.timeLabel }}</div>
+                <div style="display:flex;flex-direction:column;gap:3px;min-width:0">
+                  <div style="display:flex;align-items:center;gap:8px;font-size:12px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--text3);flex-wrap:wrap">
+                    <sc-if value="{{ seg.showSpeaker }}" hint-placeholder-val="{{ true }}"><span style="{{ seg.labelStyle }}">{{ seg.speakerLabel }}</span></sc-if>
+                    <span>{{ seg.langLabel }}</span>
+                    <sc-if value="{{ seg.showOverlap }}" hint-placeholder-val="{{ false }}"><span style="color:var(--warn)">{{ t.overlapTag }}</span></sc-if>
+                    <sc-if value="{{ seg.isPartial }}" hint-placeholder-val="{{ false }}"><span style="color:var(--text2);text-transform:none;letter-spacing:0;font-weight:500">{{ t.updating }}</span></sc-if>
+                  </div>
+                  <div style="font-size:calc(14px*var(--fs));line-height:1.35;color:var(--text2);overflow-wrap:anywhere">{{ seg.src }}</div>
+                  <sc-if value="{{ seg.hasTgt }}" hint-placeholder-val="{{ true }}"><div style="font-size:calc(16px*var(--fs));line-height:1.3;font-weight:500;color:var(--text);overflow-wrap:anywhere">{{ seg.tgt }}</div></sc-if>
+                  <sc-if value="{{ seg.isTranslating }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text3);font-weight:500;min-height:20px;white-space:nowrap"><span style="width:9px;height:9px;border-radius:50%;border:1.5px solid currentColor;border-top-color:transparent;animation:snSpin .9s linear infinite;display:inline-block"></span>{{ t.translatingTag }}</div></sc-if>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+          </sc-if>
+
+          <!-- Back to live -->
+          <sc-if value="{{ showBackToLive }}" hint-placeholder-val="{{ false }}">
+          <div style="{{ backToLiveWrapStyle }}">
+            <button onClick="{{ onBackToLive }}" style="pointer-events:auto;min-height:40px;padding:0 16px 0 12px;border:0;border-radius:20px;white-space:nowrap;flex-shrink:0;width:max-content;background:var(--accent);color:var(--onaccent);font-size:14px;font-weight:600;display:inline-flex;align-items:center;gap:6px;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.18);animation:snUp .25s ease-out;animation-duration:var(--dur)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12l7 7 7-7"></path></svg>
+              <span style="white-space:nowrap">{{ t.backToLive }}</span><span style="background:rgba(255,255,255,.28);border-radius:10px;padding:1px 7px;font-variant-numeric:tabular-nums">{{ unseen }}</span>
+            </button>
+          </div>
+          </sc-if>
+        </div>
+
+        <!-- Bottom dock: measured; scroll areas pad by its real height + safe area -->
+        <sc-if value="{{ notFacing }}" hint-placeholder-val="{{ true }}">
+        <div ref="{{ ctlRef }}" style="position:absolute;left:0;right:0;bottom:0;z-index:5;display:flex;flex-direction:column;background:color-mix(in srgb, var(--bg) 88%, transparent);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)">
+        <!-- TTS bar -->
+        <sc-if value="{{ ttsVisible }}" hint-placeholder-val="{{ false }}">
+        <div role="status" style="margin:0 16px 8px;display:flex;align-items:center;gap:10px;padding:8px 8px 8px 14px;border-radius:14px;background:var(--surface);color:var(--text)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;color:var(--accent)"><path d="M4 9v6h4l5 4V5L8 9H4z"></path><path d="M16 9a4 4 0 0 1 0 6"></path><sc-if value="{{ ttsPlayingNow }}" hint-placeholder-val="{{ true }}"><path d="M19 6.5a8 8 0 0 1 0 11" style="animation:snPulse 1s ease-in-out infinite;animation-duration:var(--pulse)"></path></sc-if></svg>
+          <span style="flex:1;min-width:0;font-size:13px;line-height:1.3;color:var(--text2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ ttsText }}</span>
+          <button onClick="{{ onTtsStop }}" style="min-height:36px;padding:0 12px;border:0;border-radius:10px;background:var(--surface2);color:var(--text);font-size:14px;font-weight:600;cursor:pointer">{{ t.tts.stop }}</button>
+        </div>
+        </sc-if>
+
+        <!-- Ended summary -->
+        <sc-if value="{{ isEnded }}" hint-placeholder-val="{{ false }}">
+        <div style="margin:0 16px 8px;padding:10px 14px;border-radius:14px;background:var(--surface);display:flex;align-items:center;gap:10px;font-size:14px;color:var(--text2)">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ok)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"></path></svg>
+          <span style="flex:1">{{ endedText }}</span>
+        </div>
+        </sc-if>
+
+        <!-- Controls (normal chrome, or stage expanded) -->
+        <sc-if value="{{ showControls }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:6px;padding:6px 16px 34px">
+          <sc-if value="{{ notStage }}" hint-placeholder-val="{{ true }}">
+          <div role="status" aria-live="polite" style="display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px;font-weight:600;color:var(--text2);min-height:18px">
+            <span style="{{ micDotStyle }}"></span>
+            <sc-if value="{{ micOn }}" hint-placeholder-val="{{ false }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3"></path></svg></sc-if>
+            <sc-if value="{{ micOff }}" hint-placeholder-val="{{ true }}"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="3" width="6" height="11" rx="3"></rect><path d="M5 11a7 7 0 0 0 14 0M12 18v3M4 4l16 16"></path></svg></sc-if>
+            <span>{{ micLabel }}</span>
+          </div>
+          </sc-if>
+          <div style="display:flex;align-items:flex-start;gap:8px">
+            <button onClick="{{ openFontSheet }}" aria-label="{{ t.fontSize }}" style="width:56px;border:0;background:transparent;color:var(--text);cursor:pointer;flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:3px;padding:0">
+              <span style="width:44px;height:44px;border-radius:22px;background:var(--surface);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600;letter-spacing:-.02em">Aa</span><span style="font-size:11px;font-weight:500;color:var(--text2);white-space:nowrap">{{ t.fontSize }}</span>
+            </button>
+            <button onClick="{{ openViewSheet }}" aria-label="{{ t.view }}" style="width:56px;border:0;background:transparent;color:var(--text);cursor:pointer;flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:3px;padding:0">
+              <span style="width:44px;height:44px;border-radius:22px;background:var(--surface);display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="3" y="4" width="18" height="6" rx="1.5"></rect><rect x="3" y="14" width="8" height="6" rx="1.5"></rect><rect x="13" y="14" width="8" height="6" rx="1.5"></rect></svg></span><span style="font-size:11px;font-weight:500;color:var(--text2);white-space:nowrap">{{ t.viewShort }}</span>
+            </button>
+            <button onClick="{{ onMain }}" disabled="{{ mainDisabled }}" style="{{ mainStyle }}">
+              <sc-if value="{{ showPauseIcon }}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="4" width="5" height="16" rx="1.5"></rect><rect x="14" y="4" width="5" height="16" rx="1.5"></rect></svg></sc-if>
+              <sc-if value="{{ showPlayIcon }}" hint-placeholder-val="{{ true }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15a1 1 0 0 0 1.5.9l12-7.5a1 1 0 0 0 0-1.7l-12-7.5A1 1 0 0 0 7 4.5z"></path></svg></sc-if>
+              <sc-if value="{{ showSpinIcon }}" hint-placeholder-val="{{ false }}"><span style="width:16px;height:16px;border-radius:50%;border:2px solid currentColor;border-top-color:transparent;animation:snSpin .8s linear infinite;display:inline-block"></span></sc-if>
+              <span style="white-space:nowrap">{{ mainLabel }}</span>
+            </button>
+            <button onClick="{{ onEnd }}" disabled="{{ endDisabled }}" aria-label="{{ t.end }}" style="{{ endStyle }}">
+              <span style="width:44px;height:44px;border-radius:22px;background:var(--surface);display:flex;align-items:center;justify-content:center"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="3"></rect></svg></span><span style="font-size:11px;font-weight:500;white-space:nowrap">{{ t.end }}</span>
+            </button>
+          </div>
+          <sc-if value="{{ isStage }}" hint-placeholder-val="{{ false }}">
+          <button onClick="{{ toggleStageControls }}" aria-label="{{ t.collapse }}" style="align-self:center;min-width:44px;height:32px;border:0;background:transparent;color:var(--text3);cursor:pointer;display:flex;align-items:center;justify-content:center"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg></button>
+          </sc-if>
+        </div>
+        </sc-if>
+        <sc-if value="{{ showStageHandle }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;justify-content:center;padding:4px 16px 36px">
+          <button onClick="{{ toggleStageControls }}" aria-label="{{ t.expand }}" style="min-width:64px;height:44px;border:0;border-radius:22px;background:var(--surface);color:var(--text2);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:6px;padding:0 14px;font-size:13px;font-weight:600"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"></path></svg><span>{{ t.expand }}</span></button>
+        </div>
+        </sc-if>
+        </div>
+        </sc-if>
+      </div>
+      </sc-if>
+
+      <!-- ═══════ SETTINGS ═══════ -->
+      <sc-if value="{{ isSettings }}" hint-placeholder-val="{{ false }}">
+      <div data-screen-label="Settings" style="flex:1;min-height:0;display:flex;flex-direction:column">
+        <div style="display:grid;grid-template-columns:1fr auto 1fr;align-items:center;padding:54px 8px 0;height:98px;box-sizing:border-box">
+          <button onClick="{{ goBack }}" style="justify-self:start;min-height:44px;padding:0 8px;border:0;background:transparent;color:var(--accent);font-size:17px;display:flex;align-items:center;gap:2px;cursor:pointer"><svg width="14" height="22" viewBox="0 0 14 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11 3L3 12l8 9"></path></svg><span style="white-space:nowrap">{{ t.back }}</span></button>
+          <div style="font-size:17px;font-weight:600;white-space:nowrap;letter-spacing:-.01em">{{ t.settings }}</div>
+          <div></div>
+        </div>
+        <div class="sn-scroll" style="flex:1;min-height:0;overflow-y:auto;padding:10px 16px 48px;display:flex;flex-direction:column;gap:22px">
+
+          <!-- SONIOX API -->
+          <section style="display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:13px;color:var(--text3);padding:0 16px;letter-spacing:.02em">{{ t.s.api }}</div>
+            <div style="background:var(--surface);border-radius:14px;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:4px;padding:4px 4px 4px 16px;min-height:50px;border-bottom:0.5px solid var(--sep)">
+                <input type="{{ keyInputType }}" value="{{ apiKey }}" onChange="{{ onKeyChange }}" placeholder="{{ t.s.keyPh }}" aria-label="{{ t.s.key }}" autocomplete="off" spellcheck="false" style="flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--text);font-size:17px;font-family:ui-monospace,Menlo,monospace;padding:8px 0"></input>
+                <sc-if value="{{ noKey }}" hint-placeholder-val="{{ true }}"><button onClick="{{ pasteKey }}" style="min-height:44px;padding:0 12px;border:0;background:transparent;color:var(--accent);font-size:16px;font-weight:500;cursor:pointer">{{ t.s.paste }}</button></sc-if>
+                <sc-if value="{{ hasKey }}" hint-placeholder-val="{{ false }}">
+                <button onClick="{{ toggleKeyVisible }}" aria-label="{{ keyVisLabel }}" style="width:44px;height:44px;border:0;background:transparent;color:var(--accent);display:flex;align-items:center;justify-content:center;cursor:pointer">
+                  <sc-if value="{{ keyVisible }}" hint-placeholder-val="{{ false }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle><path d="M4 4l16 16"></path></svg></sc-if>
+                  <sc-if value="{{ keyHidden }}" hint-placeholder-val="{{ true }}"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg></sc-if>
+                </button>
+                </sc-if>
+              </div>
+              <sc-if value="{{ hasKey }}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 6px 0 16px;min-height:50px;border-bottom:0.5px solid var(--sep)">
+                <button onClick="{{ checkKey }}" disabled="{{ checkDisabled }}" style="{{ checkRowStyle }}">{{ t.s.check }}</button>
+                <div style="{{ keyStatusStyle }}">
+                  <sc-if value="{{ keyChecking }}" hint-placeholder-val="{{ false }}"><span style="width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-top-color:transparent;animation:snSpin .8s linear infinite;display:inline-block;flex-shrink:0"></span></sc-if>
+                  <sc-if value="{{ keyValid }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"></path></svg></sc-if>
+                  <sc-if value="{{ keyBad }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3L2 20h20L12 3z"></path><path d="M12 10v4M12 17.5v.5"></path></svg></sc-if>
+                  <span>{{ keyStatusText }}</span>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:4px;padding:0 6px;min-height:50px">
+                <button onClick="{{ replaceKey }}" style="min-height:44px;padding:0 10px;border:0;background:transparent;color:var(--accent);font-size:16px;cursor:pointer">{{ t.s.replace }}</button>
+                <button onClick="{{ clearKey }}" style="min-height:44px;padding:0 10px;border:0;background:transparent;color:var(--danger);font-size:16px;cursor:pointer">{{ t.s.delete }}</button>
+              </div>
+              </sc-if>
+              <sc-if value="{{ noKey }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;align-items:center;gap:8px;padding:0 16px;min-height:44px;font-size:14px;color:var(--text3);white-space:nowrap">{{ keyStatusText }}</div>
+              </sc-if>
+            </div>
+          </section>
+
+          <!-- NGÔN NGỮ -->
+          <section style="display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:13px;color:var(--text3);padding:0 16px;letter-spacing:.02em">{{ t.s.lang }}</div>
+            <div style="background:var(--surface);border-radius:14px;overflow:hidden">
+              <div style="display:flex;flex-direction:column;gap:10px;padding:12px 16px 14px">
+                <div style="font-size:17px">{{ t.s.uiLang }}</div>
+                <div role="radiogroup" style="display:flex;background:var(--surface2);border-radius:10px;padding:2px;gap:2px">
+                  <sc-for list="{{ langOpts }}" as="o" hint-placeholder-count="2"><button role="radio" aria-checked="{{ o.selected }}" onClick="{{ o.onSelect }}" style="{{ o.style }}">{{ o.label }}</button></sc-for>
+                </div>
+              </div>
+              <div style="height:0.5px;background:var(--sep);margin-left:16px"></div>
+              <div style="padding:12px 16px 14px;display:flex;flex-direction:column;gap:12px">
+              <div style="font-size:17px">{{ t.s.convLang }}</div>
+              <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px">
+                <sc-for list="{{ langFieldsTop }}" as="f" hint-placeholder-count="2">
+                  <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+                    <div style="font-size:13px;color:var(--text3);font-weight:500">{{ f.label }}</div>
+                    <button onClick="{{ f.onOpen }}" aria-label="{{ f.aria }}" style="display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:44px;padding:0 10px 0 12px;border:0;border-radius:10px;background:var(--surface2);color:var(--text);font-size:16px;cursor:pointer;text-align:left;min-width:0"><span style="flex:1;min-width:0;overflow-wrap:anywhere;line-height:1.25">{{ f.value }}</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M6 9l6 6 6-6"></path></svg></button>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px;min-width:0">
+                <div style="font-size:13px;color:var(--text3);font-weight:500">{{ t.lang.showFor }}</div>
+                <button onClick="{{ openTargetField }}" aria-label="{{ t.lang.showFor }}" style="display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:44px;padding:0 10px 0 12px;border:0;border-radius:10px;background:var(--surface2);color:var(--text);font-size:16px;cursor:pointer;text-align:left"><span style="flex:1;min-width:0;overflow-wrap:anywhere;line-height:1.25">{{ targetName }}</span><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M6 9l6 6 6-6"></path></svg></button>
+                <div style="font-size:13px;color:var(--text3);line-height:1.4">{{ t.lang.showForNote }}</div>
+              </div>
+              <sc-if value="{{ hasPendingPair }}" hint-placeholder-val="{{ false }}">
+              <div style="font-size:13px;color:var(--warn);line-height:1.4">{{ t.lang.pendingLive }}</div>
+              </sc-if>
+            </div>
+          </section>
+
+          <!-- HIỂN THỊ -->
+          <section style="display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:13px;color:var(--text3);padding:0 16px;letter-spacing:.02em">{{ t.s.display }}</div>
+            <div style="background:var(--surface);border-radius:14px;overflow:hidden">
+              <button onClick="{{ openViewSheet }}" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 16px;min-height:50px;border:0;border-bottom:0.5px solid var(--sep);background:transparent;color:var(--text);font-size:17px;cursor:pointer;text-align:left">
+                <span>{{ t.s.viewMode }}</span>
+                <span style="display:flex;align-items:center;gap:6px;color:var(--text3);font-size:16px"><span>{{ currentViewLabel }}</span><svg width="8" height="14" viewBox="0 0 8 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l6 6-6 6"></path></svg></span>
+              </button>
+              <sc-if value="{{ isCaptionsMode }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 16px;min-height:50px;border-bottom:0.5px solid var(--sep)">
+                <div style="font-size:17px">{{ t.s.emphRow }}</div>
+                <button role="switch" aria-checked="{{ emphasizeLatest }}" aria-label="{{ t.s.emphRow }}" onClick="{{ onToggleEmph }}" style="{{ emphTrack }}"><span style="{{ emphKnob }}"></span></button>
+              </div>
+              </sc-if>
+              <div style="display:flex;flex-direction:column;gap:10px;padding:12px 16px;border-bottom:0.5px solid var(--sep)">
+                <div style="font-size:17px">{{ t.s.appearance }}</div>
+                <div role="radiogroup" style="display:flex;background:var(--surface2);border-radius:10px;padding:2px;gap:2px">
+                  <sc-for list="{{ themeOpts }}" as="o" hint-placeholder-count="3"><button role="radio" aria-checked="{{ o.selected }}" onClick="{{ o.onSelect }}" style="{{ o.style }}">{{ o.label }}</button></sc-for>
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:8px;padding:12px 16px 14px">
+                <div style="display:flex;justify-content:space-between;align-items:baseline;gap:12px"><div style="font-size:17px;white-space:nowrap">{{ t.s.fontLabel }}</div><div style="font-size:15px;color:var(--text3);white-space:nowrap">{{ fontName }}</div></div>
+                <div style="display:flex;align-items:center;gap:12px">
+                  <span aria-hidden="true" style="font-size:13px;color:var(--text3);width:20px;text-align:center">A</span>
+                  <input type="range" class="sn-range" min="0" max="5" step="1" value="{{ fontIdx }}" onChange="{{ onFontRange }}" aria-label="{{ t.s.fontLabel }}" aria-valuetext="{{ fontName }}" style="flex:1;accent-color:var(--accent)"></input>
+                  <span aria-hidden="true" style="font-size:22px;color:var(--text3);width:20px;text-align:center">A</span>
+                </div>
+                <div style="background:var(--bg);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:4px">
+                  <div style="font-size:calc(14px*var(--fs));line-height:1.35;color:var(--text2)">{{ t.previewSrc }}</div>
+                  <div style="font-size:calc(20px*var(--fs));line-height:1.25;font-weight:600;color:var(--text);text-wrap:pretty">{{ t.previewTgt }}</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- GIỌNG NÓI -->
+          <section style="display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:13px;color:var(--text3);padding:0 16px;letter-spacing:.02em">{{ t.s.voice }}</div>
+            <div style="background:var(--surface);border-radius:14px;overflow:hidden">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 16px;min-height:50px;border-bottom:0.5px solid var(--sep)">
+                <div style="font-size:17px">{{ t.s.ttsRow }}</div>
+                <button role="switch" aria-checked="{{ tts }}" aria-label="{{ t.s.ttsRow }}" onClick="{{ onToggleTts }}" style="{{ ttsTrack }}"><span style="{{ ttsKnob }}"></span></button>
+              </div>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 16px;min-height:50px">
+                <div style="font-size:17px">{{ t.s.diarRow }}</div>
+                <button role="switch" aria-checked="{{ diarization }}" aria-label="{{ t.s.diarRow }}" onClick="{{ onToggleDiar }}" style="{{ diarTrack }}"><span style="{{ diarKnob }}"></span></button>
+              </div>
+            </div>
+            <div style="font-size:13px;color:var(--text3);padding:0 16px;line-height:1.4">{{ t.s.voiceFoot }}</div>
+          </section>
+        </div>
+      </div>
+      </sc-if>
+
+      <!-- ═══════ Overlays: sheets / alert / toast ═══════ -->
+      <sc-if value="{{ hasSheet }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;inset:0;z-index:40;display:flex;flex-direction:column;justify-content:flex-end">
+        <div onClick="{{ closeSheet }}" style="position:absolute;inset:0;background:var(--scrim)"></div>
+        <div role="dialog" aria-modal="true" style="position:relative;background:var(--bg);border-radius:22px 22px 0 0;padding:8px 16px 40px;display:flex;flex-direction:column;gap:14px;animation:snUp .28s cubic-bezier(.2,.8,.2,1);animation-duration:var(--dur);max-height:calc(100% - 72px);box-sizing:border-box;overflow-y:auto;-webkit-overflow-scrolling:touch" class="sn-scroll">
+          <div aria-hidden="true" style="width:36px;height:5px;border-radius:3px;background:var(--sep);align-self:center"></div>
+
+          <sc-if value="{{ isViewSheet }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;justify-content:space-between"><div style="font-size:20px;font-weight:700;white-space:nowrap">{{ t.view }}</div><button onClick="{{ closeSheet }}" aria-label="{{ t.cancel }}" style="width:44px;height:44px;border:0;border-radius:22px;background:var(--surface);color:var(--text2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div>
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px">
+            <sc-for list="{{ viewOpts }}" as="o" hint-placeholder-count="4">
+              <button onClick="{{ o.onSelectClose }}" aria-pressed="{{ o.selected }}" style="{{ o.cardStyle }}">
+                <div style="height:92px;border-radius:10px;background:var(--bg);padding:10px;display:flex;flex-direction:column;gap:5px;overflow:hidden">
+                  <sc-if value="{{ o.isBubbles }}" hint-placeholder-val="{{ false }}">
+                    <div style="width:62%;height:22px;border-radius:8px;background:var(--surface2);align-self:flex-start"></div>
+                    <div style="width:62%;height:22px;border-radius:8px;background:var(--surface2);align-self:flex-end"></div>
+                    <div style="width:55%;height:18px;border-radius:8px;background:var(--surface2);align-self:flex-start"></div>
+                  </sc-if>
+                  <sc-if value="{{ o.isCaptions }}" hint-placeholder-val="{{ false }}">
+                    <div style="width:80%;height:5px;border-radius:3px;background:var(--surface2)"></div>
+                    <div style="width:60%;height:5px;border-radius:3px;background:var(--surface2)"></div>
+                    <div style="flex:1"></div>
+                    <div style="width:55%;height:6px;border-radius:3px;background:var(--surface2)"></div>
+                    <div style="width:95%;height:12px;border-radius:4px;background:var(--text3)"></div>
+                    <div style="width:70%;height:12px;border-radius:4px;background:var(--text3)"></div>
+                  </sc-if>
+                  <sc-if value="{{ o.isStage }}" hint-placeholder-val="{{ false }}">
+                    <div style="width:40%;height:6px;border-radius:3px;background:var(--surface2)"></div>
+                    <div style="flex:1"></div>
+                    <div style="width:100%;height:20px;border-radius:5px;background:var(--text3)"></div>
+                    <div style="width:78%;height:20px;border-radius:5px;background:var(--text3)"></div>
+                  </sc-if>
+                  <sc-if value="{{ o.isFacing }}" hint-placeholder-val="{{ false }}">
+                    <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-start;gap:4px;transform:rotate(180deg)"><div style="width:90%;height:12px;border-radius:4px;background:var(--text3)"></div><div style="width:50%;height:5px;border-radius:3px;background:var(--surface2)"></div></div>
+                    <div style="height:2px;background:var(--sep);margin:2px -10px"></div>
+                    <div style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:4px"><div style="width:50%;height:5px;border-radius:3px;background:var(--surface2)"></div><div style="width:90%;height:12px;border-radius:4px;background:var(--text3)"></div></div>
+                  </sc-if>
+                  <sc-if value="{{ o.isScript }}" hint-placeholder-val="{{ false }}">
+                    <div style="display:flex;gap:6px"><div style="width:14px;height:5px;border-radius:3px;background:var(--surface2)"></div><div style="flex:1;display:flex;flex-direction:column;gap:3px"><div style="width:70%;height:5px;border-radius:3px;background:var(--surface2)"></div><div style="width:90%;height:7px;border-radius:3px;background:var(--text3)"></div></div></div>
+                    <div style="display:flex;gap:6px"><div style="width:14px;height:5px;border-radius:3px;background:var(--surface2)"></div><div style="flex:1;display:flex;flex-direction:column;gap:3px"><div style="width:55%;height:5px;border-radius:3px;background:var(--surface2)"></div><div style="width:80%;height:7px;border-radius:3px;background:var(--text3)"></div></div></div>
+                    <div style="display:flex;gap:6px"><div style="width:14px;height:5px;border-radius:3px;background:var(--surface2)"></div><div style="flex:1;display:flex;flex-direction:column;gap:3px"><div style="width:65%;height:5px;border-radius:3px;background:var(--surface2)"></div><div style="width:95%;height:7px;border-radius:3px;background:var(--text3)"></div></div></div>
+                  </sc-if>
+                </div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:6px"><div style="font-size:15px;font-weight:600;color:var(--text);white-space:nowrap">{{ o.label }}</div><sc-if value="{{ o.selected }}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"></path></svg></sc-if></div>
+                <div style="font-size:12px;color:var(--text3);line-height:1.3">{{ o.desc }}</div>
+              </button>
+            </sc-for>
+          </div>
+          </sc-if>
+
+          <sc-if value="{{ isFontSheet }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;justify-content:space-between"><div style="font-size:20px;font-weight:700;white-space:nowrap">{{ t.fontSize }}</div><button onClick="{{ closeSheet }}" aria-label="{{ t.cancel }}" style="width:44px;height:44px;border:0;border-radius:22px;background:var(--surface);color:var(--text2);display:flex;align-items:center;justify-content:center;cursor:pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div>
+          <div style="display:flex;align-items:center;gap:12px">
+            <button onClick="{{ fontDec }}" disabled="{{ fontMin }}" aria-label="−" style="width:48px;height:48px;border-radius:24px;border:0;background:var(--surface);color:var(--text);font-size:15px;font-weight:600;cursor:pointer">A</button>
+            <input type="range" class="sn-range" min="0" max="5" step="1" value="{{ fontIdx }}" onChange="{{ onFontRange }}" aria-label="{{ t.fontSize }}" aria-valuetext="{{ fontName }}" style="flex:1;accent-color:var(--accent)"></input>
+            <button onClick="{{ fontInc }}" disabled="{{ fontMax }}" aria-label="+" style="width:48px;height:48px;border-radius:24px;border:0;background:var(--surface);color:var(--text);font-size:24px;font-weight:600;cursor:pointer">A</button>
+          </div>
+          <div style="text-align:center;font-size:14px;color:var(--text3)">{{ fontName }}</div>
+          <div style="background:var(--surface);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:4px">
+            <div style="font-size:calc(14px*var(--fs));line-height:1.35;color:var(--text2)">{{ t.previewSrc }}</div>
+            <div style="font-size:calc(22px*var(--fs));line-height:1.25;font-weight:600;text-wrap:pretty">{{ t.previewTgt }}</div>
+          </div>
+          </sc-if>
+
+          <sc-if value="{{ isPairSheet }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;align-items:center;justify-content:space-between"><div style="font-size:20px;font-weight:700;overflow-wrap:anywhere">{{ fieldTitle }}</div><button onClick="{{ closeSheet }}" aria-label="{{ t.cancel }}" style="width:44px;height:44px;border:0;border-radius:22px;background:var(--surface);color:var(--text2);display:flex;align-items:center;justify-content:center;cursor:pointer;flex-shrink:0"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"></path></svg></button></div>
+          <div style="display:flex;align-items:center;gap:8px;background:var(--surface);border-radius:12px;padding:0 12px;min-height:40px">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--text3)" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>
+            <input type="search" value="{{ langQuery }}" onChange="{{ onLangQuery }}" placeholder="{{ t.lang.search }}" aria-label="{{ t.lang.search }}" style="flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--text);font-size:16px;padding:8px 0"></input>
+          </div>
+          <div style="background:var(--surface);border-radius:14px;overflow:hidden;display:flex;flex-direction:column">
+            <sc-if value="{{ showAutoOption }}" hint-placeholder-val="{{ false }}">
+              <button role="option" aria-selected="{{ autoOpt.selected }}" onClick="{{ autoOpt.onPick }}" style="{{ autoOpt.style }}">
+                <span style="display:flex;flex-direction:column;gap:1px;flex:1;min-width:0;text-align:left"><span style="font-size:17px">{{ t.lang.auto }}</span><span style="font-size:13px;color:var(--text3)">{{ t.lang.autoSub }}</span></span>
+                <sc-if value="{{ autoOpt.selected }}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M5 12l5 5L20 7"></path></svg></sc-if>
+              </button>
+            </sc-if>
+            <sc-for list="{{ langList }}" as="o" hint-placeholder-count="6">
+              <button role="option" aria-selected="{{ o.selected }}" aria-disabled="{{ o.disabled }}" disabled="{{ o.disabled }}" onClick="{{ o.onPick }}" style="{{ o.style }}">
+                <span style="display:flex;flex-direction:column;gap:1px;flex:1;min-width:0;text-align:left"><span style="font-size:17px;overflow-wrap:anywhere">{{ o.name }}</span><span style="font-size:13px;color:var(--text3)">{{ o.native }}</span></span>
+                <sc-if value="{{ o.selected }}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M5 12l5 5L20 7"></path></svg></sc-if>
+                <sc-if value="{{ o.disabled }}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:var(--text3);white-space:nowrap;flex-shrink:0">{{ o.disabledNote }}</span></sc-if>
+              </button>
+            </sc-for>
+            <sc-if value="{{ langListEmpty }}" hint-placeholder-val="{{ false }}"><div style="padding:14px 16px;font-size:15px;color:var(--text3)">{{ t.lang.noResult }}</div></sc-if>
+          </div>
+          <sc-if value="{{ hasPendingPair }}" hint-placeholder-val="{{ false }}"><div style="font-size:13px;color:var(--warn);line-height:1.4;padding:0 4px">{{ t.lang.pendingLive }}</div></sc-if>
+          </sc-if>
+
+          <sc-if value="{{ isEndSheet }}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:20px;font-weight:700">{{ t.endTitle }}</div>
+          <div style="font-size:15px;line-height:1.4;color:var(--text2)">{{ t.endBody }}</div>
+          <div style="font-size:13px;color:var(--text3)">{{ endedText }}</div>
+          <button onClick="{{ confirmEnd }}" style="min-height:52px;border:0;border-radius:14px;background:var(--danger);color:#fff;font-size:17px;font-weight:600;cursor:pointer">{{ t.endConfirm }}</button>
+          <button onClick="{{ closeSheet }}" style="min-height:52px;border:0;border-radius:14px;background:var(--surface);color:var(--accent);font-size:17px;font-weight:600;cursor:pointer">{{ t.cancel }}</button>
+          </sc-if>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ showAlert }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;inset:0;z-index:50;background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:24px">
+        <div role="alertdialog" aria-modal="true" style="width:270px;background:var(--surface);border-radius:14px;overflow:hidden;text-align:center;display:flex;flex-direction:column">
+          <div style="padding:20px 16px 16px;display:flex;flex-direction:column;gap:6px">
+            <div style="font-size:17px;font-weight:600;line-height:1.3">{{ t.alertTitle }}</div>
+            <div style="font-size:13px;line-height:1.4;color:var(--text2)">{{ t.alertBody }}</div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;border-top:0.5px solid var(--sep)">
+            <button onClick="{{ denyMic }}" style="min-height:44px;border:0;background:transparent;color:var(--accent);font-size:17px;cursor:pointer;border-right:0.5px solid var(--sep)">{{ t.deny }}</button>
+            <button onClick="{{ allowMic }}" style="min-height:44px;border:0;background:transparent;color:var(--accent);font-size:17px;font-weight:600;cursor:pointer">{{ t.allow }}</button>
+          </div>
+        </div>
+      </div>
+      </sc-if>
+
+      <sc-if value="{{ hasToast }}" hint-placeholder-val="{{ false }}">
+      <div role="status" style="position:absolute;left:16px;right:16px;bottom:120px;z-index:60;padding:12px 16px;border-radius:14px;background:var(--text);color:var(--bg);font-size:14px;line-height:1.35;text-align:center;box-shadow:0 8px 24px rgba(0,0,0,.25)">{{ toast }}</div>
+      </sc-if>
+    </div>
+    </div>
+    </x-import>
+  </div>
+
+  <!-- ─── Right: simulation panel (not part of the product UI) ─── -->
+  <sc-if value="{{ showSim }}" hint-placeholder-val="{{ true }}">
+  <aside style="position:sticky;top:24px;width:300px;flex:0 0 auto;background:#fff;border-radius:16px;border:1px solid rgba(0,0,0,.08);padding:18px;display:flex;flex-direction:column;gap:14px;font-size:13px;color:#222">
+    <div style="display:flex;flex-direction:column;gap:2px"><div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#8a8a8f">BẢNG MÔ PHỎNG</div><div style="color:#6b6b70;line-height:1.4">Điều khiển tình huống, tách khỏi giao diện sản phẩm.</div></div>
+    <div style="display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-variant-numeric:tabular-nums;background:#F5F5F7;border-radius:10px;padding:10px 12px">
+      <span style="color:#8a8a8f">Phiên</span><strong>{{ simSession }}</strong>
+      <span style="color:#8a8a8f">Kiểu</span><strong>{{ simView }}</strong>
+      <span style="color:#8a8a8f">Khóa</span><strong>{{ simKey }}</strong>
+      <span style="color:#8a8a8f">Đoạn</span><strong>{{ simSegs }}</strong>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#8a8a8f">TÌNH HUỐNG</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <button onClick="{{ simNetLoss }}" style="{{ simBtn }}">Mất mạng 3,5 s</button>
+        <button onClick="{{ simAuthError }}" style="{{ simBtn }}">Lỗi xác thực API</button>
+        <button onClick="{{ simDenyMic }}" style="{{ simBtn }}">Từ chối quyền mic</button>
+        <button onClick="{{ simResetMic }}" style="{{ simBtn }}">Hỏi lại quyền mic</button>
+        <button onClick="{{ simFastForward }}" style="{{ simBtn }}">Tua hết hội thoại</button>
+        <button onClick="{{ simReplay }}" style="{{ simBtn }}">Chạy lại hội thoại</button>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#8a8a8f">KIỂM TRA NHANH</div>
+      <sc-for list="{{ presets }}" as="p" hint-placeholder-count="5"><button onClick="{{ p.onRun }}" style="{{ simBtn }}">{{ p.label }}</button></sc-for>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <div style="font-size:11px;font-weight:700;letter-spacing:.06em;color:#8a8a8f">MÔI TRƯỜNG</div>
+      <sc-for list="{{ simToggles }}" as="o" hint-placeholder-count="5">
+        <button onClick="{{ o.onToggle }}" aria-pressed="{{ o.on }}" style="{{ o.style }}"><span>{{ o.label }}</span><span style="{{ o.pill }}">{{ o.state }}</span></button>
+      </sc-for>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button onClick="{{ simSpeed1 }}" style="{{ speed1Style }}">Tốc độ 1×</button>
+      <button onClick="{{ simSpeed2 }}" style="{{ speed2Style }}">Tốc độ 2×</button>
+    </div>
+    <button onClick="{{ simReset }}" style="min-height:40px;border:1px solid rgba(0,0,0,.12);border-radius:10px;background:#fff;color:#c0392b;font-size:13px;font-weight:600;cursor:pointer">Đặt lại prototype</button>
+  </aside>
+  </sc-if>
+</div>
+
+<!-- ─── Handoff ─── -->
+<sc-if value="{{ showHandoff }}" hint-placeholder-val="{{ true }}">
+<section style="max-width:1000px;margin:0 auto;padding:8px 28px 80px;display:flex;flex-direction:column;gap:28px;font-size:14px;line-height:1.55;color:#2a2a2e">
+  <div style="border-top:1px solid rgba(0,0,0,.1);padding-top:28px;display:flex;flex-direction:column;gap:4px">
+    <div style="font-size:11px;font-weight:700;letter-spacing:.08em;color:#8a8a8f">HANDOFF · SWIFTUI</div>
+    <h2 style="margin:0;font-size:22px;font-weight:700">Sermiva — ghi chú triển khai</h2>
+    <p style="margin:0;color:#5a5a60">Prototype này mô phỏng toàn bộ streaming, kiểm tra khóa và TTS. Các mục đánh dấu <strong style="color:#0E7C6B">[mô phỏng]</strong> chỉ tồn tại trong prototype; <strong style="color:#5352C9">[thật]</strong> cần triển khai và kiểm thử với Soniox.</p>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px 40px">
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <h3 style="margin:0;font-size:15px">1. Cấu trúc màn hình</h3>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px">
+        <li><code>SetupView</code>: nhập khóa, kiểm tra, hoặc vào demo. Hiện khi Keychain chưa có khóa.</li>
+        <li><code>ConversationView</code>: TopBar (cặp ngôn ngữ, trạng thái, Settings) · Banner (mạng / xác thực / quyền mic) · <code>TranscriptView</code> theo <code>DisplayStyle</code> · TTSBar · ControlBar.</li>
+        <li><code>TranscriptView</code> = 1 trong 4: <code>BubblesLayout</code>, <code>CaptionsLayout</code>, <code>StageLayout</code>, <code>ScriptLayout</code>. Tất cả đọc chung <code>SessionStore.segments</code>; đổi kiểu chỉ đổi view, không đụng mic.</li>
+        <li><code>SettingsView</code>: List grouped, thứ tự cố định: Soniox API → Ngôn ngữ → Hiển thị → Giọng nói.</li>
+        <li>Sheets: <code>DisplayStylePicker</code> (4 kiểu + biến thể Sân khấu “Đối diện”), <code>FontSizeSheet</code>, <code>EndSessionConfirm</code>. Settings mở cùng sheet này; lựa chọn đồng bộ qua <code>SessionStore.displayStyle</code>.</li>
+        <li><code>FacingStageLayout</code>: hai vùng đọc, vùng trên <code>rotationEffect(180°)</code>; mỗi vùng hiện câu mới nhất bằng ngôn ngữ của người đọc bên đó, dòng nhỏ là ngôn ngữ kia. Dải giữa giữ mic, Tạm dừng, Đổi bên, Thoát. Cần test cảm ứng trên vùng xoay.</li>
+        <li>Thanh điều khiển nổi trên nội dung; vùng cuộn đệm dưới = chiều cao thực của thanh (đo bằng <code>GeometryReader</code>/safeAreaInset) + home indicator, để câu cuối luôn hiện trọn. Khi “Về trực tiếp” hiện, vùng cuộn thu ngắn 52 pt (không phải đệm nội dung) để nút nằm trong dải riêng, không phủ chữ đang đọc (kể cả màn ngang).</li>
+        <li>Đối diện: safe area đặt trên wrapper không xoay (trên 54 pt theo status bar, dưới 34 pt dọc / 22 pt ngang); hộp cuộn bên trong xoay 180°, nên nội dung không chạm status bar và cuộn được toàn câu. Không tự thu cỡ chữ.</li>
+        <li>Ghi chú đã đưa khỏi UI: khóa lưu Keychain; prototype dùng khóa giả & kết quả mô phỏng; cỡ chữ native theo Dynamic Type.</li>
+        <li><code>LanguageConfig</code> = ba giá trị độc lập: <code>me</code> (ngôn ngữ Bạn nói, cụ thể), <code>guest</code> (ngôn ngữ Khách nói: <code>.auto</code> hoặc cụ thể), <code>target</code> (ngôn ngữ hiển thị cho Khách, cụ thể; không tự đổi theo <code>guest</code>). Mặc định vi / auto / en. Ràng buộc: me ≠ target, guest ≠ me. Lưu <code>@AppStorage("languageConfig")</code>. Mỗi ô mở một sheet chọn (tìm kiếm, dấu chọn; ô Khách có thêm “Tự nhận diện”). Đổi khi phiên đang chạy → <code>pendingConfig</code>, chú thích + banner, áp dụng ở stream tiếp theo.</li>
+        <li>Điều phối dịch <strong style="color:#0E7C6B">[mô phỏng]</strong>: đoạn có language-ID = me → dịch sang target; đoạn khác → dịch sang me; guest cụ thể chỉ thu hẹp nhận diện. TTS đọc theo đích tương ứng. <strong style="color:#5352C9">[thật]</strong> “Bạn / Khách” là nhãn cấu hình trải nghiệm, không suy ra danh tính người nói từ ngôn ngữ; nhãn A/B vẫn từ diarization và có thể “Chưa xác định”. Việc gán người nói và định tuyến dịch theo language-ID từng đoạn thuộc lớp tích hợp Soniox; không giả định một cấu hình two-way làm được toàn bộ, không thêm bước thiết lập danh tính. Đoạn chưa có language-ID hiện “Đang nhận diện ngôn ngữ”. Danh sách ngôn ngữ thật lấy từ khả năng của model; prototype dùng 12 ngôn ngữ mẫu và hai kịch bản mô phỏng (quán cà phê Việt–Anh; Khách nói Nhật).</li>
+      </ul>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <h3 style="margin:0;font-size:15px">2. Máy trạng thái phiên</h3>
+      <p style="margin:0"><code>idle → requestingMic → connecting → listening ⇄ paused → ended</code>. Nhánh lỗi: <code>micDenied</code>, <code>reconnecting</code> (giữ segments, mic vẫn giữ quyền), <code>authError</code> (dừng stream, mở Settings). Nút chính chỉ ánh xạ từ trạng thái, không giữ state riêng.</p>
+      <p style="margin:0">Xin quyền micro đúng lúc nhấn Bắt đầu lần đầu; bị từ chối → banner với <code>UIApplication.openSettingsURLString</code>.</p>
+      <p style="margin:0"><strong style="color:#5352C9">[thật]</strong> Đổi cấu hình cần khởi động lại kết nối (cặp ngôn ngữ, diarization): áp dụng khi phiên <code>idle</code>/<code>ended</code>; nếu đang chạy, hiện ghi chú “Áp dụng ở phiên sau” thay vì hứa cập nhật tức thì. Khóa API mới: áp dụng ngay bằng cách đóng và mở lại stream sau khi câu hiện tại hoàn tất.</p>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <h3 style="margin:0;font-size:15px">3. Hành vi streaming</h3>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px">
+        <li><code>Segment { id, speaker: String?, lang, source, target, isFinal, startedAt }</code>. Partial cập nhật tại chỗ theo <code>id</code>; final khóa <code>source</code>, sau đó điền <code>target</code>.</li>
+        <li>Không tô mờ partial; dùng chỉ báo “Đang cập nhật” + caret. Không karaoke từng từ.</li>
+        <li>Bản dịch chỉ hiện khi câu hoàn tất <strong style="color:#0E7C6B">[mô phỏng ~0,5 s]</strong>. <strong style="color:#5352C9">[thật]</strong> nếu Soniox trả translation token theo partial, cân nhắc hiện nhưng chỉ đọc TTS bản final.</li>
+        <li><code>speaker == nil</code> → “Chưa xác định”. Không tự gán A/B. Không ràng buộc A = Việt, B = Anh.</li>
+        <li>Nói chồng: chỉ hiện nhãn khi API có tín hiệu (bật trong bảng mô phỏng). Mặc định chỉ thấy các đoạn partial cạnh nhau, có thể thiếu nhãn người nói.</li>
+        <li>Cuộn: <code>ScrollView</code> + theo dõi offset; tự cuộn chỉ khi người dùng ở cuối. Ngược lại hiện “Về trực tiếp” với số đoạn mới.</li>
+        <li>Mất mạng: giữ segments, hiện banner, thử lại với backoff; resume stream không tạo segment trùng (dedupe theo <code>id</code>).</li>
+      </ul>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <h3 style="margin:0;font-size:15px">4. Đọc bản dịch (TTS)</h3>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px">
+        <li>Hàng đợi tuần tự, chỉ nhận <code>target</code> của segment final; không phát lại khi partial sửa.</li>
+        <li>Chờ khi có segment chưa final (đang có người nói) rồi mới phát. Nút Ngắt xóa hàng đợi.</li>
+        <li><strong style="color:#5352C9">[thật]</strong> Chống thu lại tiếng loa vào mic: dùng <code>AVAudioSession</code> mode <code>.voiceChat</code> hoặc echo cancellation, tạm giảm độ nhạy khi phát, hoặc đánh dấu khoảng thời gian phát để bỏ qua nhận dạng. Phải kiểm thử trên thiết bị thật, cả loa ngoài.</li>
+      </ul>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <h3 style="margin:0;font-size:15px">5. Accessibility</h3>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px">
+        <li>Cỡ chữ: 6 mức, nhân hệ số lên cả nguyên văn và bản dịch; native dùng <code>@ScaledMetric</code> + Dynamic Type đến AX5. Không hard-code chiều cao thẻ.</li>
+        <li>Trạng thái mic: icon + chữ + <code>accessibilityLabel</code>, <code>.updatesFrequently</code> cho vùng partial; không chỉ dùng màu.</li>
+        <li>Mọi nút icon có nhãn; vùng chạm ≥ 44 pt; giảm chuyển động theo <code>accessibilityReduceMotion</code> (prototype: token <code>--dur</code>, <code>--pulse</code>).</li>
+        <li>Người nói: màu phụ trợ + nhãn chữ luôn đi cùng; tắt diarization → bố cục trung tính, không nhãn giả.</li>
+      </ul>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <h3 style="margin:0;font-size:15px">6. Tích hợp Soniox cần kiểm thử</h3>
+      <ul style="margin:0;padding-left:18px;display:flex;flex-direction:column;gap:4px">
+        <li>Realtime WebSocket: cấu hình 2 ngôn ngữ, language identification theo đoạn, translation 2 chiều, diarization. Xác nhận định dạng token final/non-final và thời gian.</li>
+        <li>Khóa API: lưu Keychain, không log, không đưa vào URL. Kiểm tra kết nối = mở stream ngắn rồi đóng; phân biệt 401 (không hợp lệ) với lỗi mạng.</li>
+        <li>Độ trễ mục tiêu: partial &lt; 500 ms, bản dịch final &lt; 1,5 s. Đo trên 4G.</li>
+        <li>Hai người nói chồng: đo tỷ lệ thiếu nhãn người nói; UI đã chấp nhận <code>speaker == nil</code>.</li>
+        <li>Người đổi ngôn ngữ giữa chừng: kiểm tra language ID không kẹt theo người nói.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div style="display:flex;flex-direction:column;gap:10px">
+    <h3 style="margin:0;font-size:15px">7. Design tokens</h3>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:8px 24px;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#3a3a3f">
+      <div>--bg · F2F2F7 / 000000</div><div>--surface · FFFFFF / 1C1C1E</div><div>--surface2 · E5E5EA / 2C2C2E</div>
+      <div>--text · 000 / FFF</div><div>--text2 · 3C3C43 78% / EBEBF5 78%</div><div>--text3 · 3C3C43 55% / EBEBF5 55%</div>
+      <div>--sep · 3C3C43 24% / 545458 60%</div><div>--accent · 007AFF / 0A84FF</div><div>--spA · 0E7C6B / 5FD2BF</div>
+      <div>--spB · 5352C9 / 9D9BFF</div><div>--danger · D70015 / FF453A</div><div>--ok · 248A3D / 30D158</div>
+      <div>--warn · C93400 / FF9F0A</div><div>--fs · 0.85 · 1 · 1.2 · 1.45 · 1.75 · 2.1</div><div>--dur · 200ms (0 khi giảm chuyển động)</div>
+    </div>
+    <p style="margin:0;color:#5a5a60">Type: SF Pro (system). Nguyên văn 14–17 pt × fs, bản dịch 17–26 pt × fs, Sân khấu 22 / 40 pt × fs. Bo góc 14 (card), 22–24 (nút tròn). Không bóng đổ trừ nút nổi “Về trực tiếp”.</p>
+    <p style="margin:0;color:#5a5a60">Component dùng lại: <code>SegmentHeader</code> (nhãn người nói · ngôn ngữ · cờ cập nhật / nói chồng), <code>SegmentText</code> (nguyên văn + bản dịch, phân cấp theo fs), <code>StatusDot</code>, <code>MicIndicator</code>, <code>PrimaryPill</code>, <code>RoundIconButton</code>, <code>SegmentedControl</code>, <code>Toggle</code>, <code>GroupedSection</code>, <code>BottomSheet</code>, <code>Banner</code>.</p>
+  </div>
+</section>
+</sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showSim&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;showHandoff&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;},&quot;skipSetup&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;Prototype&quot;}}">
+const SCALES = [0.85, 1, 1.2, 1.45, 1.75, 2.1];
+// Sample list for the prototype; the real app derives this from the Soniox model's translation capabilities.
+const LANGS = [
+  { code: 'vi', vi: 'Tiếng Việt', en: 'Vietnamese', native: 'Tiếng Việt' },
+  { code: 'en', vi: 'Tiếng Anh', en: 'English', native: 'English' },
+  { code: 'zh', vi: 'Tiếng Trung', en: 'Chinese', native: '中文' },
+  { code: 'ja', vi: 'Tiếng Nhật', en: 'Japanese', native: '日本語' },
+  { code: 'ko', vi: 'Tiếng Hàn', en: 'Korean', native: '한국어' },
+  { code: 'fr', vi: 'Tiếng Pháp', en: 'French', native: 'Français' },
+  { code: 'de', vi: 'Tiếng Đức', en: 'German', native: 'Deutsch' },
+  { code: 'es', vi: 'Tiếng Tây Ban Nha', en: 'Spanish', native: 'Español' },
+  { code: 'th', vi: 'Tiếng Thái', en: 'Thai', native: 'ไทย' },
+  { code: 'id', vi: 'Tiếng Indonesia', en: 'Indonesian', native: 'Bahasa Indonesia' },
+  { code: 'ru', vi: 'Tiếng Nga', en: 'Russian', native: 'Русский' },
+  { code: 'pt', vi: 'Tiếng Bồ Đào Nha', en: 'Portuguese', native: 'Português' },
+];
+const PAIR_KEY = 'sermiva.langcfg';
+// Language config — three independent values:
+//   me:     the language I speak (specific)
+//   guest:  the language the guest speaks ('auto' = detect per segment, or a specific code)
+//   target: the language my speech is shown in for the guest (specific; independent of `guest`)
+// Routing (simulated): speech in `me` → translated to `target`; any other speech → translated to `me`.
+// "Bạn/Khách" are experience labels only; speaker identity (A/B/unknown) still comes from diarization.
+const DEFAULT_CFG = { me: 'vi', guest: 'auto', target: 'en' };
+const validLang = (c) => LANGS.some((l) => l.code === c);
+const loadCfg = () => { try { const p = JSON.parse(localStorage.getItem(PAIR_KEY)); if (p && validLang(p.me) && validLang(p.target) && (p.guest === 'auto' || validLang(p.guest)) && p.me !== p.target && p.guest !== p.me) return p; } catch (e) {} return { ...DEFAULT_CFG }; };
+const sameCfg = (x, y) => x.me === y.me && x.guest === y.guest && x.target === y.target;
+// Demo: guest speaks Japanese → shown in my language (vi); I reply in vi → shown in target (en, or ja when target = ja)
+const DEMO_AUTO = [
+  { type: 'partial', id: 101, speaker: 'B', lang: 'ja', src: 'いらっしゃいませ。' },
+  { type: 'partial', id: 101, src: 'いらっしゃいませ。ご注文は' },
+  { type: 'final', id: 101, src: 'いらっしゃいませ。ご注文はお決まりですか？', tgt: 'Xin chào quý khách. Anh/chị đã chọn món chưa?' },
+  { type: 'partial', id: 102, speaker: 'A', lang: 'vi', src: 'Cho tôi một cà phê' },
+  { type: 'final', id: 102, src: 'Cho tôi một cà phê sữa đá, ít đường nhé.', tgt: "I'd like an iced Vietnamese coffee with less sugar, please.", tgtJa: 'アイスのベトナムコーヒーを、砂糖控えめでお願いします。' },
+  { type: 'partial', id: 103, speaker: 'B', lang: 'ja', src: 'はい、アイスコーヒー' },
+  { type: 'partial', id: 103, src: 'はい、アイスコーヒーですね。お砂糖は' },
+  { type: 'final', id: 103, src: 'はい、アイスコーヒーですね。お砂糖は控えめにします。少々お待ちください。', tgt: 'Vâng, cà phê đá ạ. Tôi sẽ cho ít đường. Xin chờ một chút.' },
+  { type: 'partial', id: 104, speaker: 'A', lang: 'vi', src: 'Có món nào không có' },
+  { type: 'final', id: 104, src: 'Có món nào không có đậu phộng không?', tgt: 'Do you have anything without peanuts?', tgtJa: 'ピーナッツを使っていない料理はありますか？' },
+  { type: 'partial', id: 105, speaker: null, lang: 'ja', src: 'ピーナッツ抜きなら' },
+  { type: 'final', id: 105, src: 'ピーナッツ抜きなら、鶏肉のバインミーがおすすめです。', tgt: 'Nếu không dùng đậu phộng thì tôi gợi ý bánh mì gà.' },
+  { type: 'partial', id: 106, speaker: 'A', lang: 'vi', src: 'Vậy cho tôi một cái' },
+  { type: 'final', id: 106, src: 'Vậy cho tôi một cái, mang đi nhé.', tgt: 'Then one of those please, to go.', tgtJa: 'では、それを一つ、持ち帰りでお願いします。' },
+];
+// Resolve the demo translation for a final event under the current config (only ja target has alternate text in the sample data)
+const resolveTgt = (ev, cfg) => (ev.lang === cfg.me && cfg.target === 'ja' && ev.tgtJa) ? ev.tgtJa : ev.tgt;
+const norm = (x) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const T = {
+  vi: {
+    settings: 'Cài đặt', back: 'Hội thoại',
+    detectingLang: 'Đang nhận diện ngôn ngữ',
+    lang: { me: 'Bạn', guest: 'Khách', showFor: 'Ngôn ngữ hiển thị cho Khách', showForNote: 'Dịch lời bạn sang ngôn ngữ này.', auto: 'Tự nhận diện', autoSub: 'Nhận diện ngôn ngữ theo từng câu', search: 'Tìm ngôn ngữ', noResult: 'Không có ngôn ngữ phù hợp', usedBy: 'Đang dùng cho', pendingLive: 'Thay đổi áp dụng từ phiên tiếp theo.', pendingBanner: 'Từ phiên tiếp theo: ' },
+    status: { idle: 'Sẵn sàng', connecting: 'Đang kết nối…', listening: 'Đã kết nối', paused: 'Tạm dừng', reconnecting: 'Đang kết nối lại…', authError: 'Lỗi xác thực', ended: 'Đã kết thúc', denied: 'Cần quyền micro' }, demo: 'Demo',
+    start: 'Bắt đầu', pause: 'Tạm dừng', resume: 'Tiếp tục', end: 'Kết thúc', newSession: 'Phiên mới', connecting: 'Đang kết nối…',
+    view: 'Kiểu hiển thị', fontSize: 'Cỡ chữ',
+    mic: { off: 'Mic tắt', listening: 'Đang nghe', recognizing: 'Đang nhận dạng', translating: 'Đang dịch', paused: 'Đã tạm dừng', connecting: 'Đang mở mic…', reconnecting: 'Mic giữ, chờ mạng', denied: 'Chưa có quyền mic' },
+    backToLive: 'Về trực tiếp', spA: 'Người nói A', spB: 'Người nói B', spUnknown: 'Chưa xác định', langVi: 'Tiếng Việt', langEn: 'English',
+    updating: 'Đang nhận dạng', translatingTag: 'Đang dịch…', doneTag: 'Hoàn tất', overlapTag: 'Nói chồng', viewShort: 'Hiển thị', endConfirm: 'Kết thúc phiên', demoNote: 'Phiên mô phỏng',
+    facing: { name: 'Đối diện', desc: 'Hai vùng đọc, một vùng xoay 180°', swap: 'Đổi bên', readVi: 'Đọc tiếng Việt', readEn: 'Đọc English', reads: 'Đọc' },
+    idleTitle: 'Sẵn sàng bắt đầu', idleBody: 'Đặt iPhone giữa hai người và nhấn Bắt đầu một lần. App nghe liên tục và dịch hai chiều, không cần giữ nút hay chọn người nói.',
+    listenTitle: 'Đang nghe…', listenBody: 'Chưa có lời nói. Cứ nói tự nhiên, nguyên văn và bản dịch sẽ hiện ở đây.',
+    views: { bubbles: 'Bong bóng', captions: 'Phụ đề', stage: 'Sân khấu', script: 'Kịch bản', facing: 'Đối diện' },
+    viewDesc: { bubbles: 'Trái / phải theo người nói', captions: 'Câu mới nhất nổi bật', stage: 'Chữ rất lớn, đọc từ xa', script: 'Danh sách theo thời gian', facing: 'Sân khấu 2 vùng, một vùng xoay 180°' },
+    fontNames: ['Nhỏ', 'Mặc định', 'Lớn', 'Rất lớn', 'Cực lớn', 'Tối đa'],
+    previewSrc: 'Cho tôi một cà phê sữa đá, ít đường nhé.', previewTgt: 'I’d like an iced Vietnamese coffee with less sugar, please.',
+    banner: { net: 'Mất kết nối mạng. Đang kết nối lại, nội dung được giữ.', auth: 'Khóa API Soniox không hợp lệ.', denied: 'Sermiva chưa được cấp quyền micro.' },
+    openSettings: 'Mở Cài đặt', openIOSSettings: 'Mở Cài đặt iPhone',
+    alertTitle: '“Sermiva” muốn truy cập Micro', alertBody: 'Để nghe và dịch hội thoại theo thời gian thực. Âm thanh chỉ gửi tới Soniox khi phiên đang chạy.', allow: 'Cho phép', deny: 'Không cho phép',
+    endTitle: 'Kết thúc phiên?', endBody: 'Mic sẽ tắt. Bản ghi vẫn xem lại được cho đến khi bạn bắt đầu phiên mới.', cancel: 'Hủy',
+    ended: 'Phiên đã kết thúc', segments: 'đoạn',
+    tts: { playing: 'Đang đọc bản dịch', waiting: 'Chờ người nói xong rồi đọc', stop: 'Ngắt' },
+    toastIOS: 'Đã mở Cài đặt iPhone (mô phỏng). Quyền micro được cấp lại.',
+    exitStage: 'Thoát Sân khấu', collapse: 'Thu gọn điều khiển', expand: 'Điều khiển',
+    show: 'Hiện khóa', hide: 'Ẩn khóa',
+    s: { api: 'SONIOX API', key: 'Khóa API Soniox', keyPh: 'Dán khóa API', paste: 'Dán', replace: 'Thay thế', delete: 'Xóa', check: 'Kiểm tra kết nối',
+      ks: { none: 'Chưa nhập khóa', unchecked: 'Chưa kiểm tra', checking: 'Đang kiểm tra…', valid: 'Khóa hợp lệ', invalid: 'Khóa không hợp lệ', network: 'Lỗi mạng, thử lại sau' },
+      apiFoot: 'Prototype chỉ dùng khóa giả và kết quả mô phỏng. Bản thật lưu khóa trong Keychain.',
+      lang: 'NGÔN NGỮ', uiLang: 'Ngôn ngữ giao diện', uiLangNote: 'Chỉ thay đổi ngôn ngữ nút và menu.', convLang: 'Ngôn ngữ hội thoại',
+      display: 'HIỂN THỊ', viewMode: 'Kiểu hiển thị', appearance: 'Giao diện', themes: { system: 'Hệ thống', light: 'Sáng', dark: 'Tối' }, fontLabel: 'Cỡ chữ', emphRow: 'Phóng to câu mới nhất', emphSub: 'Chỉ áp dụng cho kiểu Phụ đề', displayFoot: 'Cỡ chữ áp dụng cho cả nguyên văn và bản dịch. Bản native theo Dynamic Type.',
+      voice: 'GIỌNG NÓI', ttsRow: 'Đọc bản dịch thành tiếng', diarRow: 'Phân biệt người nói', voiceFoot: 'Chỉ đọc câu đã dịch xong, chờ khi có người đang nói.' },
+    setup: { title: 'Kết nối Soniox', body: 'Sermiva dùng Soniox để nhận dạng và dịch theo thời gian thực. Dán khóa API của bạn để bắt đầu.', check: 'Kiểm tra và tiếp tục', demo: 'Dùng thử bản demo (không nối Soniox)', pasteDemo: 'Dán khóa demo', foot: 'Khóa chỉ lưu trên máy này.' },
+  },
+  en: {
+    settings: 'Settings', back: 'Conversation',
+    detectingLang: 'Detecting language',
+    lang: { me: 'You', guest: 'Guest', showFor: 'Language shown to Guest', showForNote: 'Your speech is translated into this language.', auto: 'Auto-detect', autoSub: 'Detects the language per sentence', search: 'Search languages', noResult: 'No matching language', usedBy: 'Used for', pendingLive: 'Changes apply from the next session.', pendingBanner: 'From the next session: ' },
+    status: { idle: 'Ready', connecting: 'Connecting…', listening: 'Connected', paused: 'Paused', reconnecting: 'Reconnecting…', authError: 'Auth error', ended: 'Ended', denied: 'Mic access needed' }, demo: 'Demo',
+    start: 'Start', pause: 'Pause', resume: 'Resume', end: 'End', newSession: 'New session', connecting: 'Connecting…',
+    view: 'Display style', fontSize: 'Text size',
+    mic: { off: 'Mic off', listening: 'Listening', recognizing: 'Recognizing', translating: 'Translating', paused: 'Paused', connecting: 'Opening mic…', reconnecting: 'Mic held, waiting for network', denied: 'No mic access' },
+    backToLive: 'Back to live', spA: 'Speaker A', spB: 'Speaker B', spUnknown: 'Unidentified', langVi: 'Vietnamese', langEn: 'English',
+    updating: 'Recognizing', translatingTag: 'Translating…', doneTag: 'Done', overlapTag: 'Overlap', viewShort: 'Layout', endConfirm: 'End session', demoNote: 'Simulated session',
+    facing: { name: 'Face to face', desc: 'Two reading zones, one rotated 180°', swap: 'Swap sides', readVi: 'Reads Vietnamese', readEn: 'Reads English', reads: 'Reads' },
+    idleTitle: 'Ready to start', idleBody: 'Place the iPhone between you and tap Start once. It listens continuously and translates both ways; no holding a button or picking a speaker.',
+    listenTitle: 'Listening…', listenBody: 'No speech yet. Just talk naturally; the transcript and translation will appear here.',
+    views: { bubbles: 'Bubbles', captions: 'Captions', stage: 'Stage', script: 'Script', facing: 'Face to face' },
+    viewDesc: { bubbles: 'Left / right by speaker', captions: 'Latest sentence stands out', stage: 'Very large text, read from afar', script: 'Chronological list', facing: 'Two-zone stage, one rotated 180°' },
+    fontNames: ['Small', 'Default', 'Large', 'X-Large', 'XX-Large', 'Max'],
+    previewSrc: 'Cho tôi một cà phê sữa đá, ít đường nhé.', previewTgt: 'I’d like an iced Vietnamese coffee with less sugar, please.',
+    banner: { net: 'Network lost. Reconnecting; your transcript is kept.', auth: 'Soniox API key is invalid.', denied: 'Sermiva has no microphone access.' },
+    openSettings: 'Open Settings', openIOSSettings: 'Open iPhone Settings',
+    alertTitle: '“Sermiva” Would Like to Access the Microphone', alertBody: 'To listen and translate the conversation in real time. Audio is sent to Soniox only while a session is running.', allow: 'Allow', deny: 'Don’t Allow',
+    endTitle: 'End session?', endBody: 'The mic will turn off. The transcript stays readable until you start a new session.', cancel: 'Cancel',
+    ended: 'Session ended', segments: 'segments',
+    tts: { playing: 'Reading translation', waiting: 'Waiting for the speaker to finish', stop: 'Stop' },
+    toastIOS: 'Opened iPhone Settings (simulated). Mic access granted again.',
+    exitStage: 'Exit Stage', collapse: 'Hide controls', expand: 'Controls',
+    show: 'Show key', hide: 'Hide key',
+    s: { api: 'SONIOX API', key: 'Soniox API key', keyPh: 'Paste API key', paste: 'Paste', replace: 'Replace', delete: 'Delete', check: 'Test connection',
+      ks: { none: 'No key entered', unchecked: 'Not checked yet', checking: 'Checking…', valid: 'Key is valid', invalid: 'Key is invalid', network: 'Network error, try again' },
+      apiFoot: 'The prototype uses fake keys and simulated results. The real app stores the key in Keychain.',
+      lang: 'LANGUAGE', uiLang: 'Interface language', uiLangNote: 'Only changes buttons and menus.', convLang: 'Conversation languages',
+      display: 'DISPLAY', viewMode: 'Display style', appearance: 'Appearance', themes: { system: 'System', light: 'Light', dark: 'Dark' }, fontLabel: 'Text size', emphRow: 'Enlarge latest sentence', emphSub: 'Captions style only', displayFoot: 'Text size applies to both transcript and translation. Native build follows Dynamic Type.',
+      voice: 'VOICE', ttsRow: 'Read translation aloud', diarRow: 'Distinguish speakers', voiceFoot: 'Reads finished translations only, waits while someone is speaking.' },
+    setup: { title: 'Connect Soniox', body: 'Sermiva uses Soniox for real-time recognition and translation. Paste your API key to begin.', check: 'Test and continue', demo: 'Try the demo (not connected to Soniox)', pasteDemo: 'Paste demo key', foot: 'The key is stored on this device only.' },
+  },
+};
+
+const DEMO = [
+  { type: 'partial', id: 1, speaker: 'A', lang: 'vi', src: 'Cho tôi một cà phê' },
+  { type: 'partial', id: 1, src: 'Cho tôi một cà phê sữa đá, ít đường' },
+  { type: 'final', id: 1, src: 'Cho tôi một cà phê sữa đá, ít đường nhé.', tgt: "I'd like an iced Vietnamese coffee with less sugar, please." },
+  { type: 'partial', id: 2, speaker: 'B', lang: 'en', src: 'Would you like' },
+  { type: 'final', id: 2, src: 'Would you like anything to eat?', tgt: 'Bạn có muốn ăn thêm gì không?' },
+  { type: 'partial', id: 3, speaker: 'A', lang: 'vi', src: 'Có món nào không có' },
+  { type: 'final', id: 3, src: 'Có món nào không có đậu phộng không?', tgt: 'Do you have anything without peanuts?' },
+  { type: 'partial', id: 4, speaker: 'B', lang: 'en', src: 'Yes, we have a grilled chicken bánh mì' },
+  { type: 'partial', id: 4, src: 'Yes, we have a grilled chicken bánh mì and a fresh spring roll plate; both are made without peanuts' },
+  { type: 'final', id: 4, src: 'Yes, we have a grilled chicken bánh mì and a fresh spring roll plate; both are made without peanuts, but the peanut sauce is served on the side, so just let us know and we will leave it off.', tgt: 'Có, chúng tôi có bánh mì gà nướng và một phần gỏi cuốn tươi; cả hai đều không dùng đậu phộng, nhưng nước chấm đậu phộng được để riêng, nên anh chỉ cần báo là chúng tôi sẽ bỏ ra.' },
+  { type: 'partial', id: 5, speaker: 'A', lang: 'en', src: 'Perfect, one bánh mì then' },
+  { type: 'final', id: 5, src: 'Perfect, one bánh mì then. No sauce.', tgt: 'Tuyệt, vậy cho tôi một bánh mì. Không nước chấm.' },
+  { type: 'partial', id: 6, speaker: 'B', lang: 'en', src: 'Do you want it to' },
+  { type: 'partial', id: 6, src: 'Do you want it toasted' },
+  { type: 'final', id: 6, src: 'Would you like it toasted, or as it is?', tgt: 'Bạn muốn nướng nóng hay để nguyên?' },
+  { type: 'partial', id: 7, speaker: null, lang: 'vi', src: 'Cho thêm một ly' },
+  { type: 'final', id: 7, src: 'Cho thêm một ly nước lọc nữa.', tgt: 'One more glass of water, please.' },
+  { type: 'partial', id: 8, speaker: 'B', lang: 'en', src: 'Sure, for here or', overlap: true },
+  { type: 'partial', id: 9, speaker: null, lang: 'vi', src: 'À mà, khoan', overlap: true },
+  { type: 'partial', id: 8, src: 'Sure, for here or to go?' },
+  { type: 'final', id: 9, src: 'À mà, khoan đã, mang đi nhé.', tgt: 'Oh wait, actually, to go please.' },
+  { type: 'final', id: 8, src: 'Sure, for here or to go?', tgt: 'Được, dùng tại đây hay mang đi?' },
+  { type: 'partial', id: 10, speaker: 'A', lang: 'vi', src: 'Mang đi. Bao lâu thì' },
+  { type: 'final', id: 10, src: 'Mang đi. Bao lâu thì xong vậy?', tgt: 'To go. How long will it take?' },
+  { type: 'partial', id: 11, speaker: 'B', lang: 'en', src: 'About ten minutes' },
+  { type: 'final', id: 11, src: 'About ten minutes. The coffee will be ready first, you can wait by the window.', tgt: 'Khoảng mười phút. Cà phê sẽ xong trước, anh có thể ngồi chờ ở bên cửa sổ.' },
+  { type: 'partial', id: 12, speaker: 'A', lang: 'vi', src: 'Ở đây có wifi' },
+  { type: 'final', id: 12, src: 'Ở đây có wifi không? Tôi cần gửi một email nhanh.', tgt: 'Do you have wifi here? I need to send a quick email.' },
+  { type: 'partial', id: 13, speaker: 'B', lang: 'en', src: 'Yes, the network is' },
+  { type: 'final', id: 13, src: 'Yes, the network is “Cafe Sáng”, the password is printed on the receipt.', tgt: 'Có, mạng tên “Cafe Sáng”, mật khẩu in trên hóa đơn.' },
+  { type: 'partial', id: 14, speaker: 'A', lang: 'vi', src: 'Cảm ơn. Cho tôi hóa đơn' },
+  { type: 'final', id: 14, src: 'Cảm ơn. Cho tôi hóa đơn luôn nhé, tôi trả bằng thẻ.', tgt: 'Thanks. I’ll take the receipt now, I’m paying by card.' },
+  { type: 'partial', id: 15, speaker: 'B', lang: 'vi', src: 'Dạ, tổng cộng' },
+  { type: 'final', id: 15, src: 'Dạ, tổng cộng chín mươi lăm nghìn. Anh chạm thẻ ở đây.', tgt: 'Sure, that’s ninety-five thousand in total. Tap your card here.' },
+  { type: 'partial', id: 16, speaker: 'A', lang: 'en', src: 'Done. Thank you' },
+  { type: 'final', id: 16, src: 'Done. Thank you so much, see you next time.', tgt: 'Xong rồi. Cảm ơn nhiều, hẹn gặp lại lần sau.' },
+];
+
+const fmt = (s) => { const m = Math.floor(s / 60), r = Math.floor(s % 60); return m + ':' + (r < 10 ? '0' : '') + r; };
+const btnReset = { border: 0, cursor: 'pointer', fontFamily: 'inherit' };
+
+class Component extends DCLogic {
+  state = {
+    screen: 'setup', apiKey: '', keyVisible: false, keyStatus: 'none', demoMode: false,
+    uiLang: 'vi', theme: 'system', viewMode: 'captions', prevView: 'captions', fontIdx: 1, tts: false, diarization: true, emphasizeLatest: true,
+    session: 'idle', permission: 'unknown', segments: [], step: 0, elapsed: 0,
+    sheet: null, ttsCurrent: null, ttsQueue: [], stageCollapsed: false,
+    scrolledUp: false, liveAnchor: 0, landscape: false, reduceMotion: false, overlapSignal: false, simNetFail: false, speed: 1,
+    toast: null, showAlert: false, sysDark: false, ctlH: 120, facingSwap: false,
+    cfg: loadCfg(), pendingCfg: null, langField: 'me', langQuery: '',
+  };
+  // Config changes apply immediately when no session is running; otherwise they are queued for the next session (never mid-stream).
+  pickLang = (code) => {
+    const s = this.state; const base = s.pendingCfg || s.cfg;
+    const next = { ...base, [s.langField]: code };
+    if (next.me === next.target || next.guest === next.me) return;
+    this.commitCfg(next);
+    this.closeSheet();
+  };
+  openLangField = (field) => this.setState({ sheet: 'pair', langField: field, langQuery: '' });
+  commitCfg(next) {
+    const live = ['listening', 'paused', 'connecting', 'reconnecting'].includes(this.state.session);
+    try { localStorage.setItem(PAIR_KEY, JSON.stringify(next)); } catch (e) {}
+    if (live) this.setState({ pendingCfg: sameCfg(next, this.state.cfg) ? null : next });
+    else this.setState({ cfg: next, pendingCfg: null });
+  }
+  applyPendingPair() { if (this.state.pendingCfg) this.setState({ cfg: this.state.pendingCfg, pendingCfg: null }); }
+  // Demo script: the Japanese scenario whenever the guest side is auto/ja (the default), otherwise the café Việt–Anh script
+  demoScript(cfg) { const c = cfg || this.state.cfg; return (c.guest === 'auto' || c.guest === 'ja') && c.me === 'vi' && this.state.demoScenario !== 'cafe' ? DEMO_AUTO : DEMO; }
+  // Bottom dock is measured so scroll areas pad by its real height (controls + TTS bar + safe area)
+  ctlRef = (el) => {
+    if (this.ro) { this.ro.disconnect(); this.ro = null; }
+    this.ctlEl = el;
+    if (el) {
+      if (window.ResizeObserver) { this.ro = new ResizeObserver(() => this.measureCtl()); this.ro.observe(el); }
+      this.measureCtl();
+    }
+  };
+  measureCtl() {
+    const el = this.ctlEl; if (!el) return;
+    const h = Math.round(el.getBoundingClientRect().height);
+    if (h && h !== this.state.ctlH) this.setState({ ctlH: h }, () => this.followLive());
+  }
+  // Build the segment list from the demo script up to (and including) event index `upto`
+  buildSegs(upto, pendingLast, script, cfg) {
+    const D = script || this.demoScript(cfg);
+    const finals = {}; D.forEach((e) => { if (e.type === 'final') finals[e.id] = e; });
+    const segs = []; let t = 0;
+    for (let i = 0; i <= upto && i < D.length; i++) {
+      const e = D[i]; const idx = segs.findIndex((x) => x.id === e.id);
+      if (idx < 0) { segs.push({ id: e.id, speaker: e.speaker === undefined ? null : e.speaker, lang: e.lang, src: e.src, tgt: '', final: false, t, overlap: !!e.overlap }); t += 3.1; }
+      else segs[idx] = { ...segs[idx], src: e.src };
+      if (e.type === 'final') { const j = segs.findIndex((x) => x.id === e.id); segs[j] = { ...segs[j], final: true, tgt: (pendingLast && i === upto) ? '' : resolveTgt({ ...e, lang: segs[j].lang }, cfg || this.state.cfg) }; }
+    }
+    return { segs, elapsed: t };
+  }
+  runPreset = (p) => {
+    clearTimeout(this.ttsTimeout);
+    if (p.cfg) { try { localStorage.setItem(PAIR_KEY, JSON.stringify(p.cfg)); } catch (e) {} }
+    const cfg = p.cfg || this.state.cfg;
+    const script = p.scenario === 'cafe' ? DEMO : p.scenario === 'guest' ? DEMO_AUTO : this.demoScript(cfg);
+    const { segs, elapsed } = this.buildSegs(p.upto, p.pendingLast, script, cfg);
+    this.setState({ cfg, pendingCfg: null, demoScenario: p.scenario || this.state.demoScenario, screen: 'talk', demoMode: this.state.keyStatus === 'valid' ? this.state.demoMode : true, permission: 'granted', session: 'listening', segments: segs, step: p.upto + 1, elapsed, theme: p.theme, fontIdx: p.fontIdx, viewMode: p.view, prevView: p.view === 'stage' || p.view === 'facing' ? 'captions' : p.view, sheet: null, scrolledUp: false, ttsCurrent: null, ttsQueue: [], stageCollapsed: false }, () => this.followLive());
+    if (p.pendingLast) { const ev = script[p.upto]; const seg = segs.find((x) => x.id === ev.id); setTimeout(() => this.fillTgt(ev.id, resolveTgt({ ...ev, lang: seg.lang }, cfg)), 2600); }
+  };
+  componentDidMount() {
+    this.tickN = 0;
+    this.tickTimer = setInterval(() => this.onTick(), 450);
+    this.ttsTimer = setInterval(() => this.onTts(), 300);
+    if (window.matchMedia) {
+      this.mq = window.matchMedia('(prefers-color-scheme: dark)');
+      this.mqH = (e) => this.setState({ sysDark: e.matches });
+      this.mq.addEventListener('change', this.mqH);
+      this.setState({ sysDark: this.mq.matches });
+    }
+    if (this.props.skipSetup) this.setState({ screen: 'talk', demoMode: true });
+  }
+  componentWillUnmount() { clearInterval(this.tickTimer); clearInterval(this.ttsTimer); if (this.mq) this.mq.removeEventListener('change', this.mqH); if (this.ro) this.ro.disconnect(); }
+  componentDidUpdate(pp, ps) {
+    const s = this.state;
+    if (ps && (s.segments !== ps.segments || s.viewMode !== ps.viewMode || s.fontIdx !== ps.fontIdx || s.screen !== ps.screen || s.landscape !== ps.landscape || s.diarization !== ps.diarization)) this.followLive();
+    if (pp && pp.skipSetup !== this.props.skipSetup && this.props.skipSetup && s.screen === 'setup') this.setState({ screen: 'talk', demoMode: true });
+  }
+  getScrollEl() { return this.scrollEl || document.querySelector('[data-sn-scroll]'); }
+  // Auto-follow only while the reader is at the live edge; never yank them down while reading back.
+  followLive() {
+    if (this.state.scrolledUp) return;
+    const go = () => { if (this.state.scrolledUp) return; const el = this.getScrollEl(); if (el) el.scrollTop = el.scrollHeight; };
+    requestAnimationFrame(go); [60, 180, 400].forEach((ms) => setTimeout(go, ms));
+  }
+  scrollRef = (el) => { this.scrollEl = el; };
+  onScroll = (e) => {
+    // "At bottom" = the last segment is still visible in the viewport (content-relative, works on any screen size / text size)
+    const el = e.currentTarget; const last = el.lastElementChild;
+    const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const atBottom = last ? remaining < last.offsetHeight + 24 : remaining < 40;
+    if (atBottom && this.state.scrolledUp) this.setState({ scrolledUp: false });
+    else if (!atBottom && !this.state.scrolledUp) this.setState({ scrolledUp: true, liveAnchor: this.state.segments.length });
+  };
+  onBackToLive = () => this.setState({ scrolledUp: false }, () => this.followLive());
+
+  // ── demo stream ──
+  onTick() {
+    const s = this.state; if (s.session !== 'listening') return;
+    this.tickN++;
+    this.setState((st) => ({ elapsed: st.elapsed + 0.45 }));
+    if (this.tickN % (s.speed === 2 ? 1 : 2)) return;
+    const D = this.demoScript();
+    if (s.step >= D.length) return;
+    this.applyEvent(D[s.step]);
+    this.setState((st) => ({ step: st.step + 1 }));
+  }
+  applyEvent(ev) {
+    if (ev.type === 'partial') {
+      this.setState((st) => {
+        const segs = st.segments.slice(); const i = segs.findIndex((x) => x.id === ev.id);
+        if (i < 0) segs.push({ id: ev.id, speaker: ev.speaker === undefined ? null : ev.speaker, lang: ev.lang, src: ev.src, tgt: '', final: false, t: st.elapsed, overlap: !!ev.overlap });
+        else segs[i] = { ...segs[i], src: ev.src };
+        return { segments: segs };
+      }, () => this.followLive());
+    } else if (ev.type === 'final') {
+      this.setState((st) => {
+        const segs = st.segments.slice(); const i = segs.findIndex((x) => x.id === ev.id);
+        if (i < 0) segs.push({ id: ev.id, speaker: ev.speaker === undefined ? null : ev.speaker, lang: ev.lang, src: ev.src, tgt: '', final: true, t: st.elapsed, overlap: !!ev.overlap });
+        else segs[i] = { ...segs[i], src: ev.src, final: true };
+        return { segments: segs };
+      }, () => this.followLive());
+      // Translation lands after the next partial usually starts → mic keeps listening while previous segment translates
+      const seg = this.state.segments.find((x) => x.id === ev.id);
+      const tgt = resolveTgt({ ...ev, lang: seg ? seg.lang : ev.lang }, this.state.cfg);
+      setTimeout(() => this.fillTgt(ev.id, tgt), 1400 / this.state.speed);
+    }
+  }
+  fillTgt(id, tgt) {
+    this.setState((st) => {
+      const segs = st.segments.slice(); const i = segs.findIndex((x) => x.id === id); if (i < 0 || segs[i].tgt) return null;
+      segs[i] = { ...segs[i], tgt };
+      return { segments: segs, ttsQueue: st.tts ? [...st.ttsQueue, id] : st.ttsQueue };
+    }, () => this.followLive());
+  }
+  fastForward = () => {
+    const D = this.demoScript();
+    const finals = {}; D.forEach((e) => { if (e.type === 'final') finals[e.id] = e; });
+    const segs = []; let t = this.state.elapsed;
+    D.forEach((e) => { if (e.type === 'partial' && !segs.find((x) => x.id === e.id)) { const f = finals[e.id]; segs.push({ id: e.id, speaker: e.speaker === undefined ? null : e.speaker, lang: e.lang, src: f.src, tgt: resolveTgt({ ...f, lang: e.lang }, this.state.cfg), final: true, t, overlap: !!e.overlap }); t += 3.2; } });
+    this.setState({ segments: segs, step: D.length, elapsed: t, ttsQueue: [], ttsCurrent: null, scrolledUp: false }, () => this.followLive());
+  };
+  replay = () => { this.tickN = 0; this.setState({ segments: [], step: 0, elapsed: 0, ttsQueue: [], ttsCurrent: null, scrolledUp: false }); };
+
+  // ── TTS ──
+  onTts() {
+    const s = this.state;
+    if (!s.tts) { if (s.ttsCurrent || s.ttsQueue.length) { clearTimeout(this.ttsTimeout); this.setState({ ttsCurrent: null, ttsQueue: [] }); } return; }
+    if (s.ttsCurrent || !s.ttsQueue.length) return;
+    if (s.segments.some((x) => !x.final)) return; // someone is speaking → wait
+    const id = s.ttsQueue[0]; const seg = s.segments.find((x) => x.id === id);
+    if (!seg) { this.setState({ ttsQueue: s.ttsQueue.slice(1) }); return; }
+    const dur = Math.max(1400, seg.tgt.split(' ').length * 330);
+    this.setState({ ttsCurrent: id, ttsQueue: s.ttsQueue.slice(1) });
+    this.ttsTimeout = setTimeout(() => this.setState((st) => (st.ttsCurrent === id ? { ttsCurrent: null } : null)), dur);
+  }
+  onTtsStop = () => { clearTimeout(this.ttsTimeout); this.setState({ ttsCurrent: null, ttsQueue: [] }); };
+
+  // ── session ──
+  connect() {
+    this.setState({ session: 'connecting' });
+    setTimeout(() => this.setState((st) => (st.session === 'connecting' ? { session: 'listening' } : null)), 1100);
+  }
+  startFlow() {
+    this.applyPendingPair();
+    const s = this.state;
+    if (!s.demoMode && s.keyStatus !== 'valid') { this.setState({ session: 'authError' }); return; }
+    if (s.permission === 'unknown') { this.setState({ showAlert: true }); return; }
+    if (s.permission === 'denied') { this.setState({ session: 'denied' }); return; }
+    this.connect();
+  }
+  onMain = () => {
+    const s = this.state;
+    if (s.session === 'listening' || s.session === 'reconnecting') this.setState({ session: 'paused' });
+    else if (s.session === 'paused') this.setState({ session: 'listening' });
+    else if (s.session === 'connecting') return;
+    else if (s.session === 'ended') { this.replay(); this.setState({ session: 'idle' }, () => this.startFlow()); }
+    else this.startFlow();
+  };
+  allowMic = () => { this.setState({ showAlert: false, permission: 'granted' }); this.connect(); };
+  denyMic = () => this.setState({ showAlert: false, permission: 'denied', session: 'denied' });
+  openIOSSettings = () => { this.setState({ permission: 'granted', session: 'idle', toast: this.t().toastIOS }); clearTimeout(this.toastT); this.toastT = setTimeout(() => this.setState({ toast: null }), 2600); };
+  onEnd = () => this.setState({ sheet: 'end' });
+  confirmEnd = () => { clearTimeout(this.ttsTimeout); this.setState({ session: 'ended', sheet: null, ttsCurrent: null, ttsQueue: [] }, () => this.applyPendingPair()); };
+
+  // ── settings / key ──
+  t() { return T[this.state.uiLang]; }
+  onKeyChange = (e) => this.setState({ apiKey: e.target.value, keyStatus: 'none' });
+  toggleKeyVisible = () => this.setState((st) => ({ keyVisible: !st.keyVisible }));
+  pasteKey = () => this.setState({ apiKey: 'sx_demo_7f3aK9qL2mZ8', keyStatus: 'none' });
+  replaceKey = () => this.setState({ apiKey: '', keyStatus: 'none', keyVisible: true });
+  clearKey = () => this.setState({ apiKey: '', keyStatus: 'none', demoMode: false });
+  checkKey = (then) => {
+    if (!this.state.apiKey) return;
+    this.setState({ keyStatus: 'checking' });
+    setTimeout(() => {
+      const st = this.state; let r;
+      if (st.simNetFail) r = 'network'; else if (/^sx_[A-Za-z0-9]{10,}$/.test(st.apiKey)) r = 'valid'; else r = 'invalid';
+      const patch = { keyStatus: r };
+      if (r === 'valid' && st.session === 'authError') patch.session = 'idle';
+      this.setState(patch, () => { if (r === 'valid' && typeof then === 'function') then(); });
+    }, 1300);
+  };
+  setupCheck = () => this.checkKey(() => this.setState({ screen: 'talk', demoMode: false }));
+  setupDemo = () => this.setState({ screen: 'talk', demoMode: true });
+  goSettings = () => this.setState({ screen: 'settings' });
+  goBack = () => this.setState({ screen: 'talk' });
+  setView = (v) => this.setState((st) => { const big = v === 'stage' || v === 'facing'; const wasBig = st.viewMode === 'stage' || st.viewMode === 'facing'; return { viewMode: v, prevView: big ? (wasBig ? st.prevView : st.viewMode) : v, stageCollapsed: false, scrolledUp: false }; }, () => this.followLive());
+  exitStage = () => this.setState((st) => ({ viewMode: (st.prevView === 'stage' || st.prevView === 'facing') ? 'captions' : st.prevView, scrolledUp: false }), () => this.followLive());
+  swapFacing = () => this.setState((st) => ({ facingSwap: !st.facingSwap }));
+  toggleStageControls = () => this.setState((st) => ({ stageCollapsed: !st.stageCollapsed }));
+  closeSheet = () => this.setState({ sheet: null });
+  onFontRange = (e) => this.setState({ fontIdx: +e.target.value }, () => this.followLive());
+
+  renderVals() {
+    const s = this.state; const t = T[s.uiLang];
+    const themeName = s.theme === 'system' ? (s.sysDark ? 'dark' : 'light') : s.theme;
+    const isDark = themeName === 'dark';
+    const fs = SCALES[s.fontIdx];
+    const dur = s.reduceMotion ? '0ms' : '200ms';
+    const rootStyle = { height: '100%', '--fs': fs, '--dur': dur, '--pulse': s.reduceMotion ? '0s' : '1.2s' };
+
+    // segments
+    const speakerColor = (sp) => (sp === 'A' ? 'var(--spA)' : sp === 'B' ? 'var(--spB)' : 'var(--text3)');
+    const langName = (code) => { const l = LANGS.find((x) => x.code === code); return l ? l[s.uiLang] : code; };
+    const guestName = (c) => c.guest === 'auto' ? t.lang.auto : langName(c.guest);
+    // Header: "Tiếng Việt ↔ Tự nhận diện · English" (me ↔ guest, plus what the guest reads when it differs from what they speak)
+    const pairText = (c) => langName(c.me) + ' ↔ ' + guestName(c) + (c.guest === c.target ? '' : ' · ' + langName(c.target));
+    const pairLabel = pairText(s.cfg);
+    const bigText = s.fontIdx >= 4;
+    const emph = s.emphasizeLatest && !bigText;
+    const decorate = (seg) => {
+      const showSpeaker = s.diarization;
+      const side = !s.diarization ? 'center' : seg.speaker === 'A' ? 'left' : seg.speaker === 'B' ? 'right' : 'center';
+      return {
+        ...seg, showSpeaker, side,
+        speakerLabel: seg.speaker === 'A' ? t.spA : seg.speaker === 'B' ? t.spB : t.spUnknown,
+        langLabel: seg.lang ? langName(seg.lang) : t.detectingLang,
+        labelStyle: { color: s.diarization ? speakerColor(seg.speaker) : 'var(--text3)', display: 'inline-flex', alignItems: 'center', gap: 5, whiteSpace: 'nowrap' },
+        isPartial: !seg.final, hasTgt: !!seg.tgt, isTranslating: seg.final && !seg.tgt, isDone: seg.final && !!seg.tgt,
+        showOverlap: seg.overlap && s.overlapSignal,
+        timeLabel: fmt(seg.t),
+        // Captions: current sentence sits on a soft surface with an accent bar; history uses the base size.
+        // Emphasis is capped: at the two largest text sizes the current sentence uses the base size (no multiplier beyond max).
+        capCurStyle: { display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 14px 12px', margin: '0 -6px', borderRadius: 14, background: 'var(--surface)', borderLeft: '3px solid var(--accent)' },
+        capCurSrcStyle: { fontSize: `calc(${emph ? 16 : 14}px*var(--fs))`, lineHeight: 1.35, color: 'var(--text2)', overflowWrap: 'anywhere' },
+        capCurTgtStyle: { fontSize: `calc(${emph ? 24 : 17}px*var(--fs))`, lineHeight: emph ? 1.25 : 1.3, fontWeight: emph ? 600 : 500, letterSpacing: emph ? '-.01em' : 0, color: 'var(--text)', overflowWrap: 'anywhere', textWrap: 'pretty' },
+        bubbleStyle: {
+          alignSelf: side === 'left' ? 'flex-start' : side === 'right' ? 'flex-end' : 'stretch',
+          maxWidth: side === 'center' ? '100%' : bigText ? '96%' : '88%', minWidth: side === 'center' ? undefined : '55%',
+          background: 'var(--surface)', borderRadius: bigText ? 14 : 18, padding: bigText ? '8px 12px 10px' : '10px 14px 12px', display: 'flex', flexDirection: 'column', gap: 4,
+          boxSizing: 'border-box',
+        },
+      };
+    };
+    const segs = s.segments.map(decorate);
+    const curSeg = segs.length ? segs[segs.length - 1] : null;
+    const histSegs = segs.slice(0, -1);
+    const stageSeg = curSeg || { showSpeaker: false, langLabel: '', src: '', tgt: '', hasTgt: false, isPartial: false, isTranslating: false, labelStyle: {} };
+
+    const isTalk = s.screen === 'talk', isSettings = s.screen === 'settings', isSetup = s.screen === 'setup';
+    const isStage = s.viewMode === 'stage', isFacing = s.viewMode === 'facing';
+    // Facing stage: each zone shows the latest sentence in ITS reader's language
+    const facePane = (readerLang) => {
+      const seg = segs.length ? segs[segs.length - 1] : null;
+      const readerLabel = readerLang === 'vi' ? t.facing.readVi : readerLang === 'en' ? t.facing.readEn : t.facing.reads + ' ' + langName(readerLang);
+      if (!seg) return { readerLabel, big: '', small: '', showSpeaker: false, isPartial: false, isTranslating: false, labelStyle: {} };
+      const same = seg.lang === readerLang;
+      // Cross-language pane: translation is big once it exists; while it is pending show a small status only (no empty gap)
+      const big = same ? seg.src : (seg.tgt || '');
+      const small = same ? (seg.tgt || '') : seg.src;
+      return { readerLabel, big, hasBig: !!big, small, showSpeaker: seg.showSpeaker, speakerLabel: seg.speakerLabel, labelStyle: seg.labelStyle, isPartial: seg.isPartial, isTranslating: !same && !seg.tgt };
+    };
+    const faceTop = facePane(s.facingSwap ? s.cfg.me : s.cfg.target), faceBottom = facePane(s.facingSwap ? s.cfg.target : s.cfg.me);
+    // Facing panes: safe-area insets live on un-rotated wrappers, so the rotated scroll box never reaches the status bar / home indicator.
+    // Landscape: the notch sits on the side → smaller vertical insets.
+    // The device frame keeps its status bar / island at the top in both orientations → same top inset either way.
+    const topInset = 54, bottomInset = s.landscape ? 22 : 34;
+    const faceTopWrapStyle = { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', paddingTop: topInset };
+    const faceBottomWrapStyle = { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', paddingBottom: bottomInset };
+    // Scroll areas: bottom padding = measured dock height + 12. While "Back to live" is shown, the scroll VIEWPORT shrinks by a band
+    // (margin-bottom) so the button sits in reserved space and never floats over text the reader is looking at.
+    const liveBand = s.scrolledUp ? 52 : 0;
+    // Content wrapper ends above the dock (+ live band); scroll boxes fill it, so no text can sit under the dock or the button.
+    const contentWrapStyle = { flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', paddingBottom: isFacing ? 0 : s.ctlH + liveBand };
+    const scrollBase = { flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' };
+    const capScrollStyle = { ...scrollBase, padding: '8px 20px 12px', gap: 18 };
+    const bubScrollStyle = { ...scrollBase, padding: '8px 16px 12px', gap: 10 };
+    const stageScrollStyle = { ...scrollBase, padding: '12px 24px 12px', justifyContent: 'flex-end', gap: 14 };
+    const scriptScrollStyle = { ...scrollBase, padding: '4px 16px 12px' };
+    const backToLiveWrapStyle = { position: 'absolute', left: 0, right: 0, bottom: s.ctlH, height: liveBand, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 6, padding: '0 16px' };
+    const hasSegs = segs.length > 0;
+    const showEmpty = !hasSegs;
+    const emptyListening = s.session === 'listening' || s.session === 'connecting' || s.session === 'reconnecting';
+
+    // status
+    const sess = s.session;
+    const statusText = s.demoMode && (sess === 'listening' || sess === 'paused') ? t.demoNote : (t.status[sess] || t.status.idle) + (s.demoMode ? ' · ' + t.demo : '');
+    const statusColor = sess === 'listening' ? 'var(--ok)' : sess === 'connecting' || sess === 'reconnecting' ? 'var(--warn)' : sess === 'authError' || sess === 'denied' ? 'var(--danger)' : 'var(--text3)';
+    const statusDotStyle = { width: 8, height: 8, borderRadius: 4, background: statusColor, flexShrink: 0, animation: sess === 'connecting' || sess === 'reconnecting' ? `snPulse var(--pulse) ease-in-out infinite` : 'none' };
+
+    // mic
+    const anyPartial = s.segments.some((x) => !x.final);
+    let micKey = 'off';
+    // Control bar shows ONLY mic state; recognizing/translating live on the segment itself
+    if (sess === 'listening') micKey = 'listening';
+    else if (sess === 'paused') micKey = 'paused'; else if (sess === 'connecting') micKey = 'connecting'; else if (sess === 'reconnecting') micKey = 'reconnecting'; else if (sess === 'denied') micKey = 'denied';
+    const micOn = sess === 'listening' || sess === 'reconnecting';
+    const micDotStyle = { width: 8, height: 8, borderRadius: 4, flexShrink: 0, background: micOn ? 'var(--live)' : sess === 'connecting' ? 'var(--warn)' : 'var(--text3)', animation: micOn && micKey === 'listening' ? 'snPulse var(--pulse) ease-in-out infinite' : 'none' };
+
+    // main button
+    let mainLabel = t.start, showPauseIcon = false, showPlayIcon = true, showSpinIcon = false, mainDisabled = false;
+    if (sess === 'listening' || sess === 'reconnecting') { mainLabel = t.pause; showPauseIcon = true; showPlayIcon = false; }
+    else if (sess === 'paused') mainLabel = t.resume;
+    else if (sess === 'connecting') { mainLabel = t.connecting; showPlayIcon = false; showSpinIcon = true; mainDisabled = true; }
+    else if (sess === 'ended') mainLabel = t.newSession;
+    const mainStyle = { ...btnReset, flex: 1, minWidth: 0, height: 50, borderRadius: 25, background: sess === 'paused' ? 'var(--ok)' : 'var(--accent)', color: 'var(--onaccent)', fontSize: 17, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, opacity: mainDisabled ? 0.7 : 1, transition: `background var(--dur)` };
+    const endDisabled = !(sess === 'listening' || sess === 'paused' || sess === 'reconnecting' || sess === 'connecting');
+    const endStyle = { ...btnReset, width: 56, padding: 0, background: 'transparent', color: 'var(--danger)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, flexShrink: 0, opacity: endDisabled ? 0.35 : 1, cursor: endDisabled ? 'default' : 'pointer' };
+
+    // banner
+    let showBanner = false, bannerText = '', bannerAction = null, bannerActionLabel = '', isBannerNet = false, isBannerWarn = false, isBannerInfo = false, bannerColor = 'var(--text)';
+    const sessionLive = ['listening', 'paused', 'connecting', 'reconnecting'].includes(sess);
+    if (s.pendingCfg && sessionLive && sess !== 'reconnecting') { showBanner = true; bannerText = t.lang.pendingBanner + pairText(s.pendingCfg); isBannerInfo = true; bannerColor = 'var(--text2)'; }
+    if (sess === 'reconnecting') { showBanner = true; bannerText = t.banner.net; isBannerNet = true; bannerColor = 'var(--warn)'; }
+    else if (sess === 'authError') { showBanner = true; bannerText = t.banner.auth; isBannerWarn = true; bannerAction = this.goSettings; bannerActionLabel = t.openSettings; bannerColor = 'var(--danger)'; }
+    else if (sess === 'denied') { showBanner = true; bannerText = t.banner.denied; isBannerWarn = true; bannerAction = this.openIOSSettings; bannerActionLabel = t.openIOSSettings; bannerColor = 'var(--danger)'; }
+    const bannerStyle = { margin: '4px 16px 6px', padding: '10px 10px 10px 14px', borderRadius: 14, background: isBannerInfo ? 'var(--surface)' : 'var(--surface2)', color: bannerColor, display: 'flex', alignItems: 'center', gap: 10 };
+
+    // tts
+    const ttsPlayingNow = !!s.ttsCurrent;
+    const ttsWaiting = s.tts && !s.ttsCurrent && s.ttsQueue.length > 0 && anyPartial;
+    const ttsVisible = s.tts && (ttsPlayingNow || ttsWaiting) && isTalk;
+    const cur = s.segments.find((x) => x.id === s.ttsCurrent);
+    const ttsText = ttsPlayingNow ? t.tts.playing + ' · “' + (cur ? cur.tgt : '') + '”' : t.tts.waiting;
+
+    // controls visibility
+    const showControls = !isFacing && (!isStage || !s.stageCollapsed);
+    const showStageHandle = isStage && s.stageCollapsed;
+
+    // segmented options
+    const segStyle = (sel) => ({ ...btnReset, flex: 1, minHeight: 34, padding: '0 6px', borderRadius: 8, background: sel ? 'var(--surface)' : 'transparent', color: 'var(--text)', fontSize: 13, fontWeight: sel ? 600 : 500, boxShadow: sel ? '0 1px 3px rgba(0,0,0,.12)' : 'none', minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' });
+    const viewOpts = ['bubbles', 'captions', 'stage', 'script', 'facing'].map((k) => ({
+      key: k, label: t.views[k], desc: t.viewDesc[k], selected: s.viewMode === k, style: segStyle(s.viewMode === k),
+      onSelect: () => this.setView(k), onSelectClose: () => { this.setView(k); this.closeSheet(); },
+      isBubbles: k === 'bubbles', isCaptions: k === 'captions', isStage: k === 'stage', isScript: k === 'script', isFacing: k === 'facing',
+      cardStyle: { ...btnReset, textAlign: 'left', background: 'var(--surface)', borderRadius: 16, padding: 10, display: 'flex', flexDirection: 'column', gap: 6, outline: s.viewMode === k ? '2px solid var(--accent)' : '2px solid transparent', outlineOffset: -2, color: 'var(--text)' },
+    }));
+    const themeOpts = ['system', 'light', 'dark'].map((k) => ({ label: t.s.themes[k], selected: s.theme === k, style: segStyle(s.theme === k), onSelect: () => this.setState({ theme: k }) }));
+    const langOpts = [['vi', 'Tiếng Việt'], ['en', 'English']].map(([k, l]) => ({ label: l, selected: s.uiLang === k, style: segStyle(s.uiLang === k), onSelect: () => this.setState({ uiLang: k }) }));
+    // Conversation-pair sheet
+    const editCfg = s.pendingCfg || s.cfg;
+    const field = s.langField; // 'me' | 'guest' | 'target'
+    const fieldTitles = { me: t.lang.me, guest: t.lang.guest, target: t.lang.showFor };
+    const fieldTitle = fieldTitles[field];
+    // Which other value blocks a pick in this field (no duplicates between me/target and me/guest)
+    const blockedBy = field === 'me' ? [[editCfg.target, t.lang.showFor], [editCfg.guest, t.lang.guest]] : field === 'target' ? [[editCfg.me, t.lang.me]] : [[editCfg.me, t.lang.me]];
+    const langFieldsTop = [
+      { label: t.lang.me, value: langName(editCfg.me), aria: t.lang.me + ': ' + langName(editCfg.me), onOpen: () => this.openLangField('me') },
+      { label: t.lang.guest, value: guestName(editCfg), aria: t.lang.guest + ': ' + guestName(editCfg), onOpen: () => this.openLangField('guest') },
+    ];
+    const optStyle = (disabled) => ({ ...btnReset, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, width: '100%', minHeight: 50, padding: '6px 16px', background: 'transparent', color: 'var(--text)', borderBottom: '0.5px solid var(--sep)', opacity: disabled ? 0.45 : 1, cursor: disabled ? 'default' : 'pointer' });
+    const q = norm(s.langQuery.trim());
+    const showAutoOption = field === 'guest' && (!q || norm(t.lang.auto).includes(q));
+    const autoOpt = { selected: editCfg.guest === 'auto', onPick: () => this.pickLang('auto'), style: optStyle(false) };
+    const langList = LANGS.filter((l) => !q || norm(l[s.uiLang]).includes(q) || norm(l.native).includes(q) || l.code.includes(q)).map((l) => {
+      const selected = editCfg[field] === l.code;
+      const block = blockedBy.find(([code]) => code === l.code);
+      const disabled = !!block && !selected;
+      return { name: l[s.uiLang], native: l.native, selected, disabled, disabledNote: block ? t.lang.usedBy + ' ' + block[1] : '', onPick: () => this.pickLang(l.code), style: optStyle(disabled) };
+    });
+
+    const track = (on) => ({ ...btnReset, width: 51, height: 31, borderRadius: 16, background: on ? 'var(--ok)' : 'var(--surface2)', position: 'relative', flexShrink: 0, padding: 0, transition: `background var(--dur)` });
+    const knob = (on) => ({ position: 'absolute', top: 2, left: on ? 22 : 2, width: 27, height: 27, borderRadius: 14, background: '#fff', boxShadow: '0 3px 8px rgba(0,0,0,.15), 0 1px 1px rgba(0,0,0,.16)', transition: `left var(--dur)` });
+
+    // key
+    const ks = s.keyStatus;
+    const keyStatusColor = ks === 'valid' ? 'var(--ok)' : ks === 'invalid' || ks === 'network' ? 'var(--danger)' : 'var(--text3)';
+    const keyStatusStyle = { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 14, fontWeight: 500, color: keyStatusColor, minHeight: 34 };
+    const checkDisabled = !s.apiKey || ks === 'checking';
+    const checkRowStyle = { ...btnReset, minHeight: 44, background: 'transparent', color: 'var(--accent)', fontSize: 17, textAlign: 'left', padding: 0, opacity: checkDisabled ? 0.4 : 1, cursor: checkDisabled ? 'default' : 'pointer', flexShrink: 0 };
+    const deleteBtnStyle = { ...btnReset, minHeight: 34, padding: '0 12px', borderRadius: 9, background: 'var(--surface2)', color: 'var(--danger)', fontSize: 14, fontWeight: 500, opacity: s.apiKey ? 1 : 0.4 };
+    const primaryBtnStyle = { ...btnReset, minHeight: 52, borderRadius: 14, background: 'var(--accent)', color: 'var(--onaccent)', fontSize: 17, fontWeight: 600, opacity: checkDisabled ? 0.5 : 1 };
+
+    const unseen = Math.max(0, s.segments.length - s.liveAnchor);
+    const endedText = t.ended + ' · ' + s.segments.length + ' ' + t.segments + ' · ' + fmt(s.elapsed);
+
+    // sim
+    const simBtn = { ...btnReset, minHeight: 36, padding: '0 10px', borderRadius: 9, background: '#F5F5F7', color: '#1c1c1e', fontSize: 12.5, fontWeight: 500, textAlign: 'center' };
+    const tog = (label, key, on) => ({ label, on, onToggle: () => this.setState((st) => ({ [key]: !st[key] })), style: { ...btnReset, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, minHeight: 36, padding: '0 10px', borderRadius: 9, background: on ? '#E8F1FF' : '#F5F5F7', color: '#1c1c1e', fontSize: 12.5, fontWeight: 500, textAlign: 'left' }, pill: { fontSize: 10.5, fontWeight: 700, letterSpacing: '.04em', color: on ? '#0A66C2' : '#8a8a8f' }, state: on ? 'BẬT' : 'TẮT' });
+    const simToggles = [tog('Xoay ngang (852 × 393)', 'landscape', s.landscape), tog('Giảm chuyển động', 'reduceMotion', s.reduceMotion), tog('API có tín hiệu nói chồng', 'overlapSignal', s.overlapSignal), tog('Kiểm tra khóa gặp lỗi mạng', 'simNetFail', s.simNetFail)];
+    const spd = (on) => ({ ...simBtn, flex: 1, background: on ? '#1c1c1e' : '#F5F5F7', color: on ? '#fff' : '#1c1c1e' });
+    const presets = [
+      { label: 'Câu dài, đang dịch · Sáng', upto: 9, pendingLast: true, theme: 'light', fontIdx: 1, view: 'captions' },
+      { label: 'Đổi ngôn ngữ, đang nhận dạng · Tối', upto: 13, theme: 'dark', fontIdx: 1, view: 'captions' },
+      { label: 'Cỡ chữ tối đa · Sáng · Phụ đề', upto: 12, theme: 'light', fontIdx: 5, view: 'captions' },
+      { label: 'Cỡ chữ tối đa · Tối · Bong bóng', upto: 12, theme: 'dark', fontIdx: 5, view: 'bubbles' },
+      { label: 'Đối diện, câu ngắn · Sáng', upto: 6, theme: 'light', fontIdx: 1, view: 'facing' },
+      { label: 'Đối diện, câu dài đang dịch · Tối', upto: 9, pendingLast: true, theme: 'dark', fontIdx: 3, view: 'facing' },
+      { label: 'Đang dịch, chữ tối đa · Phụ đề', upto: 9, pendingLast: true, theme: 'light', fontIdx: 5, view: 'captions' },
+      { label: 'Khách: Tự nhận diện · Nhật→Việt, Việt→Anh', upto: 7, pendingLast: true, theme: 'light', fontIdx: 1, view: 'captions', cfg: { me: 'vi', guest: 'auto', target: 'en' }, scenario: 'guest' },
+      { label: 'Khách: Tiếng Nhật · hiển thị Nhật', upto: 7, pendingLast: true, theme: 'light', fontIdx: 1, view: 'captions', cfg: { me: 'vi', guest: 'ja', target: 'ja' }, scenario: 'guest' },
+      { label: 'Quán cà phê Việt–Anh · Khách: Tiếng Anh', upto: 6, theme: 'light', fontIdx: 1, view: 'captions', cfg: { me: 'vi', guest: 'en', target: 'en' }, scenario: 'cafe' },
+    ].map((p) => ({ ...p, onRun: () => this.runPreset(p) }));
+    const simSessionNames = { idle: 'Sẵn sàng', connecting: 'Đang kết nối', listening: 'Đang nghe', paused: 'Tạm dừng', reconnecting: 'Kết nối lại', authError: 'Lỗi xác thực', ended: 'Kết thúc', denied: 'Mic bị từ chối' };
+
+    return {
+      t, rootStyle, themeName, isDark, devW: s.landscape ? 852 : 393, devH: s.landscape ? 393 : 852,
+      isSetup, isTalk, isSettings, isStage, isFacing, notStage: !isStage && !isFacing, notFacing: !isFacing, showFacing: isFacing, faceTop, faceBottom, swapFacing: this.swapFacing,
+      isDemo: s.demoMode, ctlRef: this.ctlRef, faceTopWrapStyle, faceBottomWrapStyle, contentWrapStyle, capScrollStyle, bubScrollStyle, stageScrollStyle, scriptScrollStyle, backToLiveWrapStyle,
+      currentViewLabel: t.views[s.viewMode], isCaptionsMode: s.viewMode === 'captions', hasKey: !!s.apiKey, presets,
+      segs, histSegs, curSeg: curSeg || {}, hasCur: !!curSeg, stageSeg,
+      showEmpty: showEmpty && !isFacing, emptyListening, emptyTitle: emptyListening ? t.listenTitle : t.idleTitle, emptyBody: emptyListening ? t.listenBody : t.idleBody,
+      showCaptions: hasSegs && s.viewMode === 'captions', showBubbles: hasSegs && s.viewMode === 'bubbles', showStage: hasSegs && isStage, showScript: hasSegs && s.viewMode === 'script',
+      statusText, statusDotStyle,
+      micLabel: t.mic[micKey], micOn, micOff: !micOn, micDotStyle,
+      mainLabel, onMain: this.onMain, mainDisabled, mainStyle, showPauseIcon, showPlayIcon, showSpinIcon,
+      onEnd: this.onEnd, endDisabled, endStyle, confirmEnd: this.confirmEnd,
+      showBanner, bannerText, bannerStyle, hasBannerAction: !!bannerAction, bannerAction, bannerActionLabel, isBannerNet, isBannerWarn,
+      scrollRef: this.scrollRef, onScroll: this.onScroll, showBackToLive: s.scrolledUp && unseen > 0 && hasSegs, unseen, onBackToLive: this.onBackToLive,
+      ttsVisible, ttsText, ttsPlayingNow, onTtsStop: this.onTtsStop,
+      isEnded: sess === 'ended', endedText,
+      showControls, showStageHandle, toggleStageControls: this.toggleStageControls, exitStage: this.exitStage,
+      hasSheet: !!s.sheet, isViewSheet: s.sheet === 'view', isFontSheet: s.sheet === 'font', isEndSheet: s.sheet === 'end', isPairSheet: s.sheet === 'pair', closeSheet: this.closeSheet,
+      pairLabel, langFieldsTop, openTargetField: () => this.openLangField('target'), targetName: langName(editCfg.target), fieldTitle, showAutoOption, autoOpt,
+      langList, langListEmpty: langList.length === 0 && !showAutoOption, langQuery: s.langQuery, onLangQuery: (e) => this.setState({ langQuery: e.target.value }),
+      hasPendingPair: !!s.pendingCfg, isBannerInfo,
+      openViewSheet: () => this.setState({ sheet: 'view' }), openFontSheet: () => this.setState({ sheet: 'font' }),
+      viewOpts, themeOpts, langOpts,
+      fontIdx: s.fontIdx, fontName: t.fontNames[s.fontIdx], onFontRange: this.onFontRange, fontMin: s.fontIdx === 0, fontMax: s.fontIdx === SCALES.length - 1,
+      fontDec: () => this.setState((st) => ({ fontIdx: Math.max(0, st.fontIdx - 1) })), fontInc: () => this.setState((st) => ({ fontIdx: Math.min(SCALES.length - 1, st.fontIdx + 1) })),
+      tts: s.tts, diarization: s.diarization, ttsTrack: track(s.tts), ttsKnob: knob(s.tts), diarTrack: track(s.diarization), diarKnob: knob(s.diarization),
+      emphasizeLatest: s.emphasizeLatest, emphTrack: track(s.emphasizeLatest), emphKnob: knob(s.emphasizeLatest), onToggleEmph: () => this.setState((st) => ({ emphasizeLatest: !st.emphasizeLatest }), () => this.followLive()),
+      onToggleTts: () => this.setState((st) => ({ tts: !st.tts })), onToggleDiar: () => this.setState((st) => ({ diarization: !st.diarization })),
+      goSettings: this.goSettings, goBack: this.goBack,
+      apiKey: s.apiKey, onKeyChange: this.onKeyChange, keyVisible: s.keyVisible, keyHidden: !s.keyVisible, keyInputType: s.keyVisible ? 'text' : 'password', keyVisLabel: s.keyVisible ? t.hide : t.show, toggleKeyVisible: this.toggleKeyVisible,
+      pasteKey: this.pasteKey, replaceKey: this.replaceKey, clearKey: this.clearKey, noKey: !s.apiKey, checkKey: () => this.checkKey(), checkDisabled, checkRowStyle, deleteBtnStyle, primaryBtnStyle,
+      keyStatusText: ks === 'none' && s.apiKey ? t.s.ks.unchecked : t.s.ks[ks], keyStatusStyle, keyChecking: ks === 'checking', keyValid: ks === 'valid', keyBad: ks === 'invalid' || ks === 'network',
+      setupCheck: this.setupCheck, setupDemo: this.setupDemo,
+      showAlert: s.showAlert, allowMic: this.allowMic, denyMic: this.denyMic,
+      toast: s.toast, hasToast: !!s.toast,
+      // sim
+      showSim: this.props.showSim ?? true, showHandoff: this.props.showHandoff ?? true,
+      simSession: simSessionNames[sess], simView: t.views[s.viewMode], simKey: s.demoMode ? 'Demo' : t.s.ks[ks], simSegs: String(s.segments.length) + (anyPartial ? ' (partial)' : ''),
+      simBtn, simToggles, speed1Style: spd(s.speed === 1), speed2Style: spd(s.speed === 2), simSpeed1: () => this.setState({ speed: 1 }), simSpeed2: () => this.setState({ speed: 2 }),
+      simNetLoss: () => { if (sess !== 'listening' && sess !== 'connecting') return; this.setState({ session: 'reconnecting' }); setTimeout(() => this.setState((st) => (st.session === 'reconnecting' ? { session: 'listening' } : null)), 3500); },
+      simAuthError: () => { clearTimeout(this.ttsTimeout); this.setState({ session: 'authError', keyStatus: s.apiKey ? 'invalid' : 'none', demoMode: false, ttsCurrent: null, ttsQueue: [], screen: s.screen === 'setup' ? 'talk' : s.screen }); },
+      simDenyMic: () => this.setState({ permission: 'denied', session: sess === 'idle' || sess === 'ended' ? sess : 'denied', screen: s.screen === 'setup' ? 'talk' : s.screen, demoMode: s.demoMode || ks !== 'valid' }),
+      simResetMic: () => this.setState({ permission: 'unknown', session: sess === 'denied' ? 'idle' : sess }),
+      simFastForward: () => { if (s.screen === 'setup') this.setState({ screen: 'talk', demoMode: true }); if (sess === 'idle' || sess === 'ended' || sess === 'denied' || sess === 'authError') this.setState({ session: 'listening', permission: 'granted', demoMode: s.demoMode || ks !== 'valid' }); this.fastForward(); },
+      simReplay: () => { this.replay(); if (sess === 'ended') this.setState({ session: 'listening' }); },
+      simReset: () => { clearTimeout(this.ttsTimeout); this.tickN = 0; try { localStorage.removeItem(PAIR_KEY); } catch (e) {} this.setState({ cfg: { ...DEFAULT_CFG }, pendingCfg: null, langField: 'me', langQuery: '', demoScenario: null, screen: 'setup', apiKey: '', keyVisible: false, keyStatus: 'none', demoMode: false, uiLang: 'vi', theme: 'system', viewMode: 'captions', prevView: 'captions', fontIdx: 1, tts: false, diarization: true, emphasizeLatest: true, session: 'idle', permission: 'unknown', segments: [], step: 0, elapsed: 0, sheet: null, ttsCurrent: null, ttsQueue: [], stageCollapsed: false, scrolledUp: false, liveAnchor: 0, landscape: false, reduceMotion: false, overlapSignal: false, simNetFail: false, speed: 1, toast: null, showAlert: false }); },
+    };
+  }
+}
+</script>
+</body>
+</html>
