@@ -5,11 +5,13 @@ import SwiftUI
 /// except the body in demo: the approved "Mic se tat" clause is dropped
 /// there per the project owner's rule that demo must not assert anything
 /// about a microphone it never opened - see docs/demo-mic-status.md. The
-/// full approved sentence stays for a real (non-demo) session.
+/// caller (`DemoSessionController.endSessionBodyText`) decides which body
+/// applies from its own single `isDemo` source; this view only renders the
+/// string it is given, it does not re-derive demo-vs-live itself.
 struct EndSessionSheet: View {
     let segmentCount: Int
     let elapsed: TimeInterval
-    let isDemo: Bool
+    let bodyText: String
     let onConfirm: () -> Void
     let onCancel: () -> Void
 
@@ -25,8 +27,6 @@ struct EndSessionSheet: View {
             ? "Bản ghi vẫn xem lại được cho đến khi bạn bắt đầu phiên mới."
             : "Mic sẽ tắt. Bản ghi vẫn xem lại được cho đến khi bạn bắt đầu phiên mới."
     }
-
-    private var bodyText: String { Self.bodyText(isDemo: isDemo) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {

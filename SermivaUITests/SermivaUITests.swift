@@ -2,11 +2,12 @@ import XCTest
 
 /// One smoke test on the real app, no hooks or shortcuts in product code:
 /// open the app, enter demo, reach the listening state, see the first
-/// fixture segment's real content appear. Proves the app launches on a
-/// Simulator and the demo path works end to end. Does not prove translation
-/// content beyond the first segment, display styles other than "Phu de",
-/// scroll/layout details, or anything needing Soniox - see AGENTS.md's
-/// Verify section for what "runs" covers here.
+/// fixture segment's real content appear, then see playback keep advancing
+/// into the second segment's real translated content. Proves the app
+/// launches on a Simulator and the demo path works end to end. Does not
+/// prove translation content beyond the second segment, display styles
+/// other than "Phu de", scroll/layout details, or anything needing Soniox -
+/// see AGENTS.md's Verify section for what "runs" covers here.
 final class SermivaUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false

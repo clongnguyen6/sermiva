@@ -3,16 +3,14 @@ import UIKit
 
 /// HANDOFF.md section 2.2, "Phu de" display style only. Demo mode: the
 /// `DEMO` badge is the visible marker; see docs/demo-mic-status.md for why
-/// the mic dock line always says "Mic tat" here - demo never opens real
-/// hardware.
+/// the mic dock line's dot + icon + text always report mic off here - demo
+/// never opens real hardware.
 struct ConversationView: View {
     @StateObject private var controller: DemoSessionController
     @State private var showEndSheet = false
-    let isDemo: Bool
 
     init(events: [DemoEvent], isDemo: Bool) {
-        _controller = StateObject(wrappedValue: DemoSessionController(events: events))
-        self.isDemo = isDemo
+        _controller = StateObject(wrappedValue: DemoSessionController(events: events, isDemo: isDemo))
     }
 
     var body: some View {
@@ -31,7 +29,7 @@ struct ConversationView: View {
             EndSessionSheet(
                 segmentCount: controller.segments.count,
                 elapsed: controller.elapsed,
-                isDemo: isDemo,
+                bodyText: controller.endSessionBodyText,
                 onConfirm: {
                     controller.endSession()
                     showEndSheet = false
@@ -53,7 +51,7 @@ struct ConversationView: View {
                 Text("Tiếng Việt ↔ Tiếng Anh")
                     .font(.system(size: headerSize, weight: .medium))
                     .foregroundStyle(Tokens.text)
-                if isDemo {
+                if controller.isDemo {
                     Text("DEMO")
                         .font(.system(size: demoBadgeSize, weight: .bold))
                         .padding(.horizontal, 6)
@@ -85,7 +83,7 @@ struct ConversationView: View {
     }
 
     private var statusText: String {
-        if isDemo, controller.state == .listening || controller.state == .paused {
+        if controller.isDemo, controller.state == .listening || controller.state == .paused {
             return "Phiên mô phỏng"
         }
         let base: String
@@ -99,7 +97,7 @@ struct ConversationView: View {
         case .micDenied: base = "Cần quyền micro"
         case .ended: base = "Đã kết thúc"
         }
-        return isDemo ? base + " · Demo" : base
+        return controller.isDemo ? base + " · Demo" : base
     }
 
     private var statusColor: Color {
@@ -191,19 +189,17 @@ struct ConversationView: View {
 
     // MARK: - Bottom dock
 
-    private var micDockText: String {
-        DemoSessionController.micDockText(isMicCapturing: controller.isMicCapturing, state: controller.state, isDemo: isDemo)
-    }
+    /// The view reads the already-computed result from the controller - the
+    /// single source for the demo-vs-live decision - rather than passing its
+    /// own `isDemo` flag into a text-computing call here.
+    private var micDockText: String { controller.micDockText }
 
-    private var micOn: Bool { controller.isMicCapturing }
-
-    /// Demo never implies a mic that is open or was ever open - not even
-    /// "asking" (warn) or "paused" - so the dot stays neutral throughout.
     private var micDotColor: Color {
-        guard !isDemo else { return Tokens.text3 }
-        if micOn { return Tokens.live }
-        if controller.state == .connecting || controller.state == .requestingMic { return Tokens.warn }
-        return Tokens.text3
+        switch controller.micDotColorRole {
+        case .neutral: return Tokens.text3
+        case .warn: return Tokens.warn
+        case .live: return Tokens.live
+        }
     }
 
     private var primaryLabel: String {
@@ -234,6 +230,9 @@ struct ConversationView: View {
                 Circle()
                     .fill(micDotColor)
                     .frame(width: 8, height: 8)
+                Image(systemName: controller.micIconName)
+                    .font(.system(size: micDockTextSize))
+                    .foregroundStyle(Tokens.text2)
                 Text(micDockText)
                     .font(.system(size: micDockTextSize, weight: .semibold))
                     .foregroundStyle(Tokens.text)

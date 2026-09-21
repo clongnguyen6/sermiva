@@ -19,6 +19,14 @@ final class DemoSessionController: ObservableObject {
     @Published private(set) var segments: [Segment] = []
     @Published private(set) var elapsed: TimeInterval = 0
 
+    /// The single source of truth for "is this a demo session" - stored once
+    /// here at construction, not re-passed as a separate flag at each call
+    /// site. Views read the precomputed results below (`micDockText`,
+    /// `micDotColorRole`, `micIconName`, `endSessionBodyText`) instead of
+    /// branching on this themselves, so there is exactly one place left that
+    /// can get the demo-vs-live decision wrong - see docs/demo-mic-status.md.
+    let isDemo: Bool
+
     private let micPermission: MicPermissionProviding
     private let audioCapture: AudioCapturing
     private let scheduler: DemoScheduler
@@ -31,6 +39,7 @@ final class DemoSessionController: ObservableObject {
 
     init(
         events: [DemoEvent],
+        isDemo: Bool = true,
         micPermission: MicPermissionProviding = AutoGrantedMicPermission(),
         audioCapture: AudioCapturing = NullAudioCapture(),
         scheduler: DemoScheduler = DispatchScheduler(),
@@ -38,6 +47,7 @@ final class DemoSessionController: ObservableObject {
         translationDelay: TimeInterval = 1.4
     ) {
         self.events = events
+        self.isDemo = isDemo
         self.micPermission = micPermission
         self.audioCapture = audioCapture
         self.scheduler = scheduler
@@ -80,6 +90,51 @@ final class DemoSessionController: ObservableObject {
         case .micDenied: return "Chưa có quyền mic"
         case .idle, .ended, .authError, .listening: return "Mic tắt"
         }
+    }
+
+    /// What `ConversationView` actually reads: the pure function above,
+    /// applied to this controller's own state and its own `isDemo`. The view
+    /// passes no flag of its own at this call site any more - see `isDemo`.
+    var micDockText: String {
+        Self.micDockText(isMicCapturing: isMicCapturing, state: state, isDemo: isDemo)
+    }
+
+    /// The mic dock's dot color, as a role rather than a `Color` so it is
+    /// directly testable without SwiftUI. Demo never implies a mic that is
+    /// open or was ever open - not even "asking" (warn) - so it stays
+    /// `.neutral` throughout, the same rule `micDockText` follows.
+    enum MicDotColorRole: Equatable {
+        case neutral, warn, live
+    }
+
+    static func micDotColorRole(isMicCapturing: Bool, state: SessionState, isDemo: Bool) -> MicDotColorRole {
+        guard !isDemo else { return .neutral }
+        if isMicCapturing { return .live }
+        if state == .connecting || state == .requestingMic { return .warn }
+        return .neutral
+    }
+
+    var micDotColorRole: MicDotColorRole {
+        Self.micDotColorRole(isMicCapturing: isMicCapturing, state: state, isDemo: isDemo)
+    }
+
+    /// HANDOFF.md section 2.2/10: the mic dock line is chấm + icon + chữ,
+    /// not color alone. `mic.fill` only while genuinely capturing; `mic.slash`
+    /// otherwise - which in demo is unconditional, same rule as the text and
+    /// the dot color.
+    static func micIconName(isMicCapturing: Bool, isDemo: Bool) -> String {
+        (!isDemo && isMicCapturing) ? "mic.fill" : "mic.slash"
+    }
+
+    var micIconName: String {
+        Self.micIconName(isMicCapturing: isMicCapturing, isDemo: isDemo)
+    }
+
+    /// The End Session sheet's body, precomputed here from the same single
+    /// `isDemo` source rather than the sheet re-deciding it from a flag
+    /// `ConversationView` passes in.
+    var endSessionBodyText: String {
+        EndSessionSheet.bodyText(isDemo: isDemo)
     }
 
     /// Whether "Ket thuc" may open the confirmation sheet right now. A pure

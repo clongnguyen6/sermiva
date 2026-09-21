@@ -319,4 +319,53 @@ final class SessionStateMachineTests: XCTestCase {
             )
         }
     }
+
+    // MARK: - E2: `isDemo` lives on the controller itself (a single source),
+    // and `ConversationView` reads these precomputed instance properties
+    // rather than passing its own copy of the flag at each call site. These
+    // tests exercise exactly what the view reads, not just the pure static
+    // helpers above, so a regression at that single source - not only a
+    // regression in the pure functions - turns one of these red.
+
+    func test_instanceMicDockTextStaysMicOffThroughDemoRegardlessOfState() {
+        let (controller, _, scheduler, _) = makeController()
+        XCTAssertEqual(controller.micDockText, "Mic tắt")
+
+        controller.primaryButtonTapped() // -> listening
+        XCTAssertEqual(controller.micDockText, "Mic tắt", "listening must not flip demo's mic dock text")
+
+        controller.primaryButtonTapped() // -> paused
+        XCTAssertEqual(controller.micDockText, "Mic tắt")
+
+        scheduler.drainAll()
+    }
+
+    func test_instanceMicDotColorRoleStaysNeutralThroughDemoRegardlessOfState() {
+        let (controller, _, scheduler, _) = makeController()
+        XCTAssertEqual(controller.micDotColorRole, .neutral)
+
+        controller.primaryButtonTapped() // -> listening; a real capture would report .live here
+        XCTAssertEqual(controller.micDotColorRole, .neutral, "demo must never show the live dot color, even while listening")
+
+        scheduler.drainAll()
+    }
+
+    func test_instanceMicIconNameStaysMicSlashThroughDemoRegardlessOfState() {
+        let (controller, _, scheduler, _) = makeController()
+        XCTAssertEqual(controller.micIconName, "mic.slash")
+
+        controller.primaryButtonTapped() // -> listening; a real capture would report mic.fill here
+        XCTAssertEqual(controller.micIconName, "mic.slash", "demo must never show the mic.fill icon, even while listening")
+
+        scheduler.drainAll()
+    }
+
+    func test_instanceEndSessionBodyTextDropsTheMicClauseInDemo() {
+        let (controller, _, _, _) = makeController()
+        XCTAssertEqual(
+            controller.endSessionBodyText,
+            "Bản ghi vẫn xem lại được cho đến khi bạn bắt đầu phiên mới.",
+            "the End Session sheet body the controller hands to the view must already have the mic clause dropped in demo"
+        )
+    }
 }

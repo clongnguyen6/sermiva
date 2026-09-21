@@ -17,12 +17,15 @@ disagree, the handoff wins on what the app is, and this file wins on how work is
 Never report something as working without running it. If a step was skipped, say which one and why,
 and paste the real output rather than describing it.
 
-The project is `Sermiva.xcodeproj` (hand-written `project.pbxproj`, no project generator), scheme
-`Sermiva`, targets `Sermiva` (app), `SermivaTests` (XCTest) and `SermivaUITests` (one XCUITest smoke
-test). Deployment target iOS 17.0. Bundle id `com.clongnguyen6.sermiva` (`.SermivaTests` /
-`.SermivaUITests` for the test targets). These are the commands that were actually run against the
-same Simulator, iPhone 17, and actually passed; run them again from the repo root before trusting a
-"compiles", "runs" or "behaves" claim:
+The project is `Sermiva.xcodeproj` (hand-written `project.pbxproj`, no project generator, plus a
+hand-written shared scheme committed at
+`Sermiva.xcodeproj/xcshareddata/xcschemes/Sermiva.xcscheme` - see below for why), scheme `Sermiva`,
+targets `Sermiva` (app), `SermivaTests` (XCTest) and `SermivaUITests` (one XCUITest smoke test).
+Deployment target iOS 17.0. Bundle id `com.clongnguyen6.sermiva` (`.SermivaTests` /
+`.SermivaUITests` for the test targets). These are the commands that were actually run, in this
+order, against the same Simulator - iPhone 17, UDID `2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD` - and
+actually passed 5 consecutive times; run them again from the repo root before trusting a "compiles",
+"runs" or "behaves" claim:
 
 ```
 xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
@@ -35,17 +38,28 @@ xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
   -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:SermivaUITests test
 ```
 
-If the target Simulator is not already booted and settled, boot it first and wait
-(`xcrun simctl boot <udid>` then `xcrun simctl bootstatus <udid> -b`) before running the
-`SermivaUITests` command - that is the fix actually observed for `RBSRequestErrorDomain Code=5
-"Launch failed"` / `FBSOpenApplicationServiceErrorDomain ... Busy` when the Simulator was still
-mid-boot. The same error has also been seen on an ephemeral retry clone (e.g. "Clone 2 of iPhone 17")
-that `xcodebuild` creates for a second attempt, even while the base device was already settled and
-had just run other tests fine - if that happens, simply run the same `SermivaUITests` command again.
-Neither observation points to a specific iPhone model or to Developer Mode: an earlier version of
-this section blamed a disabled `DevToolsSecurity` for the launch failure, which is not supported by
-what was actually observed (the same failure and the same fix reproduced on more than one device and
-more than one Simulator instance) - do not reach for `sudo DevToolsSecurity -enable` for this.
+The target Simulator must already be booted and settled (`xcrun simctl boot <udid>` then
+`xcrun simctl bootstatus <udid> -b`) before running these - that is unchanged and still needed, but
+by itself it is not sufficient: without a scheme committed to the repo, `xcodebuild` auto-generates
+one on the fly, and an auto-generated scheme runs tests with parallel testing enabled. That clones the
+simulator (e.g. "Clone 1 of iPhone 17" in the Simulator list) rather than running on the named,
+already-booted device - across 9 runs of the three commands above in this exact order, the
+`SermivaUITests` step failed to even launch its runner on the first try 4 times, with `denied by
+service delegate (SBMainWorkspace) for reason: Busy ("Application failed preflight checks")`; the
+preceding `SermivaTests` step was also observed to leave the base device `Shutdown` after running on
+its own clone. The committed shared scheme sets `parallelizable = "NO"` on both test targets, which
+keeps testing on the named booted device instead: with it in place, `SermivaUITests` alone ran 13
+times with zero launch failures, and the full three-command sequence ran the 5 consecutive times
+below with zero failures; each run's `.xcresult` bundle (`xcrun xcresulttool get --legacy --format
+json --path <bundle>`, checked for the ones still retained by DerivedData's log pruning) records the
+device name as `iPhone 17`, never a `Clone N of iPhone 17`, and `xcrun simctl list devices` after all
+5 runs shows no clone device left behind and the base `iPhone 17` (UDID above) still `Booted`. No
+cause deeper than "an auto-generated scheme enables parallel testing, which clones the simulator" was
+established, and no earlier explanation on this point should be trusted: a previous version of this
+section blamed the Simulator
+being mid-boot, and before that a disabled `DevToolsSecurity`, neither of which explains why the
+clone or the `Shutdown` base device appeared - do not reach for `sudo DevToolsSecurity -enable` for
+this, and do not reintroduce the auto-generated-scheme behavior by deleting the shared scheme file.
 
 `build` proves "compiles". The `SermivaTests` run (state machine + segment assembly fixtures read
 from `demo-data.json`) proves "behaves" for what those fixtures cover - nothing more; it also
