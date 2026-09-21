@@ -36,13 +36,16 @@ xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
 ```
 
 If the target Simulator is not already booted and settled, boot it first and wait
-(`xcrun simctl boot <udid>` then `xcrun simctl bootstatus <udid> -b`) - launching the UI test runner
-against a Simulator that is still mid-boot fails with `RBSRequestErrorDomain Code=5 "Launch failed"` /
-`FBSOpenApplicationServiceErrorDomain ... Busy`, on any device, and has nothing to do with Developer
-Mode or with which iPhone model is targeted. (An earlier version of this section blamed a disabled
-`DevToolsSecurity` - that was wrong: the same failure reproduced and then went away on both iPhone 17
-and iPhone 17 Pro depending only on whether the Simulator had just finished booting; do not reach for
-`sudo DevToolsSecurity -enable` for this.)
+(`xcrun simctl boot <udid>` then `xcrun simctl bootstatus <udid> -b`) before running the
+`SermivaUITests` command - that is the fix actually observed for `RBSRequestErrorDomain Code=5
+"Launch failed"` / `FBSOpenApplicationServiceErrorDomain ... Busy` when the Simulator was still
+mid-boot. The same error has also been seen on an ephemeral retry clone (e.g. "Clone 2 of iPhone 17")
+that `xcodebuild` creates for a second attempt, even while the base device was already settled and
+had just run other tests fine - if that happens, simply run the same `SermivaUITests` command again.
+Neither observation points to a specific iPhone model or to Developer Mode: an earlier version of
+this section blamed a disabled `DevToolsSecurity` for the launch failure, which is not supported by
+what was actually observed (the same failure and the same fix reproduced on more than one device and
+more than one Simulator instance) - do not reach for `sudo DevToolsSecurity -enable` for this.
 
 `build` proves "compiles". The `SermivaTests` run (state machine + segment assembly fixtures read
 from `demo-data.json`) proves "behaves" for what those fixtures cover - nothing more; it also

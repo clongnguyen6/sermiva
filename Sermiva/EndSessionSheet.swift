@@ -1,10 +1,15 @@
 import SwiftUI
 
 /// HANDOFF.md section 5: ending a session always goes through this
-/// confirmation sheet. Copy taken verbatim from the approved prototype.
+/// confirmation sheet. Copy taken verbatim from the approved prototype,
+/// except the body in demo: the approved "Mic se tat" clause is dropped
+/// there per the project owner's rule that demo must not assert anything
+/// about a microphone it never opened - see docs/demo-mic-status.md. The
+/// full approved sentence stays for a real (non-demo) session.
 struct EndSessionSheet: View {
     let segmentCount: Int
     let elapsed: TimeInterval
+    let isDemo: Bool
     let onConfirm: () -> Void
     let onCancel: () -> Void
 
@@ -13,13 +18,23 @@ struct EndSessionSheet: View {
     @ScaledMetric(relativeTo: .body) private var captionSize: CGFloat = 13
     @ScaledMetric(relativeTo: .body) private var buttonSize: CGFloat = 17
 
+    /// Pure so the demo-must-not-assert-mic-state rule is directly
+    /// testable without instantiating the view.
+    static func bodyText(isDemo: Bool) -> String {
+        isDemo
+            ? "Bản ghi vẫn xem lại được cho đến khi bạn bắt đầu phiên mới."
+            : "Mic sẽ tắt. Bản ghi vẫn xem lại được cho đến khi bạn bắt đầu phiên mới."
+    }
+
+    private var bodyText: String { Self.bodyText(isDemo: isDemo) }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Kết thúc phiên?")
                 .font(.system(size: titleSize, weight: .bold))
                 .foregroundStyle(Tokens.text)
 
-            Text("Mic sẽ tắt. Bản ghi vẫn xem lại được cho đến khi bạn bắt đầu phiên mới.")
+            Text(bodyText)
                 .font(.system(size: bodySize))
                 .foregroundStyle(Tokens.text2)
 

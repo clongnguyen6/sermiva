@@ -271,23 +271,52 @@ final class SessionStateMachineTests: XCTestCase {
         XCTAssertFalse(controller.isMicCapturing)
     }
 
-    /// The dock text is a pure function of `(isMicCapturing, state)`, not of
-    /// `state` alone: `isMicCapturing: true` must say "Dang nghe" no matter
-    /// what `state` is, proving the text really follows capture rather than
-    /// session progress. `listening` with capture off falls back to "Mic
-    /// tat" - the one string among the six that stays true when the session
-    /// is genuinely running but the mic never opened.
+    /// Live (isDemo: false) path: the dock text is a pure function of
+    /// `(isMicCapturing, state)`, not of `state` alone - `isMicCapturing:
+    /// true` must say "Dang nghe" no matter what `state` is, proving the
+    /// text really follows capture rather than session progress.
+    /// `listening` with capture off falls back to "Mic tat" - the one
+    /// string among the six that stays true when the session is genuinely
+    /// running but the mic never opened. This branch is not reachable by
+    /// the shipped demo (see the isDemo test below); it is kept for
+    /// Outcome 2's real session.
     func test_micDockTextFollowsCaptureNotSession() {
-        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: true, state: .paused), "Đang nghe")
-        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: true, state: .idle), "Đang nghe")
-        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: true, state: .micDenied), "Đang nghe")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: true, state: .paused, isDemo: false), "Đang nghe")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: true, state: .idle, isDemo: false), "Đang nghe")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: true, state: .micDenied, isDemo: false), "Đang nghe")
 
-        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .listening), "Mic tắt", "session running with capture off must not claim any of the other five strings")
-        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .idle), "Mic tắt")
-        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .paused), "Đã tạm dừng")
-        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .requestingMic), "Đang mở mic…")
-        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .connecting), "Đang mở mic…")
-        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .micDenied), "Chưa có quyền mic")
-        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .reconnecting), "Mic giữ, chờ mạng")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .listening, isDemo: false), "Mic tắt", "session running with capture off must not claim any of the other five strings")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .idle, isDemo: false), "Mic tắt")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .paused, isDemo: false), "Đã tạm dừng")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .requestingMic, isDemo: false), "Đang mở mic…")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .connecting, isDemo: false), "Đang mở mic…")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .micDenied, isDemo: false), "Chưa có quyền mic")
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .reconnecting, isDemo: false), "Mic giữ, chờ mạng")
+    }
+
+    /// Project owner's decision: in demo there is nothing capturing under
+    /// any session state, so the dock must say "Mic tat" everywhere,
+    /// including "asking"/"paused" states that would otherwise imply a mic
+    /// that was at some point open. Checked for every SessionState case,
+    /// and even for a (never actually possible in demo) isMicCapturing:
+    /// true, since the demo flag must win outright, not just tip the
+    /// existing six-string mapping.
+    func test_demoAlwaysShowsMicOffRegardlessOfSessionState() {
+        let allStates: [SessionState] = [
+            .idle, .requestingMic, .micDenied, .connecting, .listening,
+            .paused, .reconnecting, .authError, .ended,
+        ]
+        for state in allStates {
+            XCTAssertEqual(
+                DemoSessionController.micDockText(isMicCapturing: false, state: state, isDemo: true),
+                "Mic tắt",
+                "demo must always show Mic tat, state: \(state)"
+            )
+            XCTAssertEqual(
+                DemoSessionController.micDockText(isMicCapturing: true, state: state, isDemo: true),
+                "Mic tắt",
+                "demo must show Mic tat even if capture were somehow reported on, state: \(state)"
+            )
+        }
     }
 }

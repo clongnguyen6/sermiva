@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		E665232944194A91AAFA0C10 /* EndSessionSheetTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1569EAC826C413FB40C7DBC /* EndSessionSheetTests.swift */; };
 		2128529FFB4F496D96E6C386 /* SermivaUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 88054569658846F789D6BDE7 /* SermivaUITests.swift */; };
 		80104374A189477291FF30DD /* SermivaApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9FD973B7E0BA4D5FB90CD3F2 /* SermivaApp.swift */; };
 		AAF85BCB7DEF44D794FB9796 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2E38FE130F4484F90A3EA8A /* RootView.swift */; };
@@ -75,6 +76,7 @@
 		603A83ABF413480AB31EFA06 /* SermivaTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SermivaTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		88054569658846F789D6BDE7 /* SermivaUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SermivaUITests.swift; sourceTree = "<group>"; };
 		0349CD65761D4FF9B474FA15 /* SermivaUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SermivaUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F1569EAC826C413FB40C7DBC /* EndSessionSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EndSessionSheetTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -130,6 +132,7 @@
 			children = (
 				5477A7168B8245EBB2BA466C /* TestFakes.swift */,
 				1B10254C1952402EB9C4CA44 /* SegmentAssemblerTests.swift */,
+				F1569EAC826C413FB40C7DBC /* EndSessionSheetTests.swift */,
 				E11DE6C6F5694D9E889849AB /* SessionStateMachineTests.swift */,
 				DD6FFDA9C0C74A429864612A /* DemoFixtureLoaderTests.swift */,
 			);
@@ -320,6 +323,7 @@
 			files = (
 				45D7B0E4CD4849E3AA6C3999 /* TestFakes.swift in Sources */,
 				B6FA4224D3D4442792C8584D /* SegmentAssemblerTests.swift in Sources */,
+				E665232944194A91AAFA0C10 /* EndSessionSheetTests.swift in Sources */,
 				7655595F510E498DAE8E625F /* SessionStateMachineTests.swift in Sources */,
 				5B2919A77B4C472AA2635653 /* DemoFixtureLoaderTests.swift in Sources */,
 			);

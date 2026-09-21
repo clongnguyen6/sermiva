@@ -31,6 +31,7 @@ struct ConversationView: View {
             EndSessionSheet(
                 segmentCount: controller.segments.count,
                 elapsed: controller.elapsed,
+                isDemo: isDemo,
                 onConfirm: {
                     controller.endSession()
                     showEndSheet = false
@@ -191,10 +192,19 @@ struct ConversationView: View {
     // MARK: - Bottom dock
 
     private var micDockText: String {
-        DemoSessionController.micDockText(isMicCapturing: controller.isMicCapturing, state: controller.state)
+        DemoSessionController.micDockText(isMicCapturing: controller.isMicCapturing, state: controller.state, isDemo: isDemo)
     }
 
     private var micOn: Bool { controller.isMicCapturing }
+
+    /// Demo never implies a mic that is open or was ever open - not even
+    /// "asking" (warn) or "paused" - so the dot stays neutral throughout.
+    private var micDotColor: Color {
+        guard !isDemo else { return Tokens.text3 }
+        if micOn { return Tokens.live }
+        if controller.state == .connecting || controller.state == .requestingMic { return Tokens.warn }
+        return Tokens.text3
+    }
 
     private var primaryLabel: String {
         switch controller.state {
@@ -222,7 +232,7 @@ struct ConversationView: View {
         VStack(spacing: 10) {
             HStack(spacing: 8) {
                 Circle()
-                    .fill(micOn ? Tokens.live : (controller.state == .connecting || controller.state == .requestingMic ? Tokens.warn : Tokens.text3))
+                    .fill(micDotColor)
                     .frame(width: 8, height: 8)
                 Text(micDockText)
                     .font(.system(size: micDockTextSize, weight: .semibold))

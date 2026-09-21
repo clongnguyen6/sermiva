@@ -53,13 +53,23 @@ final class DemoSessionController: ObservableObject {
         audioCapture.stop()
     }
 
-    /// The six HANDOFF.md section 5 mic-dock strings, chosen from real
-    /// capture state first - "Dang nghe" only when `isMicCapturing`, never
-    /// as a function of `state` alone - so the claim that this text follows
-    /// capture, not session progress, is directly testable. See
-    /// docs/demo-mic-status.md for why `listening` falls back to "Mic tat"
+    /// The six HANDOFF.md section 5 mic-dock strings. In demo, per the
+    /// project owner's decision, there is nothing capturing under any
+    /// session state - not even "asking" or "paused", which still imply a
+    /// mic that was at some point open - so `isDemo` short-circuits to
+    /// "Mic tat" unconditionally, checked before anything else. The
+    /// state-driven six-string mapping stays underneath for the real
+    /// session Outcome 2 introduces; nothing here builds a live path early,
+    /// it only keeps the existing contract reachable once `isDemo` is
+    /// false. "Dang nghe" only when `isMicCapturing`, never as a function
+    /// of `state` alone, so the claim that live text follows capture, not
+    /// session progress, is directly testable. See docs/demo-mic-status.md
+    /// for why a live `listening` with no capture falls back to "Mic tat"
     /// rather than a dedicated error string.
-    static func micDockText(isMicCapturing: Bool, state: SessionState) -> String {
+    static func micDockText(isMicCapturing: Bool, state: SessionState, isDemo: Bool) -> String {
+        if isDemo {
+            return "Mic tắt"
+        }
         if isMicCapturing {
             return "Đang nghe"
         }
