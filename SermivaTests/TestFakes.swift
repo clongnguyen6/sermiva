@@ -2,9 +2,11 @@ import Foundation
 @testable import Sermiva
 
 /// Answers a mic-permission request synchronously with a fixed, injected
-/// result instead of showing a real system alert.
+/// result instead of showing a real system alert. `granted` is mutable so a
+/// test can simulate the user granting access via iPhone Settings between
+/// two taps of the main button.
 final class FakeMicPermissionProvider: MicPermissionProviding {
-    let granted: Bool
+    var granted: Bool
     private(set) var requestCount = 0
 
     init(granted: Bool) {
@@ -19,12 +21,15 @@ final class FakeMicPermissionProvider: MicPermissionProviding {
 
 /// Tracks start/stop calls instead of touching real audio hardware.
 /// `failNextStart` lets a test simulate the engine failing to open.
+/// `simulateExternalStop()` lets a test simulate capture stopping itself for
+/// a reason outside an explicit `stop()` call (backgrounding, interruption).
 final class FakeAudioCapture: AudioCapturing {
     enum CaptureError: Error { case simulatedFailure }
 
     private(set) var startCount = 0
     private(set) var stopCount = 0
     var failNextStart = false
+    var onUnexpectedStop: (@MainActor () -> Void)?
 
     func start() throws {
         if failNextStart {
@@ -36,6 +41,10 @@ final class FakeAudioCapture: AudioCapturing {
 
     func stop() {
         stopCount += 1
+    }
+
+    @MainActor func simulateExternalStop() {
+        onUnexpectedStop?()
     }
 }
 

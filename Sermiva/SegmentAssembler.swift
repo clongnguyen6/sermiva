@@ -7,11 +7,16 @@ enum SegmentAssembler {
     /// by `id`. A final locks `source` and sets `isFinal`, but never writes
     /// `target` itself - `target` only arrives through `fillTarget`, so a
     /// final segment is briefly final with `target == nil` ("Dang dich...").
+    /// Once a segment is final, `source` stays locked against any later
+    /// event for the same id - a late partial or a duplicate delivery must
+    /// not be able to change wording that has already locked.
     /// `speaker`, `lang` and `overlap` are read only when the id is new;
     /// later events for the same id cannot change them.
     static func apply(_ event: DemoEvent, elapsed: TimeInterval, to segments: inout [Segment]) {
         if let index = segments.firstIndex(where: { $0.id == event.id }) {
-            segments[index].source = event.src
+            if !segments[index].isFinal {
+                segments[index].source = event.src
+            }
             if event.type == .final {
                 segments[index].isFinal = true
             }

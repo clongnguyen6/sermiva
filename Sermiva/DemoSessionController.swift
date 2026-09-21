@@ -34,33 +34,69 @@ final class DemoSessionController: ObservableObject {
         self.scheduler = scheduler
         self.eventInterval = eventInterval
         self.translationDelay = translationDelay
+        self.audioCapture.onUnexpectedStop = { [weak self] in
+            self?.handleCaptureStoppedExternally()
+        }
     }
 
-    /// Whether "Ket thuc" may open the confirmation sheet right now.
-    var canEnd: Bool {
+    deinit {
+        // The mic must not stay open once this controller leaves the view tree.
+        audioCapture.stop()
+    }
+
+    /// Whether "Ket thuc" may open the confirmation sheet right now. A pure
+    /// function of state so it is directly testable for states (like
+    /// `reconnecting`) that this offline slice never actually reaches -
+    /// see `SessionStateMachineTests`.
+    static func canEnd(for state: SessionState) -> Bool {
         switch state {
-        case .requestingMic, .connecting, .listening, .paused:
+        case .requestingMic, .connecting, .listening, .paused, .reconnecting:
             return true
-        case .idle, .micDenied, .reconnecting, .authError, .ended:
+        case .idle, .micDenied, .authError, .ended:
             return false
         }
     }
 
-    /// Maps the primary dock button per HANDOFF.md section 5. `requestingMic`,
-    /// `micDenied`, `reconnecting` and `authError` are left disabled: the
-    /// section-5 table only defines idle/listening/paused/connecting/ended.
-    func primaryButtonTapped() {
+    var canEnd: Bool { Self.canEnd(for: state) }
+
+    private enum PrimaryAction {
+        case beginRequestingMic
+        case resume
+        case pause
+        case startNewSession
+        case none
+    }
+
+    /// Maps the primary dock button per HANDOFF.md section 5: idle ->
+    /// Bat dau, listening/reconnecting -> Tam dung, paused -> Tiep tuc,
+    /// connecting -> spinner (disabled), ended -> Phien moi. `micDenied`
+    /// re-checks the real permission (the OS answers instantly once it has
+    /// already been decided, so this is how a grant via Settings takes
+    /// effect - see docs/demo-mic-status.md). `requestingMic` and
+    /// `authError` stay inert: the section-5 table defines no action for
+    /// them here.
+    private static func primaryAction(for state: SessionState) -> PrimaryAction {
         switch state {
-        case .idle:
-            beginRequestingMic()
+        case .idle, .micDenied:
+            return .beginRequestingMic
         case .paused:
-            resume()
-        case .listening:
-            pause()
+            return .resume
+        case .listening, .reconnecting:
+            return .pause
         case .ended:
-            startNewSession()
-        case .requestingMic, .connecting, .micDenied, .reconnecting, .authError:
-            break
+            return .startNewSession
+        case .requestingMic, .connecting, .authError:
+            return .none
+        }
+    }
+
+    func primaryButtonTapped() {
+        switch Self.primaryAction(for: state) {
+        case .beginRequestingMic: beginRequestingMic()
+        case .resume: resume()
+        case .pause: pause()
+        case .startNewSession: startNewSession()
+        case .none: break
         }
     }
 
@@ -85,24 +121,27 @@ final class DemoSessionController: ObservableObject {
 
     private func beginConnecting() {
         state = .connecting
-        do {
-            try audioCapture.start()
-            state = .listening
-            playbackToken = UUID()
-            playNextEvent(token: playbackToken)
-        } catch {
-            state = .micDenied
-        }
+        startCaptureAndPlayback()
     }
 
     private func resume() {
+        startCaptureAndPlayback()
+    }
+
+    /// Starts real capture and, on success, playback. A capture failure
+    /// here is an engine/hardware problem, not a permission denial - HANDOFF
+    /// section 5 has no dedicated mic-error state and the design has no
+    /// banner for it, so this returns to `idle` ("Mic tat") rather than
+    /// inventing one. Flagged as a gap for the project owner in the handoff
+    /// report.
+    private func startCaptureAndPlayback() {
         do {
             try audioCapture.start()
             state = .listening
             playbackToken = UUID()
             playNextEvent(token: playbackToken)
         } catch {
-            state = .micDenied
+            state = .idle
         }
     }
 
@@ -112,12 +151,26 @@ final class DemoSessionController: ObservableObject {
         state = .paused
     }
 
+    /// Capture stopped itself for a reason outside the user's own pause tap
+    /// (backgrounding, a phone call, media services reset - see
+    /// `AudioCapturing`). The dock must never keep saying "Dang nghe" once
+    /// that has happened, so this mirrors `pause()` without calling
+    /// `audioCapture.stop()` again (it already stopped).
+    private func handleCaptureStoppedExternally() {
+        guard state == .listening else { return }
+        playbackToken = UUID()
+        state = .paused
+    }
+
+    /// "Phien moi" clears the transcript and restarts the flow immediately,
+    /// per the approved prototype's `replay()` + `startFlow()` - it does not
+    /// stop at idle waiting for a second tap.
     private func startNewSession() {
         playbackToken = UUID()
         segments = []
         elapsed = 0
         eventIndex = 0
-        state = .idle
+        beginRequestingMic()
     }
 
     private func playNextEvent(token: UUID) {

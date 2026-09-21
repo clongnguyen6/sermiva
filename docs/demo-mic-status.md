@@ -36,6 +36,46 @@ in this slice that could use them. Pausing or ending the session stops the tap a
 deactivates the audio session, matching the "mic tat" line whenever capture is
 genuinely stopped.
 
+The same honesty requirement applies when capture stops for a reason outside the
+user's own pause tap: backgrounding, an interruption (a call, Siri, another app
+taking the mic), or a media services reset. `MicrophoneCapture` observes those three
+signals directly and reports back through `onUnexpectedStop`; the controller treats
+that exactly like an explicit pause (stop playback, `state = .paused`), so the dock
+never keeps asserting "Dang nghe" once the OS has actually taken the mic away. This
+also covers the concrete case of backgrounding: the app declares no
+`UIBackgroundModes: audio` entitlement, so iOS silently kills the tap on its own the
+moment the app leaves the foreground regardless of what the app does - reacting to
+`didEnterBackgroundNotification` makes that visible immediately instead of leaving a
+stale "listening" state until something else happens to notice. The controller also
+stops capture in `deinit`, so the mic cannot stay open if the controller is ever
+dropped from the view tree.
+
+A capture failure (`engine.start()` throwing) is treated as a hardware/engine
+problem, not a permission denial - reporting `micDenied` for it would tell the user
+"you have not granted microphone access" when they actually have, which is worse
+than saying nothing. HANDOFF.md section 5 has no dedicated mic-error state and the
+approved design has no banner for one, so this slice does not invent either; it
+returns to `idle` ("Mic tat") and leaves a real, named gap: **there is currently no
+UI signal that distinguishes "never asked" from "asked and the engine failed to
+open"; both look like idle.** That is a decision for the project owner to make in a
+later outcome, not something to paper over here.
+
+## Audio session category
+
+`MicrophoneCapture` activates the session with category `.record`, not
+`.playAndRecord`. This slice never plays any audio back (no TTS, no live segment
+readback), so forcing an output route at all - to the speaker via `.defaultToSpeaker`,
+or to a Bluetooth headset via `.allowBluetoothHFP` - would be asserting a playback
+concern the app has no playback to justify. `.record` avoids both.
+
+This does not make the demo session invisible to the rest of the system: activating
+any non-ambient audio session, including a record-only one, still takes audio focus
+and will interrupt another app's background playback for as long as the demo is
+listening. That is an unavoidable consequence of requesting real microphone access at
+all (true for essentially any voice app, live or demo), not something specific to how
+this slice configured the session - the category choice only controls whether the
+*output* route gets forced too, and here it does not.
+
 Given that, the mic dock text stays keyed purely off `SessionState`, exactly like the
 approved design: "Dang nghe" during `listening` is literally true, because the mic
 really is capturing. The `DEMO` badge and the "Phien mo phong" connection-status line
@@ -60,6 +100,16 @@ prove criterion 9 without a live Soniox key, which this slice needs anyway.
 
 This does not implement or test echo suppression, barge-in, or any interaction
 between the open tap and eventual TTS playback - those stay `[that]` and out of scope
-per AGENTS.md and the outcome brief. It also does not implement `reconnecting` or
-`authError`: those states exist on `SessionState` for contract completeness but
-nothing in this slice can produce the network/auth signal that would drive into them.
+per AGENTS.md and the outcome brief. `reconnecting` and `authError` exist on
+`SessionState` for contract completeness, and the primary-button and `canEnd`
+mappings do handle `reconnecting` correctly (tested as a pure function of state), but
+nothing in this slice can produce the network/auth signal that would actually drive
+either state - no path in product code reaches them, and none was added just to make
+them reachable for testing.
+
+Not verified on a real Simulator in this outcome: an actual Home-button-and-return or
+a real phone-call interruption. This environment has no way to drive Simulator UI
+interaction (no accessibility automation, no XCUITest target in scope), so the
+external-stop path is proven by a unit test that calls the capture's own
+`onUnexpectedStop` callback directly, plus reading `MicrophoneCapture`'s notification
+registration and cleanup code - not by an observed Home-press on device.

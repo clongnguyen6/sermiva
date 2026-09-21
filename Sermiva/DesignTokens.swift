@@ -9,7 +9,7 @@ enum Tokens {
     static let surface = dynamic(light: "#FFFFFF", dark: "#1C1C1E")
     static let surface2 = dynamic(light: "#E5E5EA", dark: "#2C2C2E")
     static let text = dynamic(light: "#000000", dark: "#FFFFFF")
-    static let text2 = dynamic(light: "#3C3C4380", dark: "#EBEBF580") // .78 alpha per handoff
+    static let text2 = dynamic(light: "#3C3C43C7", dark: "#EBEBF5C7") // .78 alpha per handoff
     static let text3 = dynamic(light: "#3C3C438C", dark: "#EBEBF58C") // .55 alpha per handoff
     static let sep = dynamic(light: "#3C3C433D", dark: "#54545899") // .24 / .6 alpha per handoff
     static let accent = dynamic(light: "#007AFF", dark: "#0A84FF")

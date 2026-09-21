@@ -1,8 +1,10 @@
 # sermiva - a live conversation translator for iPhone
 
 A native SwiftUI iPhone app: microphone capture, Soniox streaming transcription, translation, and
-speaker labels on one conversation screen. Nothing has been built yet. This repository holds an
-approved design and an interactive HTML prototype, and no application source.
+speaker labels on one conversation screen. This repository holds an approved design, an interactive
+HTML prototype, and a hand-made Xcode project (`Sermiva.xcodeproj`) that currently covers only the
+offline demo slice described in the Verify section below - the real Soniox integration is not
+built yet.
 
 `design/claude-handoff/HANDOFF.md` is the authority on screens, the session state machine, design
 tokens, and the acceptance criteria. The design is settled; do not redesign it and do not reopen it
@@ -29,11 +31,13 @@ xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
 ```
 
 `build` proves "compiles". `test` runs `SermivaTests` (state machine + segment assembly fixtures
-read from `demo-data.json`) and proves "behaves" for what those fixtures cover - nothing more.
-Neither command launches the app or drives the UI; "runs" needs a separate manual step (install +
-launch on a named Simulator, e.g. via `xcrun simctl install/launch`) and a description of what was
-actually observed on screen, not just an exit code. Nothing here reaches "works live" - that rung
-needs a real Soniox key on a real device, per Outcome 2.
+read from `demo-data.json`) and proves "behaves" for what those fixtures cover - nothing more. The
+test target does launch `Sermiva.app` as its `TEST_HOST` process, so "test passed" implies the app
+itself launched without crashing, but that is a side effect of how `XCTest` hosts unit tests, not UI
+automation: nothing in `test` drives the UI or looks at a screen. "runs" needs a separate manual step
+(install + launch on a named Simulator, e.g. via `xcrun simctl install/launch`) and a description of
+what was actually observed on screen, not just an exit code. Nothing here reaches "works live" - that
+rung needs a real Soniox key on a real device, per Outcome 2.
 
 State which rung your claim is on, every time:
 
@@ -120,5 +124,5 @@ Claude Code reads `CLAUDE.md`, which imports this file.
 ## Maintenance
 
 Update this file when any of these change: how a change is verified, the project or package layout,
-the Soniox integration contract, or the release process. The first Xcode project makes the Verify
-section stale on the day it lands.
+the Soniox integration contract, or the release process. The Verify section above must keep matching
+the actual scheme, targets and commands as the project grows past the offline demo slice.

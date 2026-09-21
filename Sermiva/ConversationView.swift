@@ -136,8 +136,10 @@ struct ConversationView: View {
     private var content: some View {
         if controller.segments.isEmpty {
             emptyState
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             CaptionsTranscriptView(segments: controller.segments)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -202,7 +204,7 @@ struct ConversationView: View {
 
     private var primaryDisabled: Bool {
         switch controller.state {
-        case .connecting, .requestingMic, .micDenied, .authError: return true
+        case .connecting, .requestingMic, .authError: return true
         default: return false
         }
     }
