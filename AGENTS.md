@@ -14,31 +14,30 @@ disagree, the handoff wins on what the app is, and this file wins on how work is
 
 ## Verify before handing back
 
-Never report something as working without running it; paste real output, not a description. Nothing here runs automatically - no CI, no pre-commit hook - so run it by hand every time:
+Never report something as working without running it; paste real output, not a description. If a
+step was skipped, say which one and why. Nothing here runs automatically - so run it by hand every time:
 
 ```
 ./scripts/verify.sh
 ```
 
-Run from the repo root. It boots the named Simulator (iPhone 17, UDID `2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD`),
-waits for it to settle, builds, runs `SermivaTests`, then `SermivaUITests`, exiting non-zero and
-naming the cause: build failure, test failure, or a run on a cloned Simulator instead of the named device.
+Run from the repo root. It boots the named Simulator by UDID, not name (iPhone 17, `2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD`),
+waits for it to settle, builds, runs `SermivaTests`, then `SermivaUITests`, exiting non-zero naming
+the cause: build failure, test failure, a clone signature in the log, or that UDID missing or not
+Booted afterward (reported as that, not asserted a clone). State which rung your claim is on, every time:
 
 | Claim | What proves it |
 |---|---|
 | compiles | the `build` step |
-| runs | `SermivaUITests`: drives the real UI, Setup -> demo -> Bat dau -> a fixture segment visible |
-| behaves | `SermivaTests`: state machine + segment assembly fixtures from `demo-data.json`, nothing beyond what those fixtures cover |
+| runs | `SermivaUITests`: the real committed app, no product-code hooks, only accessibility identifiers; checks the first and a later fixture segment; its screenshots land in the test's result bundle |
+| behaves | `SermivaTests`: state machine + segment assembly fixtures from `demo-data.json`, nothing beyond what those fixtures cover; it launches the app as its `TEST_HOST`, which is not UI automation - nothing in it drives or looks at the UI |
 | works live | a real Soniox key on a real device, named, and what you heard - not proven here, per Outcome 2 |
 
-Not covered: Settings, any other display style, real audio hardware (echo, barge-in, overlapping
-speech, per-segment language ID, `me`/`guest`/`target` routing, the loudspeaker case - all marked
-`[thật]` in the handoff), and Soniox's own stream shape, kept behind a thin, untested adapter.
+Not covered: Settings, any other display style, real audio hardware (echo, barge-in, overlapping speech, per-segment language ID, `me`/`guest`/`target` routing, the loudspeaker case - all marked `[thật]` in the handoff),
+and Soniox's own stream shape, kept behind a thin, untested adapter - a test written around a contract nobody has confirmed forces a compatibility layer that never goes away.
 
-Do not delete the committed shared scheme at
-`Sermiva.xcodeproj/xcshareddata/xcschemes/Sermiva.xcscheme`: its `parallelizable = "NO"` keeps a run
-on the named Simulator. Without it, `xcodebuild` auto-generates a scheme with parallel testing
-enabled, silently moving tests onto a cloned Simulator instead - the failure mode `scripts/verify.sh` checks for.
+Do not delete the committed shared scheme at `Sermiva.xcodeproj/xcshareddata/xcschemes/Sermiva.xcscheme`: its `parallelizable = "NO"` keeps a run on the named Simulator. Without it, `xcodebuild` auto-generates a scheme
+with parallel testing enabled, silently moving tests onto a cloned Simulator instead - the failure mode `scripts/verify.sh` checks for.
 
 ## Source of truth
 

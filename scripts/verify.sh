@@ -2,15 +2,18 @@
 # Verification for handing back work on this repo. See AGENTS.md "Verify before handing back"
 # for what each step proves (compiles / runs / behaves) and what it does not cover.
 #
-# Exits non-zero on: build failure, test failure, or a test run that landed on a cloned
-# Simulator instead of the named device. The failure message names which of the three happened.
+# Exits non-zero on: build failure, test failure, a test run whose log carries a clone signature,
+# or the named Simulator (by UDID) turning up missing or not Booted afterward. The failure message
+# names which one happened, without asserting more than what was actually observed.
 set -uo pipefail
 
 UDID="2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD"
-DEVICE_NAME="iPhone 17"
+DEVICE_NAME="iPhone 17"  # display label only - selection below is always pinned to UDID, not name
 PROJECT="Sermiva.xcodeproj"
 SCHEME="Sermiva"
-DESTINATION="platform=iOS Simulator,name=${DEVICE_NAME}"
+# `id=` pins xcodebuild to this exact device. `name=` would match any device with a matching
+# name - including a second, unrelated device that happens to share the name "iPhone 17".
+DESTINATION="platform=iOS Simulator,id=${UDID}"
 LOG_DIR="$(mktemp -d "${TMPDIR:-/tmp}/sermiva-verify.XXXXXX")"
 
 fail() {
@@ -52,35 +55,34 @@ run_tests() {
     -destination "$DESTINATION" -only-testing:"$TARGET" test 2>&1 | tee "$TEST_LOG"
   local TEST_EXIT=${PIPESTATUS[0]}
 
-  # A clone run happens if tests do not run under the committed shared scheme's
-  # parallelizable="NO" setting (see AGENTS.md Verify section for why that scheme must not be
-  # deleted). Do not trust the run's own .xcresult bundle to check this: its deviceName/deviceId fields
-  # report the named Simulator even when the run actually happened on a clone. Clones also do not
-  # show up in `xcrun simctl list devices` (the default device set) - they live in a separate
-  # device set, `xcrun simctl --set testing list devices`.
-  #
-  # The two signals that actually distinguish a clone run, both checked below:
-  #   1. log signature: a clone run's xcodebuild lines read
-  #      "... passed on 'Clone N of iPhone 17 - ...'"; a named-device run's lines carry no
-  #      "on '...'" at all.
-  #   2. device state: the named device must still be Booted right after the run: a clone run
-  #      leaves it Shutdown. This is only a valid signal because the boot/bootstatus step above
-  #      already settled the named device before any test ran - otherwise a normal named-device
-  #      run could also end Shutdown and look like a false clone signal.
+  # A clone run happens when tests do not run under the committed shared scheme - see AGENTS.md's
+  # Verify section for why that scheme must not be deleted. Do not trust the run's own .xcresult
+  # bundle to check this: its deviceName/deviceId fields report the named Simulator even when the
+  # run actually happened on a clone. Clones also do not show up in `xcrun simctl list devices`
+  # (the default device set) - they live in a separate device set,
+  # `xcrun simctl --set testing list devices`. The signal that actually distinguishes a clone run:
+  # a clone run's xcodebuild lines read "... passed on 'Clone N of iPhone 17 - ...'"; a
+  # named-device run's lines carry no "on '...'" at all.
   if grep -q "on 'Clone" "$TEST_LOG"; then
-    fail "clone run ($TARGET ran on a cloned Simulator, not ${DEVICE_NAME} - see ${TEST_LOG})"
-  fi
-
-  local STATE
-  STATE=$(xcrun simctl list devices | grep "$UDID" | sed -E 's/.*\(([A-Za-z]+)\)[^()]*$/\1/')
-  if [ "$STATE" != "Booted" ]; then
-    fail "clone run ($TARGET left ${DEVICE_NAME} in state '${STATE}' instead of Booted, meaning the run happened on a clone - see ${TEST_LOG})"
+    fail "clone run ($TARGET ran on a cloned Simulator, not ${UDID} - see ${TEST_LOG})"
   fi
 
   # A genuine test failure can make xcodebuild take several extra minutes here collecting
   # diagnostics from the Simulator before it exits - that is xcodebuild's own behavior on a
   # failure, not this script hanging.
   [ "$TEST_EXIT" -eq 0 ] || fail "test failure ($TARGET - see ${TEST_LOG})"
+
+  # No clone signature and a reported pass, but the device itself is now missing or not Booted:
+  # something is still wrong, but it is not established to be a clone, so it is not reported as
+  # one. xcodebuild has been observed to shut a named device down on its own (see the boot-order
+  # comment above) even on a genuine named-device run, so "not Booted" alone does not mean "clone".
+  local STATE
+  STATE=$(xcrun simctl list devices | grep "$UDID" | sed -E 's/.*\(([A-Za-z]+)\)[^()]*$/\1/')
+  if [ -z "$STATE" ]; then
+    fail "could not find Simulator ${UDID} in \`xcrun simctl list devices\` after running ${TARGET} - see ${TEST_LOG}"
+  elif [ "$STATE" != "Booted" ]; then
+    fail "Simulator ${UDID} was left in state '${STATE}' (not Booted) after running ${TARGET} - not itself proof of a clone run, but the run is not trusted - see ${TEST_LOG}"
+  fi
 }
 
 run_tests SermivaTests
