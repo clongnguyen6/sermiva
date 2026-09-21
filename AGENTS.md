@@ -136,7 +136,10 @@ WebView. Rebuild the interface in SwiftUI.
 - Change anything outside this repository: system settings, security or privacy configuration,
   machine-wide tool configuration, or another project. The one exception is the Simulator itself -
   any operation on it (creating, booting, shutting down, erasing, deleting, changing its settings,
-  restarting its service) is routine, not a change this rule covers.
+  restarting its service) is routine, not a change this rule covers. Installing, deleting, or
+  downloading a Simulator runtime or an Xcode platform (`xcrun simctl runtime`,
+  `xcodebuild -downloadPlatform`) is not part of that exception - it reaches outside this Simulator
+  instance, so ask first.
 
 ## Scope discipline
 

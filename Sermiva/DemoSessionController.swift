@@ -143,9 +143,9 @@ final class DemoSessionController: ObservableObject {
     /// same `playbackToken` pause/end/"Phien moi" already rotate, so by the
     /// time this is false, no translation is actually landing in the
     /// background either - the demo's own activity, not merely its display,
-    /// stops with the session. `CaptionsTranscriptView` reads this the same
-    /// way it reads `micDockText` - a precomputed result, not a flag it
-    /// re-derives itself.
+    /// stops with the session. `CaptionsTranscriptView` never reads this
+    /// value directly - it reads `displaySegments` below, which folds this
+    /// into each segment's own precomputed result.
     static func isActivityRunning(for state: SessionState) -> Bool {
         state == .listening
     }
