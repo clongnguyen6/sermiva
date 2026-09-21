@@ -371,4 +371,50 @@ final class SessionStateMachineTests: XCTestCase {
             "the End Session sheet body the controller hands to the view must already have the mic clause dropped in demo"
         )
     }
+
+    // MARK: - K1: an activity indicator (the "Dang nhan dang" tag, its
+    // pulsing dot, the caret, "Dang dich..." and its spinner) only shows
+    // while that activity is genuinely running - not as a stale readout of
+    // a segment's own shape (`isFinal`/`target`) once the session has
+    // stopped advancing.
+
+    func test_isActivityRunningIsTrueOnlyWhileListening() {
+        let allStates: [SessionState] = [
+            .idle, .requestingMic, .micDenied, .connecting, .listening,
+            .paused, .reconnecting, .authError, .ended,
+        ]
+        for state in allStates {
+            XCTAssertEqual(
+                DemoSessionController.isActivityRunning(for: state),
+                state == .listening,
+                "isActivityRunning must be true for .listening only, state: \(state)"
+            )
+        }
+    }
+
+    /// Drives the real flow with a partial (non-final) segment still
+    /// current, exactly the shape the project owner's review found showing
+    /// a stale "Dang nhan dang" while paused: `isActivityRunning` must
+    /// track session state, not the segment's own `isFinal`, which stays
+    /// false throughout since nothing here ever completes it.
+    func test_isActivityRunningTracksPauseAndEndWhileASegmentStaysPartial() {
+        let (controller, _, scheduler, _) = makeController()
+        XCTAssertFalse(controller.isActivityRunning)
+
+        controller.primaryButtonTapped() // -> listening, applies event 1 (a partial)
+        XCTAssertFalse(controller.segments[0].isFinal, "the fixture's first event is a partial, not yet final")
+        XCTAssertTrue(controller.isActivityRunning, "genuinely listening: the indicator may show")
+
+        controller.primaryButtonTapped() // -> paused, segment still partial
+        XCTAssertFalse(controller.segments[0].isFinal)
+        XCTAssertFalse(controller.isActivityRunning, "paused: the partial's indicator must not claim ongoing activity")
+
+        controller.primaryButtonTapped() // -> listening again
+        XCTAssertTrue(controller.isActivityRunning)
+
+        controller.endSession()
+        XCTAssertFalse(controller.isActivityRunning, "ended: nothing is running any more")
+
+        scheduler.drainAll()
+    }
 }

@@ -6,6 +6,11 @@ import SwiftUI
 /// bar, history rows smaller and separated by dividers.
 struct CaptionsTranscriptView: View {
     let segments: [Segment]
+    /// Whether recognition/translation is genuinely running right now - see
+    /// `DemoSessionController.isActivityRunning`. Gates every "in progress"
+    /// indicator below; it does not affect what content is shown, only
+    /// whether the view claims something is actively happening.
+    let isActivityRunning: Bool
 
     private var current: Segment? { segments.last }
     private var history: ArraySlice<Segment> { segments.dropLast() }
@@ -15,13 +20,13 @@ struct CaptionsTranscriptView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     ForEach(Array(history), id: \.id) { segment in
-                        HistoryRow(segment: segment)
+                        HistoryRow(segment: segment, isActivityRunning: isActivityRunning)
                         if segment.id != history.last?.id {
                             Rectangle().fill(Tokens.sep).frame(height: 0.5)
                         }
                     }
                     if let current {
-                        CurrentRow(segment: current)
+                        CurrentRow(segment: current, isActivityRunning: isActivityRunning)
                     }
                 }
                 .padding(.horizontal, 20)
@@ -43,6 +48,7 @@ struct CaptionsTranscriptView: View {
 
 private struct CurrentRow: View {
     let segment: Segment
+    let isActivityRunning: Bool
     @ScaledMetric(relativeTo: .body) private var metaSize: CGFloat = 13
     @ScaledMetric(relativeTo: .body) private var srcSize: CGFloat = 16
     @ScaledMetric(relativeTo: .body) private var tgtSize: CGFloat = 24
@@ -55,14 +61,14 @@ private struct CurrentRow: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     SegmentMeta(segment: segment, fontSize: metaSize)
-                    CurrentStatusTag(segment: segment)
+                    CurrentStatusTag(segment: segment, isActivityRunning: isActivityRunning)
                     Spacer(minLength: 0)
                 }
                 HStack(alignment: .bottom, spacing: 0) {
                     Text(segment.source)
                         .font(.system(size: srcSize))
                         .foregroundStyle(Tokens.text2)
-                    if !segment.isFinal {
+                    if !segment.isFinal && isActivityRunning {
                         BlinkingCaret()
                     }
                 }
@@ -70,7 +76,7 @@ private struct CurrentRow: View {
                     Text(target)
                         .font(.system(size: tgtSize, weight: .semibold))
                         .foregroundStyle(Tokens.text)
-                } else if segment.isFinal {
+                } else if segment.isFinal && isActivityRunning {
                     TranslatingPlaceholder(fontSize: metaSize)
                 }
             }
@@ -93,12 +99,13 @@ private struct CurrentRow: View {
         // individually to VoiceOver, so nothing it reads changes.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("currentSegment")
-        .accessibilityAddTraits(segment.isFinal ? [] : .updatesFrequently)
+        .accessibilityAddTraits((segment.isFinal || !isActivityRunning) ? [] : .updatesFrequently)
     }
 }
 
 private struct HistoryRow: View {
     let segment: Segment
+    let isActivityRunning: Bool
     @ScaledMetric(relativeTo: .body) private var metaSize: CGFloat = 12
     @ScaledMetric(relativeTo: .body) private var srcSize: CGFloat = 14
     @ScaledMetric(relativeTo: .body) private var tgtSize: CGFloat = 17
@@ -113,7 +120,7 @@ private struct HistoryRow: View {
                 Text(target)
                     .font(.system(size: tgtSize, weight: .medium))
                     .foregroundStyle(Tokens.text)
-            } else if segment.isFinal {
+            } else if segment.isFinal && isActivityRunning {
                 TranslatingPlaceholder(fontSize: metaSize)
             }
         }
@@ -161,16 +168,19 @@ private struct SegmentMeta: View {
     }
 }
 
-/// "Dang nhan dang" (pulsing dot) while partial, "Hoan tat" (checkmark)
-/// once a target has landed. Explicitly not uppercase, and only ever shown
-/// on the current row - the prototype has no such tag on history rows.
+/// "Dang nhan dang" (pulsing dot) while partial and genuinely running,
+/// "Hoan tat" (checkmark) once a target has landed - the latter is a
+/// completed fact, not a claim of ongoing activity, so it does not need
+/// `isActivityRunning`. Explicitly not uppercase, and only ever shown on
+/// the current row - the prototype has no such tag on history rows.
 private struct CurrentStatusTag: View {
     let segment: Segment
+    let isActivityRunning: Bool
     @ScaledMetric(relativeTo: .body) private var tagSize: CGFloat = 13
     @ScaledMetric(relativeTo: .body) private var checkmarkSize: CGFloat = 10
 
     var body: some View {
-        if !segment.isFinal {
+        if !segment.isFinal && isActivityRunning {
             HStack(spacing: 5) {
                 PulsingDot(color: Tokens.accent)
                 Text("Đang nhận dạng")

@@ -35,12 +35,15 @@ xcrun simctl boot 2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD
 xcrun simctl bootstatus 2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD -b
 ```
 
+`simctl boot` on an already-booted device returns `Unable to boot device in current state: Booted`
+with a non-zero exit; that is expected, not a failure, and `bootstatus -b` still exits 0 right after.
+
 Starting a test command against a Simulator that is `Shutdown` has been observed to fail with
 `Busy ("Application failed preflight checks")` on the named device itself, no clone involved, on 2
-of 3 cold-start attempts; the third attempt passed but only because `xcodebuild` booted and then
-shut the Simulator back down on its own, which would otherwise read as a false clone signal below.
-No cause deeper than "starting from `Shutdown` is unreliable" was established - boot and settle
-first and this does not come up.
+of 3 cold-start attempts; the third attempt passed, but `xcodebuild` then shut the Simulator back
+down on its own, which would otherwise read as a false clone signal below. No cause deeper than
+"starting from `Shutdown` is unreliable" was established - boot and settle first and this does not
+come up.
 
 ```
 xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
@@ -130,6 +133,9 @@ WebView. Rebuild the interface in SwiftUI.
   the owner enters through the app's own screen.
 - Add a dependency, or introduce a package manager or a project generator.
 - Signing, device provisioning, TestFlight, or publishing anything.
+- Change anything outside this repository: system settings, security or privacy configuration,
+  machine-wide tool configuration, or another project. The one exception is the Simulator: creating,
+  booting, deleting, and restarting the Simulator service is routine.
 
 ## Scope discipline
 
@@ -151,8 +157,12 @@ Each of these corrects something the prototype or the handoff would otherwise le
   unidentified rather than being assigned one.
 - **A verified signal, or no badge.** Diarization is not an overlap detector. Do not render the
   "Nói chồng" state without a signal from the service that says so.
-- **Microphone, network, transcription, translation and playback are five separate states.** Never
-  show "Đang nghe" while capture is stopped. The prototype collapses these; the app must not.
+- **An activity indicator only shows while that activity is genuinely running.** Microphone,
+  network, transcription, translation and playback are five separate states, each with its own
+  label ("Đang nghe", "Đang nhận dạng", "Đang dịch…"), spinner, pulsing dot, or caret; none of them
+  may reflect a segment's own stale shape or another activity's state once the real one has stopped.
+  When it stops, hide the indicator or fall back to an existing true state - never write new copy.
+  The prototype collapses these; the app must not.
 - **Keys never appear in chat, in a log, in a URL, or in this repository.** Entry happens through
   the app's own screen into Keychain. The handoff's key pattern and its `sx_demo_...` value are
   `[mô phỏng]`; validate real credentials against the actual service.

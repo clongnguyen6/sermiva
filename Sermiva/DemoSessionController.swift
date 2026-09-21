@@ -137,6 +137,23 @@ final class DemoSessionController: ObservableObject {
         EndSessionSheet.bodyText(isDemo: isDemo)
     }
 
+    /// Whether backend activity - recognition or translation - is genuinely
+    /// happening right now. The demo scheduler only ever advances playback
+    /// or fills a translation while `state == .listening`; every other
+    /// state (idle, paused, ended, or anything before the first tap) must
+    /// not claim an in-progress "Dang nhan dang" or "Dang dich..." for a
+    /// segment that merely has `isFinal == false` or no `target` yet - the
+    /// project owner's rule that an activity indicator only shows while
+    /// that activity is really running, not as a stale readout of a
+    /// segment's own shape. `CaptionsTranscriptView` reads this the same
+    /// way it reads `micDockText` - a precomputed result, not a flag it
+    /// re-derives itself.
+    static func isActivityRunning(for state: SessionState) -> Bool {
+        state == .listening
+    }
+
+    var isActivityRunning: Bool { Self.isActivityRunning(for: state) }
+
     /// Whether "Ket thuc" may open the confirmation sheet right now. A pure
     /// function of state so it is directly testable for states (like
     /// `reconnecting`) that this offline slice never actually reaches -
