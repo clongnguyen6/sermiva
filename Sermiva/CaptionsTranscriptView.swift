@@ -86,7 +86,14 @@ private struct CurrentRow: View {
         // live inside the identified view itself, so it actually shows.
         .padding(.bottom, 16)
         .id(segment.id)
+        // Without this, SwiftUI never creates one addressable element for
+        // the whole card - `.accessibilityIdentifier` lands on whichever
+        // child Text happens to claim it instead. `.contain` groups the
+        // card into one element while still exposing each child
+        // individually to VoiceOver, so nothing it reads changes.
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("currentSegment")
+        .accessibilityAddTraits(segment.isFinal ? [] : .updatesFrequently)
     }
 }
 

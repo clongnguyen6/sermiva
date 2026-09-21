@@ -20,19 +20,29 @@ and paste the real output rather than describing it.
 The project is `Sermiva.xcodeproj` (hand-written `project.pbxproj`, no project generator), scheme
 `Sermiva`, targets `Sermiva` (app), `SermivaTests` (XCTest) and `SermivaUITests` (one XCUITest smoke
 test). Deployment target iOS 17.0. Bundle id `com.clongnguyen6.sermiva` (`.SermivaTests` /
-`.SermivaUITests` for the test targets). These are the commands that were actually run; run them
-again from the repo root before trusting a "compiles" or "behaves" claim:
+`.SermivaUITests` for the test targets). These are the commands that were actually run against the
+same Simulator, iPhone 17, and actually passed; run them again from the repo root before trusting a
+"compiles", "runs" or "behaves" claim:
 
 ```
 xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
+  -destination 'platform=iOS Simulator,name=iPhone 17' build
 
 xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:SermivaTests test
+  -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:SermivaTests test
 
 xcodebuild -project Sermiva.xcodeproj -scheme Sermiva -sdk iphonesimulator \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -only-testing:SermivaUITests test
+  -destination 'platform=iOS Simulator,name=iPhone 17' -only-testing:SermivaUITests test
 ```
+
+If the target Simulator is not already booted and settled, boot it first and wait
+(`xcrun simctl boot <udid>` then `xcrun simctl bootstatus <udid> -b`) - launching the UI test runner
+against a Simulator that is still mid-boot fails with `RBSRequestErrorDomain Code=5 "Launch failed"` /
+`FBSOpenApplicationServiceErrorDomain ... Busy`, on any device, and has nothing to do with Developer
+Mode or with which iPhone model is targeted. (An earlier version of this section blamed a disabled
+`DevToolsSecurity` - that was wrong: the same failure reproduced and then went away on both iPhone 17
+and iPhone 17 Pro depending only on whether the Simulator had just finished booting; do not reach for
+`sudo DevToolsSecurity -enable` for this.)
 
 `build` proves "compiles". The `SermivaTests` run (state machine + segment assembly fixtures read
 from `demo-data.json`) proves "behaves" for what those fixtures cover - nothing more; it also
@@ -41,19 +51,16 @@ but that is a side effect of how `XCTest` hosts unit tests, not UI automation - 
 the UI or looks at a screen.
 
 The `SermivaUITests` run is the one thing that does drive the UI: it taps into the real committed
-app (Setup -> demo -> Bat dau -> first fixture segment visible) with no hooks or shortcuts in product
-code, only accessibility identifiers. Passing is real "runs" evidence, repeatable, not a one-off
-screenshot - but it proves only that one path; it says nothing about any other display style, about
-Settings, or about anything needing Soniox. It requires the host Mac to have Developer Mode enabled
-(`DevToolsSecurity -status`; enable with `sudo DevToolsSecurity -enable`, a one-time interactive
-admin action) - `xcodebuild build` and the `SermivaTests` run do not need this, only XCUITest's
-debugger-based process attach does. If that command reports disabled and nobody with admin access to
-this machine can run the enable step, `SermivaUITests` cannot run here; say so plainly rather than
-reporting a guessed result.
+app (Setup -> demo -> Bat dau -> first fixture segment's real content visible, then a later segment's
+content visible) with no hooks or shortcuts in product code, only accessibility identifiers. Passing
+is real "runs" evidence, repeatable, not a one-off screenshot, with the demo's actual content attached
+as screenshots in the test's result bundle. It proves only that one path - it says nothing about any
+other display style, about Settings, or about anything needing Soniox.
 
 A plain "install and observe" pass (`xcrun simctl install` / `launch` / `io screenshot`, no taps) is
 weaker evidence than `SermivaUITests` - it cannot get past the Setup screen without tapping - but it
-still proves the app installs and launches, and is the fallback when `SermivaUITests` cannot run.
+still proves the app installs and launches, and is a fallback if `SermivaUITests` cannot run for some
+other reason.
 
 Nothing here reaches "works live" - that rung needs a real Soniox key on a real device, per
 Outcome 2.
