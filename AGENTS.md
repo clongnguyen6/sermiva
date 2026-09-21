@@ -20,10 +20,9 @@ step was skipped, say which one and why. Nothing runs automatically; run it by h
 ./scripts/verify.sh
 ```
 
-Run from repo root; it boots iPhone 17 by UDID, not name (`2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD`),
-waits to settle, builds, runs `SermivaTests`, then `SermivaUITests`. A non-zero exit names the
-cause: build failure, test failure, a clone signature, or that UDID missing or not Booted afterward,
-reported as such, not as a clone. State which rung your claim is on, every time:
+Boots iPhone 17 by UDID (`2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD`), not name, from repo root; builds
+and tests. Exit is non-zero for: build failure, test failure, a clone signature, or UDID missing/not
+Booted (not asserted a clone). State which rung your claim is on, every time:
 
 | Claim | What proves it |
 |---|---|
@@ -31,6 +30,7 @@ reported as such, not as a clone. State which rung your claim is on, every time:
 | runs | `SermivaUITests`: the real committed app, no product-code hooks, only accessibility identifiers; checks the first and a later fixture segment; its screenshots land in the test's result bundle |
 | behaves | `SermivaTests`: state machine + segment assembly fixtures from `demo-data.json`, nothing beyond what those fixtures cover; it launches the app as its `TEST_HOST`, which is not UI automation - nothing in it drives or looks at the UI |
 | works live | a real Soniox key on a real device, named, and what you heard - not proven here, per Outcome 2 |
+
 This does not cover Settings, other display styles, or audio hardware (echo, barge-in, overlapping
 speech, per-segment language ID, `me`/`guest`/`target` routing, loudspeaker case), all `[thật]` in
 the handoff. Soniox's stream shape is untested: behind a thin adapter, so do not write tests through
