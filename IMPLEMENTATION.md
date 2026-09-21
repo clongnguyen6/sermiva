@@ -4,7 +4,17 @@ The approved design is in `design/claude-handoff/HANDOFF.md`. The standalone HTM
 
 ## First milestone
 
-Build a native SwiftUI iPhone application with a working vertical slice: microphone capture → Soniox streaming → original text, translated text and optional speaker labels on the Captions screen. Provide an explicit offline demo using the supplied fixtures. Validate on Simulator, then on an actual iPhone before expanding all layouts.
+Two sequential outcomes. The first deliberately does not touch Soniox.
+
+**Outcome 1.** A hand-made Xcode project that builds, and the conversation screen in the Phụ đề
+display style replaying the sample conversation from `design/claude-handoff/demo-data.json` with
+speaker labels, following the session state machine in `HANDOFF.md` section 5 including the denied
+microphone branch. No network, no Soniox, no key. The build and run commands this produces are part
+of the deliverable: they replace the placeholder in the Verify section of `AGENTS.md`.
+
+**Outcome 2.** The same screen driven by the real service. Before any integration code is written,
+read the current official Soniox documentation and record the chosen `me` / `guest` / `target`
+routing strategy together with its limits. Validate on a Simulator, then on an actual iPhone.
 
 The durable constraints for this repository are in `AGENTS.md`. This document only sequences the work.
 
