@@ -15,16 +15,15 @@ disagree, the handoff wins on what the app is, and this file wins on how work is
 ## Verify before handing back
 
 Never report something as working without running it; paste real output, not a description. If a
-step was skipped, say which one and why. Nothing here runs automatically - so run it by hand every time:
+step was skipped, say which one and why. Nothing runs automatically; run it by hand every time:
 
 ```
 ./scripts/verify.sh
 ```
-
-Run from the repo root. It boots the named Simulator by UDID, not name (iPhone 17, `2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD`),
-waits for it to settle, builds, runs `SermivaTests`, then `SermivaUITests`, exiting non-zero naming
-the cause: build failure, test failure, a clone signature in the log, or that UDID missing or not
-Booted afterward (reported as that, not asserted a clone). State which rung your claim is on, every time:
+Run from repo root; it boots iPhone 17 by UDID, not name (`2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD`),
+waits to settle, builds, runs `SermivaTests`, then `SermivaUITests`; a non-zero exit names the cause
+- build failure, test failure, a clone signature, or that UDID missing or not Booted afterward,
+reported as such, not as a clone. State which rung your claim is on, every time:
 
 | Claim | What proves it |
 |---|---|
@@ -33,11 +32,13 @@ Booted afterward (reported as that, not asserted a clone). State which rung your
 | behaves | `SermivaTests`: state machine + segment assembly fixtures from `demo-data.json`, nothing beyond what those fixtures cover; it launches the app as its `TEST_HOST`, which is not UI automation - nothing in it drives or looks at the UI |
 | works live | a real Soniox key on a real device, named, and what you heard - not proven here, per Outcome 2 |
 
-Not covered: Settings, any other display style, real audio hardware (echo, barge-in, overlapping speech, per-segment language ID, `me`/`guest`/`target` routing, the loudspeaker case - all marked `[thật]` in the handoff),
-and Soniox's own stream shape, kept behind a thin, untested adapter - a test written around a contract nobody has confirmed forces a compatibility layer that never goes away.
+Not covered: Settings, other display style, audio hardware (echo, barge-in, overlapping speech,
+per-segment language ID, `me`/`guest`/`target` routing, loudspeaker case - `[thật]`), and Soniox
+stream, behind a thin adapter: an unconfirmed contract forces a lasting compatibility layer.
 
-Do not delete the committed shared scheme at `Sermiva.xcodeproj/xcshareddata/xcschemes/Sermiva.xcscheme`: its `parallelizable = "NO"` keeps a run on the named Simulator. Without it, `xcodebuild` auto-generates a scheme
-with parallel testing enabled, silently moving tests onto a cloned Simulator instead - the failure mode `scripts/verify.sh` checks for.
+Do not delete the committed scheme at `Sermiva.xcodeproj/xcshareddata/xcschemes/Sermiva.xcscheme`:
+its `parallelizable = "NO"` keeps runs on the named device; without it, `xcodebuild` auto-generates
+a parallel scheme that silently moves tests onto a clone, which `scripts/verify.sh` checks for.
 
 ## Source of truth
 

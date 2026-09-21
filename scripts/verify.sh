@@ -74,8 +74,11 @@ run_tests() {
 
   # No clone signature and a reported pass, but the device itself is now missing or not Booted:
   # something is still wrong, but it is not established to be a clone, so it is not reported as
-  # one. xcodebuild has been observed to shut a named device down on its own (see the boot-order
-  # comment above) even on a genuine named-device run, so "not Booted" alone does not mean "clone".
+  # one. A clone run does leave the named device Shutdown - but that signal is only meaningful
+  # because the boot/bootstatus step above already settled the device as Booted before this test
+  # ran. xcodebuild has also been observed to shut a named device down on its own (see the
+  # boot-order comment above) even on a genuine named-device run, so "not Booted" alone does not
+  # mean "clone" - it is reported as exactly that, not asserted to be a clone.
   local STATE
   STATE=$(xcrun simctl list devices | grep "$UDID" | sed -E 's/.*\(([A-Za-z]+)\)[^()]*$/\1/')
   if [ -z "$STATE" ]; then
