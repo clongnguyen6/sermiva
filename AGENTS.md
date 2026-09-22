@@ -2,9 +2,8 @@
 
 A native SwiftUI iPhone app: microphone capture, Soniox streaming transcription, translation, and
 speaker labels on one conversation screen. This repository holds an approved design, an interactive
-HTML prototype, and a hand-made Xcode project (`Sermiva.xcodeproj`) that currently covers only the
-offline demo slice described in the Verify section below - the real Soniox integration is not
-built yet.
+HTML prototype, and a hand-made Xcode project (`Sermiva.xcodeproj`) covering two slices: an offline
+demo (no network, no real mic) and a live Soniox session, both described in the Verify section below.
 
 `design/claude-handoff/HANDOFF.md` is the authority on screens, the session state machine, design
 tokens, and the acceptance criteria. The design is settled; do not redesign it and do not reopen it
@@ -21,48 +20,52 @@ step was skipped, say which one and why. Nothing runs automatically; run it by h
 ```
 
 Boots iPhone 17 by UDID (`2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD`), not name, from repo root; builds
-and tests. Exit is non-zero for: build failure, test failure, a clone signature, or UDID missing/not
-Booted (not asserted a clone). State which rung your claim is on, every time:
+and tests on the Simulator only. Exit is non-zero for: build failure, test failure, a clone
+signature, the Simulator stuck "Shutting Down", or UDID missing/not Booted (not asserted a clone).
+`./scripts/verify.sh --device` additionally builds and installs on the owner's iPhone "Long"
+(`00008101-000138D801F8001E`), pinned by UDID, with development signing under the owner's personal
+team; it never launches or starts a session on it. State which rung your claim is on, every time:
 
 | Claim | What proves it |
 |---|---|
 | compiles | the `build` step |
 | runs | `SermivaUITests`: the real committed app, no product-code hooks, only accessibility identifiers; checks the first and a later fixture segment; its screenshots land in the test's result bundle |
-| behaves | `SermivaTests`: state machine + segment assembly fixtures from `demo-data.json`, nothing beyond what those fixtures cover; it launches the app as its `TEST_HOST`, which is not UI automation - nothing in it drives or looks at the UI |
-| works live | a real Soniox key on a real device, named, and what you heard - not proven here, per Outcome 2 |
+| behaves | `SermivaTests`: state machine + segment assembly fixtures from `demo-data.json`, the no-guess join, and Keychain, nothing beyond what those cover; it launches the app as its `TEST_HOST`, which is not UI automation - nothing in it drives or looks at the UI |
+| works live | a real Soniox key on a real device, named, and what you heard - never proven by this script; the owner runs that session |
 
-This does not cover Settings, other display styles, or audio hardware (echo, barge-in, overlapping
-speech, per-segment language ID, `me`/`guest`/`target` routing, loudspeaker case), all `[thật]` in
-the handoff. Soniox's stream shape is untested: behind a thin adapter, so do not write tests through
-it - a test around an unconfirmed contract forces a compatibility layer that never goes away.
+This does not cover Settings, other display styles, or real audio hardware (echo, barge-in,
+overlapping speech, loudspeaker case) - all `[thật]` in the handoff and, on the Simulator,
+indistinguishable from correct: audio-dependent behaviour can look entirely right on a Simulator run
+without ever having exercised real hardware. Soniox's stream shape is untested: behind a thin
+adapter, so do not write tests through it - a test around an unconfirmed contract forces a
+compatibility layer that never goes away.
 
 Do not delete the committed scheme at `Sermiva.xcodeproj/xcshareddata/xcschemes/Sermiva.xcscheme`:
-its `parallelizable = "NO"` keeps runs on the named device; without it, `xcodebuild` auto-generates
-a parallel scheme that silently moves tests onto a clone, which `scripts/verify.sh` checks for.
+its `parallelizable = "NO"` keeps runs on the named device; without it, `xcodebuild` auto-generates a
+parallel scheme that silently moves tests onto a clone, which `scripts/verify.sh` checks for.
 
 ## Source of truth
 
-`design/claude-handoff/` is an approved handoff package, and reference material rather than
-application code.
+`design/claude-handoff/` is an approved handoff package, and reference material rather than application code.
 
 - `HANDOFF.md` and `demo-data.json` are authoritative. `demo-data.json` is the fixture that offline
   demo mode plays back, and the fixture the tests above read.
-- `Sermiva.dc.html`, `Sermiva.standalone.html`, `ios-frame.jsx`, `support.js` are the prototype and
-  its runtime. `HANDOFF.md` §13 states they are not used by the app.
+- `Sermiva.dc.html`, `Sermiva.standalone.html`, `ios-frame.jsx`, `support.js` are the prototype and its runtime. `HANDOFF.md` §13 states they are not used by the app.
 
-Never edit anything under `design/claude-handoff/`, and never ship the prototype HTML inside a
-WebView. Rebuild the interface in SwiftUI.
+Never edit anything under `design/claude-handoff/`, and never ship the prototype HTML inside a WebView. Rebuild the interface in SwiftUI.
 
 ## Do not do without asking first
 
 - Change an approved screen, flow, token, or acceptance criterion.
-- Add anything the approved design does not describe: an account system, a subscription
-  system, or a new feature.
+- Add anything the approved design does not describe: an account system, a subscription system, or a new feature.
 - Open a streaming session against the real Soniox service. It is metered and costs money per
   session, including during a test run. Live testing happens when the owner asks for it, with a key
   the owner enters through the app's own screen.
 - Add a dependency, or introduce a package manager or a project generator.
-- Signing, device provisioning, TestFlight, or publishing anything.
+- TestFlight, App Store Connect, distribution certificates, or publishing anything. Development
+  signing under the owner's personal team, to build and install on the owner's device (Verify's
+  `--device` flag), is approved; an Apple account in Xcode, Developer Mode, and trusting the Mac
+  stay the owner's own steps.
 - Change anything outside this repository: system settings, security or privacy configuration,
   machine-wide tool configuration, or another project. The one exception is the Simulator itself -
   any operation on it (creating, booting, shutting down, erasing, deleting, changing its settings,
@@ -109,12 +112,9 @@ Each of these corrects something the prototype or the handoff would otherwise le
   prototype artifact, and the app's own font-size setting is a separate axis from system Dynamic
   Type. Interface chrome still has to scale for accessibility.
 
-## Tool-specific context
-
-Claude Code reads `CLAUDE.md`, which imports this file.
-
 ## Maintenance
 
-Update this file when any of these change: how a change is verified, the project or package layout,
-the Soniox integration contract, or the release process. The Verify section above must keep matching
-the actual scheme, targets and commands as the project grows past the offline demo slice.
+Claude Code reads `CLAUDE.md`, which imports this file. Update it when any of these change: how a
+change is verified, the project or package layout, the Soniox integration contract, or the release
+process. The Verify section above must keep matching the actual scheme, targets and commands as the
+project grows.
