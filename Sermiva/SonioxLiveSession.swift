@@ -215,14 +215,14 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// realign the reconnected socket's new zero-based timeline with the
     /// surviving socket's old one. If only one side reconnects, its future
     /// windows are computed on a fresh clock while the other stream is
-    /// still on the original one, so new joins on the reconnected side
-    /// will simply fail to find a match (safe - never a wrong translation,
-    /// per the no-guess rule - but no `me`-language segment gets a
-    /// translation either, for the rest of the session, until the other
-    /// side also reconnects and both share a fresh origin again). This is
-    /// a deliberate simplification, not a general fix - see
-    /// docs/soniox-routing.md's reconnecting section and the hand-off
-    /// report's owner questions.
+    /// still on the original one, so new joins on the reconnected side will
+    /// simply fail to find a match (safe - never a wrong translation, per
+    /// the no-guess rule - but no `me`-language segment gets a translation
+    /// either) for the rest of the session - a *later* reconnect of the
+    /// other side does not recover this either, since that resets its own
+    /// clock to its own zero at a different wall-clock moment, not to a
+    /// shared origin with the first socket. Deliberate simplification, not
+    /// a general fix - see docs/soniox-routing.md's reconnecting section.
     private func reconnect(isStreamM: Bool) {
         guard let config else { return }
         let hints: [String] = {

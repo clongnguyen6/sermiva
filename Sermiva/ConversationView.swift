@@ -150,9 +150,9 @@ struct ConversationView<Controller: SessionControlling>: View {
     /// that would not really be "Mở Cài đặt" (or reuse the mic-denied
     /// banner's iOS Settings deep link, which would be actively wrong for
     /// a rejected API key), this shows the message only, with no action -
-    /// the smallest honest choice, flagged as an owner question in the
-    /// hand-off report. The message itself reuses `SetupView`'s own
-    /// existing "Khóa không hợp lệ" copy rather than inventing new text.
+    /// the smallest honest choice, left for the project owner to decide.
+    /// The message itself reuses `SetupView`'s own existing "Khóa không
+    /// hợp lệ" copy rather than inventing new text.
     private var authErrorBanner: some View {
         HStack {
             Image(systemName: "exclamationmark.triangle")

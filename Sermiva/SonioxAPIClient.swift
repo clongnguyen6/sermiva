@@ -13,8 +13,8 @@ import Foundation
 /// invalid would be dishonest; HANDOFF's SettingsView vocabulary
 /// ("Chưa kiểm tra / Đang kiểm tra… / Khóa hợp lệ / Khóa không hợp lệ /
 /// Lỗi mạng") has no case that fits this either, so `SetupView` maps it
-/// onto the existing "Lỗi mạng" copy rather than inventing new text - see
-/// the hand-off report's owner questions.
+/// onto the existing "Lỗi mạng" copy - not literally accurate either, left
+/// for the project owner to decide.
 enum SonioxKeyValidationOutcome: Equatable {
     case valid(concurrencyWarning: String?)
     case invalidKey

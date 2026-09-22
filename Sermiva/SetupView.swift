@@ -144,8 +144,9 @@ struct SetupView: View {
                     // The key itself was accepted for `.unusableConfiguration` -
                     // HANDOFF's status vocabulary has no case for "valid key,
                     // unusable model/languages", so this reuses the existing
-                    // "Lỗi mạng" copy rather than inventing new text. See the
-                    // hand-off report's owner questions.
+                    // "Lỗi mạng" copy rather than inventing new text. That
+                    // copy is not literally accurate here either - left as
+                    // is pending the project owner's decision.
                     validationState = .networkError
                 }
             }

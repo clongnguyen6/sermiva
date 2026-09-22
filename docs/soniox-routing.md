@@ -168,15 +168,17 @@ actually billed).
   windows against; no "Đang dịch…" lingers for them. The surviving socket keeps receiving live audio
   without interruption; only the reconnecting one misses audio during its own gap. Implemented
   simplification, not a general fix: reconnect does not attempt to realign the reconnected socket's
-  new zero-based clock with the surviving socket's old one, so if only one side reconnects, new joins
-  on that side will simply never find a match again for the rest of the session (safe - never a
-  wrong translation - but no `me`-language translation either) until the other side also reconnects
-  and both share a fresh origin. If M drops, its speaker numbering restarts; post-drop raw ids get
-  letters never shown pre-drop (see Segment mapping above) rather than being displayed as the same
-  person. Reconnect both before the 300-minute cap. **Owner question:** is this degrade-safely
-  behaviour (no translation for `me` segments after a one-sided reconnect, until both reconnect)
-  acceptable, or does a live session's reconnect frequency make a real timeline-realignment worth
-  the added complexity?
+  new zero-based clock with the surviving socket's old one. If only one side reconnects, new joins on
+  that side simply never find a match again (safe - never a wrong translation - but no `me`-language
+  translation either) **for the rest of the session**: a second, later reconnect of the other side
+  does not fix this either, since each reconnect resets that socket's own clock to its own zero at a
+  different wall-clock moment - two independently-reset clocks are not a shared origin, and the code
+  makes no attempt to establish one. If M drops, its speaker numbering restarts; post-drop raw ids
+  get letters never shown pre-drop (see Segment mapping above) rather than being displayed as the
+  same person. Reconnect both before the 300-minute cap. **Owner question:** is this permanent
+  degrade (no `me`-segment translation for the rest of the session after any one-sided reconnect)
+  acceptable, or should the app reconnect both sockets together instead, so they always share one
+  origin? Not implemented pending that decision.
 - ended: `finalize` on both, wait for `<fin>`, empty frame, wait for `finished`, close; close on
   timeout.
 
