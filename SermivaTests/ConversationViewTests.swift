@@ -9,8 +9,8 @@ import XCTest
 /// role's color - this covers that mapping directly.
 final class ConversationViewTests: XCTestCase {
     func test_micDotColorMapsEachRoleToItsOwnToken() {
-        XCTAssertEqual(ConversationView.micDotColor(for: .neutral), Tokens.text3)
-        XCTAssertEqual(ConversationView.micDotColor(for: .warn), Tokens.warn)
-        XCTAssertEqual(ConversationView.micDotColor(for: .live), Tokens.live)
+        XCTAssertEqual(ConversationView<DemoSessionController>.micDotColor(for: .neutral), Tokens.text3)
+        XCTAssertEqual(ConversationView<DemoSessionController>.micDotColor(for: .warn), Tokens.warn)
+        XCTAssertEqual(ConversationView<DemoSessionController>.micDotColor(for: .live), Tokens.live)
     }
 }

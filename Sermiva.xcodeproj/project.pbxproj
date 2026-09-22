@@ -34,6 +34,21 @@
 		5B2919A77B4C472AA2635653 /* DemoFixtureLoaderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD6FFDA9C0C74A429864612A /* DemoFixtureLoaderTests.swift */; };
 		85F695C7713B42D7B2AE77BE /* demo-data.json in Resources */ = {isa = PBXBuildFile; fileRef = 7836B2C424AD45E5892A6EE1 /* demo-data.json */; };
 		C06795C17D9046929C083F8E /* demo-data.json in Resources */ = {isa = PBXBuildFile; fileRef = 7836B2C424AD45E5892A6EE1 /* demo-data.json */; };
+		7B7460B96491406E9E90AE61 /* SessionPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B892465E0EA42E98F1DC08C /* SessionPresentation.swift */; };
+		3011B80C79D24D8BBD17ED5F /* SessionControlling.swift in Sources */ = {isa = PBXBuildFile; fileRef = C9D98BE02FDC4421931BA07C /* SessionControlling.swift */; };
+		E1F7785016A94349929D34F7 /* SonioxToken.swift in Sources */ = {isa = PBXBuildFile; fileRef = 061961B2D1CA4DEFA822DB66 /* SonioxToken.swift */; };
+		CCF21EB99FDD4447A932AF76 /* SonioxJoinEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4648BE7231A9406E82F4C71D /* SonioxJoinEngine.swift */; };
+		0B572FF729DE48E7A4BB21CC /* SonioxWireModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 85236940B0BF48158F43C178 /* SonioxWireModels.swift */; };
+		9C3D2A28CC8E4AF7BA3BE557 /* SonioxStreamSocket.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43751FA6D0AC4118950E8797 /* SonioxStreamSocket.swift */; };
+		18B0DFBA483841DA9E0737E4 /* SonioxLiveSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22A71BF94A1B4CC48722C07B /* SonioxLiveSession.swift */; };
+		163A1E39E4504590865463D1 /* SonioxAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37E07FE3A4D045E3949AAF02 /* SonioxAPIClient.swift */; };
+		F7D2C62FAD9F41BB95F5BBC7 /* SonioxKeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A8E1C33C183742FF8D6D5822 /* SonioxKeychainStore.swift */; };
+		FA2013E2FE754D04BBF632F3 /* RealMicPermissionProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 972DD9B5E41E4A71850095A7 /* RealMicPermissionProvider.swift */; };
+		2FBF7C551D6E4ADEB20F51D8 /* RealAudioCapture.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0E599D64A764F289B80EDEE /* RealAudioCapture.swift */; };
+		CEBE349C386940F68666C576 /* LiveSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FFDE534B1C740EB96AC2B4A /* LiveSessionController.swift */; };
+		A6FC13DA6E1E4379B7F00670 /* SonioxJoinEngineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAC10FFE0D8A45F4814819D7 /* SonioxJoinEngineTests.swift */; };
+		7EE9E01A7C92494BB6084537 /* SonioxAPIClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8271E915E8DE4BB4B8A3C381 /* SonioxAPIClientTests.swift */; };
+		CEC2915BF19846C4A3774F7E /* LiveSessionControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45962B9A2D9C477CBC26D686 /* LiveSessionControllerTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -83,6 +98,21 @@
 		88054569658846F789D6BDE7 /* SermivaUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SermivaUITests.swift; sourceTree = "<group>"; };
 		0349CD65761D4FF9B474FA15 /* SermivaUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SermivaUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		F1569EAC826C413FB40C7DBC /* EndSessionSheetTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EndSessionSheetTests.swift; sourceTree = "<group>"; };
+		7B892465E0EA42E98F1DC08C /* SessionPresentation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionPresentation.swift; sourceTree = "<group>"; };
+		C9D98BE02FDC4421931BA07C /* SessionControlling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionControlling.swift; sourceTree = "<group>"; };
+		061961B2D1CA4DEFA822DB66 /* SonioxToken.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxToken.swift; sourceTree = "<group>"; };
+		4648BE7231A9406E82F4C71D /* SonioxJoinEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxJoinEngine.swift; sourceTree = "<group>"; };
+		85236940B0BF48158F43C178 /* SonioxWireModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxWireModels.swift; sourceTree = "<group>"; };
+		43751FA6D0AC4118950E8797 /* SonioxStreamSocket.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxStreamSocket.swift; sourceTree = "<group>"; };
+		22A71BF94A1B4CC48722C07B /* SonioxLiveSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxLiveSession.swift; sourceTree = "<group>"; };
+		37E07FE3A4D045E3949AAF02 /* SonioxAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxAPIClient.swift; sourceTree = "<group>"; };
+		A8E1C33C183742FF8D6D5822 /* SonioxKeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxKeychainStore.swift; sourceTree = "<group>"; };
+		972DD9B5E41E4A71850095A7 /* RealMicPermissionProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealMicPermissionProvider.swift; sourceTree = "<group>"; };
+		B0E599D64A764F289B80EDEE /* RealAudioCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealAudioCapture.swift; sourceTree = "<group>"; };
+		3FFDE534B1C740EB96AC2B4A /* LiveSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSessionController.swift; sourceTree = "<group>"; };
+		CAC10FFE0D8A45F4814819D7 /* SonioxJoinEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxJoinEngineTests.swift; sourceTree = "<group>"; };
+		8271E915E8DE4BB4B8A3C381 /* SonioxAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxAPIClientTests.swift; sourceTree = "<group>"; };
+		45962B9A2D9C477CBC26D686 /* LiveSessionControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSessionControllerTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -130,6 +160,18 @@
 				69BE3416B76347A0A7DBDBC6 /* ConversationView.swift */,
 				EDF9915E7B9045E5806EA8F0 /* CaptionsTranscriptView.swift */,
 				5BD8D81A4C9A4B4EB3976598 /* EndSessionSheet.swift */,
+				7B892465E0EA42E98F1DC08C /* SessionPresentation.swift */,
+				C9D98BE02FDC4421931BA07C /* SessionControlling.swift */,
+				061961B2D1CA4DEFA822DB66 /* SonioxToken.swift */,
+				4648BE7231A9406E82F4C71D /* SonioxJoinEngine.swift */,
+				85236940B0BF48158F43C178 /* SonioxWireModels.swift */,
+				43751FA6D0AC4118950E8797 /* SonioxStreamSocket.swift */,
+				22A71BF94A1B4CC48722C07B /* SonioxLiveSession.swift */,
+				37E07FE3A4D045E3949AAF02 /* SonioxAPIClient.swift */,
+				A8E1C33C183742FF8D6D5822 /* SonioxKeychainStore.swift */,
+				972DD9B5E41E4A71850095A7 /* RealMicPermissionProvider.swift */,
+				B0E599D64A764F289B80EDEE /* RealAudioCapture.swift */,
+				3FFDE534B1C740EB96AC2B4A /* LiveSessionController.swift */,
 			);
 			path = Sermiva;
 			sourceTree = "<group>";
@@ -144,6 +186,9 @@
 				DD6FFDA9C0C74A429864612A /* DemoFixtureLoaderTests.swift */,
 				65BB55D9DE304E2898821F68 /* ConversationViewTests.swift */,
 				A449C874F8444313B85CF398 /* SegmentDisplayTests.swift */,
+				CAC10FFE0D8A45F4814819D7 /* SonioxJoinEngineTests.swift */,
+				8271E915E8DE4BB4B8A3C381 /* SonioxAPIClientTests.swift */,
+				45962B9A2D9C477CBC26D686 /* LiveSessionControllerTests.swift */,
 			);
 			path = SermivaTests;
 			sourceTree = "<group>";
@@ -324,6 +369,18 @@
 				5A7CC37470874BC386794F72 /* ConversationView.swift in Sources */,
 				072BD63256C6434687589E20 /* CaptionsTranscriptView.swift in Sources */,
 				ECB91888A5DC4C11BC80A4D7 /* EndSessionSheet.swift in Sources */,
+				7B7460B96491406E9E90AE61 /* SessionPresentation.swift in Sources */,
+				3011B80C79D24D8BBD17ED5F /* SessionControlling.swift in Sources */,
+				E1F7785016A94349929D34F7 /* SonioxToken.swift in Sources */,
+				CCF21EB99FDD4447A932AF76 /* SonioxJoinEngine.swift in Sources */,
+				0B572FF729DE48E7A4BB21CC /* SonioxWireModels.swift in Sources */,
+				9C3D2A28CC8E4AF7BA3BE557 /* SonioxStreamSocket.swift in Sources */,
+				18B0DFBA483841DA9E0737E4 /* SonioxLiveSession.swift in Sources */,
+				163A1E39E4504590865463D1 /* SonioxAPIClient.swift in Sources */,
+				F7D2C62FAD9F41BB95F5BBC7 /* SonioxKeychainStore.swift in Sources */,
+				FA2013E2FE754D04BBF632F3 /* RealMicPermissionProvider.swift in Sources */,
+				2FBF7C551D6E4ADEB20F51D8 /* RealAudioCapture.swift in Sources */,
+				CEBE349C386940F68666C576 /* LiveSessionController.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -338,6 +395,9 @@
 				5B2919A77B4C472AA2635653 /* DemoFixtureLoaderTests.swift in Sources */,
 				AD94258047874F11B85645D2 /* ConversationViewTests.swift in Sources */,
 				A85F489CB6884A009B7D9A56 /* SegmentDisplayTests.swift in Sources */,
+				A6FC13DA6E1E4379B7F00670 /* SonioxJoinEngineTests.swift in Sources */,
+				7EE9E01A7C92494BB6084537 /* SonioxAPIClientTests.swift in Sources */,
+				CEC2915BF19846C4A3774F7E /* LiveSessionControllerTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -430,6 +490,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Sermiva;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Sermiva cần micro để nhận dạng và dịch lời nói trong cuộc trò chuyện.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
@@ -453,6 +514,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = Sermiva;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Sermiva cần micro để nhận dạng và dịch lời nói trong cuộc trò chuyện.";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";

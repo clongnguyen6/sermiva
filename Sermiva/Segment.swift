@@ -15,4 +15,11 @@ struct Segment: Identifiable, Equatable {
     var isFinal: Bool
     var startedAt: TimeInterval
     var overlap: Bool
+    /// Set once the live no-guess join (docs/soniox-routing.md) has given up
+    /// on ever filling `target` for this segment - a permanent state, not a
+    /// retry. `target == nil` alone means "not yet", which still permits
+    /// showing the "Đang dịch…" placeholder; `targetAbandoned` means "never
+    /// will", which must not. Demo playback never sets this - it always
+    /// eventually fills `target` from the fixture.
+    var targetAbandoned: Bool = false
 }

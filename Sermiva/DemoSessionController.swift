@@ -8,7 +8,7 @@ import Foundation
 /// what makes that possible without the state machine lying about it -
 /// see docs/demo-mic-status.md.
 @MainActor
-final class DemoSessionController: ObservableObject {
+final class DemoSessionController: ObservableObject, SessionControlling {
     @Published private(set) var state: SessionState = .idle
     /// Whether the mic is genuinely capturing right now. Deliberately a
     /// separate published value, not derived from `state`: HANDOFF.md
@@ -77,19 +77,7 @@ final class DemoSessionController: ObservableObject {
     /// for why a live `listening` with no capture falls back to "Mic tat"
     /// rather than a dedicated error string.
     static func micDockText(isMicCapturing: Bool, state: SessionState, isDemo: Bool) -> String {
-        if isDemo {
-            return "Mic tắt"
-        }
-        if isMicCapturing {
-            return "Đang nghe"
-        }
-        switch state {
-        case .paused: return "Đã tạm dừng"
-        case .requestingMic, .connecting: return "Đang mở mic…"
-        case .reconnecting: return "Mic giữ, chờ mạng"
-        case .micDenied: return "Chưa có quyền mic"
-        case .idle, .ended, .authError, .listening: return "Mic tắt"
-        }
+        SessionPresentation.micDockText(isMicCapturing: isMicCapturing, state: state, isDemo: isDemo)
     }
 
     /// What `ConversationView` actually reads: the pure function above,
@@ -103,15 +91,10 @@ final class DemoSessionController: ObservableObject {
     /// directly testable without SwiftUI. Demo never implies a mic that is
     /// open or was ever open - not even "asking" (warn) - so it stays
     /// `.neutral` throughout, the same rule `micDockText` follows.
-    enum MicDotColorRole: Equatable {
-        case neutral, warn, live
-    }
+    typealias MicDotColorRole = SessionPresentation.MicDotColorRole
 
     static func micDotColorRole(isMicCapturing: Bool, state: SessionState, isDemo: Bool) -> MicDotColorRole {
-        guard !isDemo else { return .neutral }
-        if isMicCapturing { return .live }
-        if state == .connecting || state == .requestingMic { return .warn }
-        return .neutral
+        SessionPresentation.micDotColorRole(isMicCapturing: isMicCapturing, state: state, isDemo: isDemo)
     }
 
     var micDotColorRole: MicDotColorRole {
@@ -123,7 +106,7 @@ final class DemoSessionController: ObservableObject {
     /// otherwise - which in demo is unconditional, same rule as the text and
     /// the dot color.
     static func micIconName(isMicCapturing: Bool, isDemo: Bool) -> String {
-        (!isDemo && isMicCapturing) ? "mic.fill" : "mic.slash"
+        SessionPresentation.micIconName(isMicCapturing: isMicCapturing, isDemo: isDemo)
     }
 
     var micIconName: String {
@@ -147,7 +130,7 @@ final class DemoSessionController: ObservableObject {
     /// value directly - it reads `displaySegments` below, which folds this
     /// into each segment's own precomputed result.
     static func isActivityRunning(for state: SessionState) -> Bool {
-        state == .listening
+        SessionPresentation.isActivityRunning(for: state)
     }
 
     var isActivityRunning: Bool { Self.isActivityRunning(for: state) }
@@ -167,12 +150,7 @@ final class DemoSessionController: ObservableObject {
     /// `reconnecting`) that this offline slice never actually reaches -
     /// see `SessionStateMachineTests`.
     static func canEnd(for state: SessionState) -> Bool {
-        switch state {
-        case .requestingMic, .connecting, .listening, .paused, .reconnecting:
-            return true
-        case .idle, .micDenied, .authError, .ended:
-            return false
-        }
+        SessionPresentation.canEnd(for: state)
     }
 
     var canEnd: Bool { Self.canEnd(for: state) }

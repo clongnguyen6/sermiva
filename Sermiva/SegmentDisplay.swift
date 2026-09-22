@@ -23,7 +23,7 @@ struct SegmentDisplay: Equatable {
 
     static func make(for segment: Segment, isActivityRunning: Bool) -> SegmentDisplay {
         let isPartial = !segment.isFinal
-        let awaitingTranslation = segment.isFinal && segment.target == nil
+        let awaitingTranslation = segment.isFinal && segment.target == nil && !segment.targetAbandoned
         return SegmentDisplay(
             segment: segment,
             showsRecognizingTag: isPartial && isActivityRunning,

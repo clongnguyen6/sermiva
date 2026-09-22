@@ -13,6 +13,12 @@ import Foundation
 /// tests stay: Outcome 2's real implementation needs it.
 protocol AudioCapturing: AnyObject {
     var onUnexpectedStop: (@MainActor () -> Void)? { get set }
+    /// Fires with each captured buffer, already converted to the wire
+    /// format both Soniox streams expect (PCM s16le, 16 kHz, mono) - see
+    /// docs/soniox-routing.md's audio-origin section. Demo's
+    /// `NullAudioCapture` never calls this; it never opens real capture at
+    /// all.
+    var onAudioBuffer: (@MainActor (Data) -> Void)? { get set }
     func start() throws
     func stop()
 }
@@ -32,6 +38,7 @@ final class NullAudioCapture: AudioCapturing {
     }
 
     var onUnexpectedStop: (@MainActor () -> Void)?
+    var onAudioBuffer: (@MainActor (Data) -> Void)?
 
     func start() throws {
         throw NotUsedInDemo.audioIsNeverOpenedInDemoMode

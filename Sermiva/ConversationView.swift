@@ -4,13 +4,15 @@ import UIKit
 /// HANDOFF.md section 2.2, "Phu de" display style only. Demo mode: the
 /// `DEMO` badge is the visible marker; see docs/demo-mic-status.md for why
 /// the mic dock line's dot + icon + text always report mic off here - demo
-/// never opens real hardware.
-struct ConversationView: View {
-    @StateObject private var controller: DemoSessionController
+/// never opens real hardware. Generic over `SessionControlling` so the same
+/// approved screen drives either `DemoSessionController` or
+/// `LiveSessionController` - see `SessionControlling`.
+struct ConversationView<Controller: SessionControlling>: View {
+    @StateObject private var controller: Controller
     @State private var showEndSheet = false
 
-    init(events: [DemoEvent], isDemo: Bool) {
-        _controller = StateObject(wrappedValue: DemoSessionController(events: events, isDemo: isDemo))
+    init(controller: @autoclosure @escaping () -> Controller) {
+        _controller = StateObject(wrappedValue: controller())
     }
 
     var body: some View {
@@ -197,7 +199,7 @@ struct ConversationView: View {
     /// Pure so the role-to-color mapping is directly testable: demo must
     /// never reach `.live` (the "listening" red), and this is the one place
     /// that decides what color that role actually renders as.
-    static func micDotColor(for role: DemoSessionController.MicDotColorRole) -> Color {
+    static func micDotColor(for role: SessionPresentation.MicDotColorRole) -> Color {
         switch role {
         case .neutral: return Tokens.text3
         case .warn: return Tokens.warn
@@ -295,6 +297,12 @@ struct ConversationView: View {
         .padding(.top, 8)
         .padding(.bottom, 12)
         .background(.ultraThinMaterial)
+    }
+}
+
+extension ConversationView where Controller == DemoSessionController {
+    init(events: [DemoEvent], isDemo: Bool) {
+        self.init(controller: DemoSessionController(events: events, isDemo: isDemo))
     }
 }
 

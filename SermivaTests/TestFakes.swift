@@ -30,6 +30,7 @@ final class FakeAudioCapture: AudioCapturing {
     private(set) var stopCount = 0
     var failNextStart = false
     var onUnexpectedStop: (@MainActor () -> Void)?
+    var onAudioBuffer: (@MainActor (Data) -> Void)?
 
     func start() throws {
         if failNextStart {
@@ -45,6 +46,49 @@ final class FakeAudioCapture: AudioCapturing {
 
     @MainActor func simulateExternalStop() {
         onUnexpectedStop?()
+    }
+}
+
+/// Stands in for `SonioxLiveSession` so `LiveSessionController`'s state
+/// machine is testable without ever opening a socket. `start` never
+/// connects to anything real - the test drives its `completion` and the
+/// `on...` callbacks directly to simulate what a real session would report.
+final class FakeSonioxLiveSession: SonioxLiveSessionProtocol {
+    var onSegmentsChanged: (@MainActor ([Segment]) -> Void)?
+    var onAuthError: (@MainActor () -> Void)?
+    var onDisconnected: (@MainActor () -> Void)?
+    var onReconnected: (@MainActor () -> Void)?
+
+    private(set) var startCount = 0
+    private(set) var endCount = 0
+    private(set) var ingestedAudioCount = 0
+    private(set) var pauseKeepaliveCount = 0
+    private(set) var resumeCount = 0
+    var nextStartResult = true
+
+    // See SonioxLiveSession.init for why this must be nonisolated.
+    nonisolated init() {}
+
+    func start(config: SonioxSessionConfig, completion: @escaping @MainActor (Bool) -> Void) {
+        startCount += 1
+        completion(nextStartResult)
+    }
+
+    func ingestAudio(_ data: Data) {
+        ingestedAudioCount += 1
+    }
+
+    func beginPauseKeepalive() {
+        pauseKeepaliveCount += 1
+    }
+
+    func endPauseKeepalive() {
+        resumeCount += 1
+    }
+
+    func end(completion: @escaping @MainActor () -> Void) {
+        endCount += 1
+        completion()
     }
 }
 
