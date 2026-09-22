@@ -85,7 +85,7 @@ Each of these corrects something the prototype or the handoff would otherwise le
   documentation first; the handoff predates it. `me`, `guest` and `target` are three independent
   settings, and one two-way translation configuration does not necessarily serve asymmetric targets.
   Write down what you chose and its limits. Every screen reads segments, so changing this later
-  touches all of them.
+  touches all of them. Decided; see docs/soniox-routing.md.
 - **Never infer speaker identity from language.** "Bạn" and "Khách" are configuration labels;
   A / B / "Chưa xác định" always come from diarization. A segment with no speaker stays
   unidentified rather than being assigned one.
