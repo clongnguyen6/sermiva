@@ -48,6 +48,13 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     private var mConfigSent = false
     private var tConfigSent = false
     private var bufferedAudio: [Data] = []
+    /// Set once the very first (both-sockets-ready) flush has happened.
+    /// Before that, `ingestAudio` buffers until both sockets are ready, so
+    /// they share one byte-identical origin (docs/soniox-routing.md's
+    /// audio-origin rule). After that, a later reconnect of one socket must
+    /// never again pause the *surviving* socket's own live audio feed while
+    /// waiting - only the reconnecting socket goes quiet for its own gap.
+    private var hasStartedStreaming = false
     private var isEnding = false
     private var keepaliveTimer: Timer?
 
@@ -63,6 +70,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         mConfigSent = false
         tConfigSent = false
         bufferedAudio = []
+        hasStartedStreaming = false
         joinEngine = SonioxJoinEngine(meLanguage: config.meLanguage)
 
         var hints = [config.meLanguage, config.targetLanguage]
@@ -98,12 +106,26 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     }
 
     func ingestAudio(_ data: Data) {
-        guard mConfigSent, tConfigSent else {
-            bufferedAudio.append(data)
+        guard hasStartedStreaming else {
+            // Initial startup only: buffer until both sockets share one
+            // byte-identical origin, per docs/soniox-routing.md.
+            guard mConfigSent, tConfigSent else {
+                bufferedAudio.append(data)
+                return
+            }
+            hasStartedStreaming = true
+            streamM?.sendAudio(data)
+            streamT?.sendAudio(data)
             return
         }
-        streamM?.sendAudio(data)
-        streamT?.sendAudio(data)
+        // Once streaming has genuinely started, a later reconnect of one
+        // socket must not corrupt the surviving socket's own timeline by
+        // withholding its live audio while the other one is down - each
+        // ready socket gets audio independently; a reconnecting socket
+        // simply misses audio during its own gap (its timeline restarts
+        // regardless, per the reconnecting section of the routing doc).
+        if mConfigSent { streamM?.sendAudio(data) }
+        if tConfigSent { streamT?.sendAudio(data) }
     }
 
     func beginPauseKeepalive() {
@@ -145,7 +167,9 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
             if isStreamM { mConfigSent = true } else { tConfigSent = true }
             flushBufferedAudioIfReady()
         case .response(let response):
-            if let code = response.errorCode, (400...403).contains(code) {
+            // 401/402/403 are the docs' auth-class errors; 400 is not, and
+            // must not be treated as one.
+            if let code = response.errorCode, (401...403).contains(code) {
                 onAuthError?()
                 return
             }
@@ -159,6 +183,18 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
             onSegmentsChanged?(engine.segments)
         case .closed:
             guard !isEnding else { return }
+            // The dropped socket's replacement gets a fresh, zero-based
+            // timeline (docs/soniox-routing.md), so every join still in
+            // flight against the old shared origin must be abandoned now -
+            // not left to time out on its own, and not compared against
+            // timestamps that no longer share an origin with it.
+            joinEngine?.abandonAllPendingJoins()
+            if isStreamM {
+                joinEngine?.handleStreamMReconnected()
+            }
+            if let engine = joinEngine {
+                onSegmentsChanged?(engine.segments)
+            }
             onDisconnected?()
             reconnect(isStreamM: isStreamM)
         }
@@ -173,10 +209,20 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         bufferedAudio.removeAll()
     }
 
-    /// Reopening a dropped socket restarts that stream's own timeline (see
-    /// docs/soniox-routing.md's reconnecting bullet); any join windows
-    /// already pending on the dropped stream stay abandoned rather than
-    /// waiting on tokens that will never arrive with the old numbering.
+    /// Reopens the dropped socket only - `handle`'s `.closed` branch has
+    /// already abandoned every in-flight join and, for an M drop, cleared
+    /// the speaker-letter map before this runs. What this does NOT do:
+    /// realign the reconnected socket's new zero-based timeline with the
+    /// surviving socket's old one. If only one side reconnects, its future
+    /// windows are computed on a fresh clock while the other stream is
+    /// still on the original one, so new joins on the reconnected side
+    /// will simply fail to find a match (safe - never a wrong translation,
+    /// per the no-guess rule - but no `me`-language segment gets a
+    /// translation either, for the rest of the session, until the other
+    /// side also reconnects and both share a fresh origin again). This is
+    /// a deliberate simplification, not a general fix - see
+    /// docs/soniox-routing.md's reconnecting section and the hand-off
+    /// report's owner questions.
     private func reconnect(isStreamM: Bool) {
         guard let config else { return }
         let hints: [String] = {

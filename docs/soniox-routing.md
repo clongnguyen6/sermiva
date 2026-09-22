@@ -132,8 +132,12 @@ actually billed).
 - `id`: app-assigned, increasing per session.
 - Boundary: new segment on the first original token after `<end>`, or when a final original token
   changes `speaker` or `language` from the open segment's locked values.
-- `speaker`: first original token's `speaker`; "1" -> "A", "2" -> "B", "3" -> "C" in label order.
-  Missing -> `nil` -> "Chưa xác định". Never derived from language.
+- `speaker`: raw Soniox speaker ids are mapped to "A", "B", "C", ... in order of first appearance
+  within the current M connection - not by the raw id's numeric value, since diarization is not
+  guaranteed to hand "1" to whoever spoke first. Missing -> `nil` -> "Chưa xác định". Never derived
+  from language. The map is per-connection: an M reconnect clears it (never resets the letter
+  counter), so a post-reconnect raw id gets a letter never shown before, rather than risk falsely
+  implying it is the same person as a pre-reconnect speaker (see Session lifecycle below).
 - `lang`: `nil` until the first original token is final, then locked.
 - `source`: final original tokens plus the current non-final tail.
 - `target`, lang != `me`: M's translation chunk following the segment's original chunk, set when
@@ -158,10 +162,21 @@ actually billed).
 - paused: stop audio, keepalive every 10 s on both. Streams stay open so labels survive resume -
   M's speaker numbering must not restart mid-session. Pause time may be billed (see Live
   measurements above).
-- reconnecting: entered when either socket drops. Reopen that socket with its config; its timeline
-  restarts, so the join for M-segments started before T's drop is abandoned (they stay `nil`). If M
-  drops, its speaker numbering restarts and labels before and after are not comparable. Reconnect
-  both before the 300-minute cap.
+- reconnecting: entered when either socket drops. Reopen that socket with its own fresh config; its
+  timeline restarts at zero. The app abandons every join still in flight the moment either socket
+  drops - not just the ones on the dropped side - since a shared origin no longer exists to compare
+  windows against; no "Đang dịch…" lingers for them. The surviving socket keeps receiving live audio
+  without interruption; only the reconnecting one misses audio during its own gap. Implemented
+  simplification, not a general fix: reconnect does not attempt to realign the reconnected socket's
+  new zero-based clock with the surviving socket's old one, so if only one side reconnects, new joins
+  on that side will simply never find a match again for the rest of the session (safe - never a
+  wrong translation - but no `me`-language translation either) until the other side also reconnects
+  and both share a fresh origin. If M drops, its speaker numbering restarts; post-drop raw ids get
+  letters never shown pre-drop (see Segment mapping above) rather than being displayed as the same
+  person. Reconnect both before the 300-minute cap. **Owner question:** is this degrade-safely
+  behaviour (no translation for `me` segments after a one-sided reconnect, until both reconnect)
+  acceptable, or does a live session's reconnect frequency make a real timeline-realignment worth
+  the added complexity?
 - ended: `finalize` on both, wait for `<fin>`, empty frame, wait for `finished`, close; close on
   timeout.
 
