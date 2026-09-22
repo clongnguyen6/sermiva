@@ -7,12 +7,17 @@ import XCTest
 /// the language label. `CaptionsTranscriptView` only reads the result, so
 /// this is where every state demo actually passes through must be covered.
 final class SegmentDisplayTests: XCTestCase {
+    /// `translationInProgress` defaults to `true` here because these tests
+    /// describe demo's own contract, where the fixture's scheduled fill
+    /// already is the real "translation is under way" signal - see
+    /// `SegmentAssembler.apply` and `Segment.translationInProgress`.
     private func segment(
         lang: String? = "vi",
         isFinal: Bool,
-        target: String? = nil
+        target: String? = nil,
+        translationInProgress: Bool = true
     ) -> Segment {
-        Segment(id: 1, speaker: "A", lang: lang, source: "x", target: target, isFinal: isFinal, startedAt: 0, overlap: false)
+        Segment(id: 1, speaker: "A", lang: lang, source: "x", target: target, isFinal: isFinal, startedAt: 0, overlap: false, translationInProgress: translationInProgress)
     }
 
     func test_partialSegmentWhileRunningShowsRecognizingTagCaretAndUpdatesFrequently() {
@@ -42,6 +47,14 @@ final class SegmentDisplayTests: XCTestCase {
     func test_finalSegmentAwaitingTranslationWhileNotRunningShowsNoPlaceholder() {
         let display = SegmentDisplay.make(for: segment(isFinal: true, target: nil), isActivityRunning: false)
         XCTAssertFalse(display.showsTranslatingPlaceholder, "paused or ended must not claim a translation is in progress")
+    }
+
+    /// The AGENTS.md activity-indicator invariant, directly: `target == nil`
+    /// alone is the absence of a result, not a signal that a translation is
+    /// genuinely under way. Without `translationInProgress`, nothing shows.
+    func test_finalSegmentWithNoTranslationSignalShowsNoPlaceholderEvenWhileRunning() {
+        let display = SegmentDisplay.make(for: segment(isFinal: true, target: nil, translationInProgress: false), isActivityRunning: true)
+        XCTAssertFalse(display.showsTranslatingPlaceholder, "target == nil alone is not a real signal - nothing has shown that a translation is under way")
     }
 
     func test_finalSegmentWithATargetShowsNoIndicatorRegardlessOfRunning() {

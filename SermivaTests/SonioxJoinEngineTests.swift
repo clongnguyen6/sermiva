@@ -144,14 +144,70 @@ final class SonioxJoinEngineTests: XCTestCase {
         XCTAssertFalse(engine.segments[0].targetAbandoned)
     }
 
-    func test_translatingPlaceholderStaysUpUntilTPassesTheWindow() {
+    /// Re-review: `target == nil` alone is not a real signal - it is only
+    /// the absence of a result. Nothing from T has happened yet here, so
+    /// nothing should show - the exact case the review flagged against the
+    /// previous version of this test, which asserted the opposite.
+    func test_placeholderDoesNotShowBeforeAnyRealTranslationSignalArrives() {
         let engine = SonioxJoinEngine(meLanguage: "vi")
         engine.applyStreamM([
             original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
             endMarker(),
         ])
         let display = SegmentDisplay.make(for: engine.segments[0], isActivityRunning: true)
-        XCTAssertTrue(display.showsTranslatingPlaceholder, "final with no target yet, and not abandoned, must still show the placeholder")
+        XCTAssertFalse(display.showsTranslatingPlaceholder, "final with no target and no translation signal yet must show nothing, not a placeholder")
+    }
+
+    /// Once T actually starts translating this window - even with only a
+    /// non-final translation token - the placeholder may show: a real
+    /// signal from the contributing stream, not a guess. The non-final
+    /// text itself must never be committed to `target` (no karaoke reveal
+    /// of a partial translation, per HANDOFF section 6).
+    func test_placeholderShowsOnceARealNonFinalTranslationSignalArrivesFromT() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
+            endMarker(),
+        ])
+
+        engine.applyStreamT(
+            [
+                original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
+                translation("Hel", final: false),
+            ],
+            finalAudioProcMs: 500
+        )
+
+        let display = SegmentDisplay.make(for: engine.segments[0], isActivityRunning: true)
+        XCTAssertTrue(display.showsTranslatingPlaceholder, "a non-final translation token is a real signal that translation is under way")
+        XCTAssertNil(engine.segments[0].target, "a non-final translation token must never be committed to target")
+    }
+
+    /// The non-`me` (M-direct) side of the same rule: nothing shows before
+    /// M has sent any translation token for this segment.
+    func test_nonMePlaceholderDoesNotShowBeforeAnyMTranslationTokenArrives() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Hi", final: true, start: 0, end: 500, speaker: "1", lang: "en"),
+            endMarker(),
+        ])
+        let display = SegmentDisplay.make(for: engine.segments[0], isActivityRunning: true)
+        XCTAssertFalse(display.showsTranslatingPlaceholder)
+    }
+
+    /// ...and shows once a real (even non-final) M translation token
+    /// arrives, without that partial text ever landing in `target`.
+    func test_nonMePlaceholderShowsOnceANonFinalMTranslationTokenArrives() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Hi", final: true, start: 0, end: 500, speaker: "1", lang: "en"),
+            endMarker(),
+        ])
+        engine.applyStreamM([translation("Ch", final: false)])
+
+        let display = SegmentDisplay.make(for: engine.segments[0], isActivityRunning: true)
+        XCTAssertTrue(display.showsTranslatingPlaceholder)
+        XCTAssertNil(engine.segments[0].target)
     }
 
     /// Issue 2: independent streams do not guarantee arrival order. T can

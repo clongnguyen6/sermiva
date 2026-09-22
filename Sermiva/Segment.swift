@@ -22,4 +22,12 @@ struct Segment: Identifiable, Equatable {
     /// will", which must not. Demo playback never sets this - it always
     /// eventually fills `target` from the fixture.
     var targetAbandoned: Bool = false
+    /// Set once a real translation token - from whichever stream
+    /// contributes this segment's translation, final or not - has actually
+    /// arrived. `target == nil` alone is not a translation-in-progress
+    /// signal; per AGENTS.md's activity-indicator invariant, "Đang dịch…"
+    /// must reflect a genuine signal from the service, not merely the
+    /// absence of a result yet. Demo playback never sets this - its
+    /// placeholder timing comes from the fixture's own simulated delay.
+    var translationInProgress: Bool = false
 }

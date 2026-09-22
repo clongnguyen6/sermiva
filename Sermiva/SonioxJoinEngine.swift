@@ -263,22 +263,28 @@ final class SonioxJoinEngine {
     }
 
     private func applyMTranslation(_ token: SonioxToken) {
-        guard token.isFinal, let id = currentMSegmentId, let index = segments.firstIndex(where: { $0.id == id }) else { return }
+        guard let id = currentMSegmentId, let index = segments.firstIndex(where: { $0.id == id }) else { return }
         // M's own translation (target_language = me) is only meaningful for
         // a segment not already in `me` - a me-language segment's M
         // translation is a same-language echo, discarded per
         // docs/soniox-routing.md.
         guard let lang = segments[index].lang, lang != meLanguage else { return }
+        // Any translation token at all - final or not - is the real
+        // "translation is under way" signal; only a final one is ever
+        // committed to `target` (no karaoke reveal of partial translation
+        // text, per HANDOFF section 6).
+        segments[index].translationInProgress = true
+        guard token.isFinal else { return }
         segments[index].target = (segments[index].target ?? "") + token.text
     }
 
     // MARK: - Stream T (join only - T's own original text is never shown)
 
     func applyStreamT(_ tokens: [SonioxToken], finalAudioProcMs: Int) {
-        for token in tokens where token.isFinal {
+        for token in tokens {
             switch token.translationStatus {
             case .original:
-                applyTOriginal(token)
+                if token.isFinal { applyTOriginal(token) }
             case .translation:
                 applyTTranslation(token)
             case .none:
@@ -326,11 +332,20 @@ final class SonioxJoinEngine {
 
     private func applyTTranslation(_ token: SonioxToken) {
         guard let id = activeJoinId, var join = pendingJoins[id], !join.disqualified, !join.resolved else {
-            // No currently-active, still-open window to attach to - buffer
-            // it in case its own original gets matched on a later replay.
-            bufferUnmatched(token)
+            // No currently-active, still-open window to attach to. Only a
+            // final token is buffered for the no-guess replay mechanism
+            // (issue 2) - a non-final one is a live signal only, worth
+            // nothing to replay later.
+            if token.isFinal {
+                bufferUnmatched(token)
+            }
             return
         }
+        // Any translation token at all - final or not - is the real
+        // "translation is under way" signal for this window's segment;
+        // only a final one is ever committed to `collectedTarget`.
+        markTranslationInProgress(segmentId: join.segmentId)
+        guard token.isFinal else { return }
         join.collectedTarget += token.text
         pendingJoins[id] = join
     }
@@ -370,6 +385,11 @@ final class SonioxJoinEngine {
     private func markAbandoned(segmentId: Int) {
         guard let index = segments.firstIndex(where: { $0.id == segmentId }) else { return }
         segments[index].targetAbandoned = true
+    }
+
+    private func markTranslationInProgress(segmentId: Int) {
+        guard let index = segments.firstIndex(where: { $0.id == segmentId }) else { return }
+        segments[index].translationInProgress = true
     }
 
     /// Check 2: M itself saw no overlap in the window. Runs against every

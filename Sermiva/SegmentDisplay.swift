@@ -23,7 +23,12 @@ struct SegmentDisplay: Equatable {
 
     static func make(for segment: Segment, isActivityRunning: Bool) -> SegmentDisplay {
         let isPartial = !segment.isFinal
-        let awaitingTranslation = segment.isFinal && segment.target == nil && !segment.targetAbandoned
+        // `target == nil` alone is not a real signal - it is just the
+        // absence of a result. `translationInProgress` is set only once a
+        // real translation token has actually arrived (or, for demo, once
+        // the fixture has committed to filling it); without that, per
+        // AGENTS.md's activity-indicator invariant, nothing shows.
+        let awaitingTranslation = segment.isFinal && segment.target == nil && !segment.targetAbandoned && segment.translationInProgress
         return SegmentDisplay(
             segment: segment,
             showsRecognizingTag: isPartial && isActivityRunning,

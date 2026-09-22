@@ -19,6 +19,12 @@ enum SegmentAssembler {
             }
             if event.type == .final {
                 segments[index].isFinal = true
+                // The fixture guarantees a target will land after its own
+                // simulated delay - that scheduled fill is demo's real
+                // "translation is under way" signal, the same role a live
+                // stream's own translation tokens play for
+                // `SonioxJoinEngine` - see `Segment.translationInProgress`.
+                segments[index].translationInProgress = true
             }
         } else {
             segments.append(
@@ -30,7 +36,8 @@ enum SegmentAssembler {
                     target: nil,
                     isFinal: event.type == .final,
                     startedAt: elapsed,
-                    overlap: event.overlap ?? false
+                    overlap: event.overlap ?? false,
+                    translationInProgress: event.type == .final
                 )
             )
         }
