@@ -153,18 +153,23 @@ actually billed).
   `final_audio_proc_ms` has passed the segment's `end_ms` and its next original chunk has begun, or
   once the join is abandoned by the certainty test. Never shown for a discarded same-language
   translation.
-- "Đang dịch…" (`target` (lang != `me`), M-direct): shown only once a real translation token - final
-  or not - has actually arrived from M for that segment (`target == nil` alone is not a signal, it is
-  only the absence of a result). Cleared the moment the next M segment starts with nothing landed, or
-  once M's own `final_audio_proc_ms` has passed well beyond that segment's `end_ms` with still nothing
-  landed - the same kind of real signal the T-join case already trusts, covering the case where
-  `<end>` closes the segment and M simply never sends a final translation chunk for it at all.
+- "Đang dịch…" (`target` (lang != `me`), M-direct): reflects a live signal, not a timer. Non-final
+  tokens are replaced in full on every M response, so "the latest response still carries a
+  translation token for this segment" is itself the signal - shown while that holds, cleared
+  (`translationInProgress = false`) the moment a later response has none at all for the segment M is
+  currently tracking, whether or not any final chunk ever landed. This is a display flip only, never
+  a permanent verdict: a still-later response bringing the (possibly final) chunk after all sets the
+  signal true again, or lands `target` directly - a late final translation always lands cleanly, and
+  the segment is never simultaneously `targetAbandoned` and translated. `targetAbandoned` for a
+  non-`me` segment only ever comes from `startNewMSegment`'s "M moved on to a new segment with
+  nothing landed" rule, or from a reconnect - both genuinely permanent, unlike a single quiet
+  response.
 
 ## Session lifecycle
 
 - connecting: open both sockets, send both configs, buffer audio until both accepted. listening
   once both are sent (see Unknowns). 401/402/403 on either -> authError, which wins over everything
-  else, including a reconnect already in progress.
+  else at any point, including from a socket the app has already superseded by a reconnect.
 - listening: AVAudioEngine tap -> AVAudioConverter -> Int16 16 kHz mono -> same bytes to both
   sockets. Check `channelCount`/`sampleRate` before `installTapOnBus`.
 - paused: stop audio, keepalive every 10 s on both. Streams stay open so labels survive resume -
@@ -185,20 +190,33 @@ actually billed).
   being displayed as the same person, since the app has no way to know a post-drop "1" is the same
   person as any pre-drop speaker. The mic keeps capturing throughout - only the network side is
   affected; captured audio keeps being buffered while reconnecting (see below).
-  If the replacement pair itself fails to connect before its config is sent, the app retries with
-  exponential backoff (HANDOFF section 6: "retry backoff") - 1 s, 2 s, 4 s, ... capped at 30 s,
-  reset to 1 s the moment a pair fully connects again - opening a fresh pair each attempt, never
-  reusing a failed socket. Every socket is tagged with the connection attempt that created it, so a
-  stale event arriving from a socket the app itself already superseded (an old attempt's pair, or
-  the pair a fresh reconnect just closed) is discarded rather than mistaken for the current attempt's
-  own status - this is what lets retry converge instead of getting stuck on one dead attempt forever.
-  Buffered audio is capped at 200 chunks (roughly 50 s at the capture tap's buffer size); a
-  reconnect stuck retrying for longer than that drops the OLDEST buffered audio to make room for
-  new, rather than growing without bound - that audio is lost for both streams once dropped, same as
-  any other gap a reconnect's timeline restart already creates. Ending the session (`endImmediately`
-  for a 401/402/403, `end` otherwise) at any point during a reconnect stops the retry loop; a
-  scheduled retry checks this again right before it actually fires. Reconnect completes before the
-  300-minute cap.
+
+  Every socket the app opens is tagged with the connection attempt ("generation") that created it.
+  The moment either socket in the current pair closes, that generation is retired immediately -
+  before anything else runs - so a second close from the SAME pair (its other socket detecting the
+  same drop moments later) is recognised as stale and does not schedule a second, overlapping retry;
+  exactly one retry is ever pending per outage. If a replacement pair itself fails before its config
+  is sent, the app closes it and schedules exactly one more retry the same way - this is what lets
+  retry actually converge across a multi-attempt outage, not just recover from a single clean drop.
+  Backoff is exponential: 1 s, 2 s, 4 s, ... capped at 30 s, reset to 1 s the moment a pair fully
+  connects again (HANDOFF section 6: "retry backoff"). Ending the session (`endImmediately` for a
+  401/402/403, `end` otherwise) at any point during a reconnect stops the retry loop, including
+  mid-backoff; a scheduled retry checks this again right before it actually fires. Reconnect
+  completes before the 300-minute cap.
+
+  Captured audio keeps arriving from a mic that never stops during a reconnect; it is buffered and
+  sent from byte zero to whichever pair finally connects, across the WHOLE outage - a failed
+  attempt in the middle does not discard what was captured so far, only a successful flush (or
+  ending the session) ever clears it, so a later, separate outage starts from nothing. The buffer is
+  bounded by an exact duration of the converted 16 kHz mono Int16 stream (32,000 bytes/s) - 60 s
+  (1,920,000 bytes) - independent of whatever sample rate the device's microphone hardware happens
+  to be capturing at, since a chunk-count bound would not have that property (each hardware tap
+  callback's own duration varies with the hardware's rate). Beyond 60 s, the OLDEST buffered audio is
+  dropped to make room for new - that audio is lost for both streams, same as any other gap a
+  reconnect's timeline restart already creates. **Live session TODO:** confirm the actual buffered
+  duration achieved on a real device before relying on the 60 s figure.
+- ended: `finalize` on both, wait for `<fin>`, empty frame, wait for `finished`, close; close on
+  timeout.
 
 ## Known UI deviations from HANDOFF
 
@@ -208,8 +226,6 @@ actually billed).
   Setup's own key field starts empty, since the rejected key is deleted from Keychain the moment the
   button is tapped. Owner-approved temporary deviation, to be rewired to open Settings once it
   exists.
-- ended: `finalize` on both, wait for `<fin>`, empty frame, wait for `finished`, close; close on
-  timeout.
 
 ## Key validation and language list
 
