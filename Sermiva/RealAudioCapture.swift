@@ -23,48 +23,65 @@ final class RealAudioCapture: AudioCapturing {
     private var isRunning = false
 
     func start() throws {
-        let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
-        try session.setActive(true)
-
-        let input = engine.inputNode
-        let inputFormat = input.inputFormat(forBus: 0)
-        guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
-            throw CaptureError.converterUnavailable
-        }
-        guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
-            throw CaptureError.converterUnavailable
-        }
-        self.converter = converter
-
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(handleInterruption),
-            name: AVAudioSession.interruptionNotification, object: session
-        )
-        NotificationCenter.default.addObserver(
-            self, selector: #selector(handleMediaServicesReset),
-            name: AVAudioSession.mediaServicesWereResetNotification, object: session
-        )
-
-        input.installTap(onBus: 0, bufferSize: 4_096, format: inputFormat) { [weak self] buffer, _ in
-            self?.convertAndDeliver(buffer)
-        }
-
         do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
+            try session.setActive(true)
+
+            let input = engine.inputNode
+            let inputFormat = input.inputFormat(forBus: 0)
+            guard inputFormat.channelCount > 0, inputFormat.sampleRate > 0 else {
+                throw CaptureError.converterUnavailable
+            }
+            guard let converter = AVAudioConverter(from: inputFormat, to: targetFormat) else {
+                throw CaptureError.converterUnavailable
+            }
+            self.converter = converter
+
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(handleInterruption),
+                name: AVAudioSession.interruptionNotification, object: session
+            )
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(handleMediaServicesReset),
+                name: AVAudioSession.mediaServicesWereResetNotification, object: session
+            )
+            NotificationCenter.default.addObserver(
+                self, selector: #selector(handleRouteChange),
+                name: AVAudioSession.routeChangeNotification, object: session
+            )
+
+            input.installTap(onBus: 0, bufferSize: 4_096, format: inputFormat) { [weak self] buffer, _ in
+                self?.convertAndDeliver(buffer)
+            }
+
             try engine.start()
+            isRunning = true
         } catch {
-            input.removeTap(onBus: 0)
+            // Every failure path above can leave the audio session active,
+            // observers registered, or a tap installed - `stop()` tears
+            // down unconditionally (not gated on `isRunning`), so this is
+            // never a partial cleanup regardless of which line threw.
+            stop()
+            if let captureError = error as? CaptureError {
+                throw captureError
+            }
             throw CaptureError.engineStartFailed(error)
         }
-        isRunning = true
     }
 
+    /// Unconditional and idempotent - safe to call even if `start()` never
+    /// got far enough to set `isRunning`, so a failure partway through
+    /// `start()` can never leave the session active, an observer
+    /// registered, or a tap installed.
     func stop() {
-        guard isRunning else { return }
-        isRunning = false
         engine.inputNode.removeTap(onBus: 0)
-        engine.stop()
+        if engine.isRunning {
+            engine.stop()
+        }
         NotificationCenter.default.removeObserver(self)
+        converter = nil
+        isRunning = false
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
@@ -105,6 +122,24 @@ final class RealAudioCapture: AudioCapturing {
     }
 
     @objc private func handleMediaServicesReset() {
+        reportUnexpectedStop()
+    }
+
+    /// The input route disappearing mid-session (e.g. a Bluetooth mic
+    /// disconnecting) can leave the installed tap's format stale - rather
+    /// than risk silently capturing garbage or crashing on a format
+    /// mismatch, this treats it the same as any other unexpected stop and
+    /// falls back to paused. Scoped to `.oldDeviceUnavailable` specifically
+    /// (not every route change, some of which - e.g. `.categoryChange` -
+    /// this class's own `start()`/`stop()` calls can themselves trigger)
+    /// so a benign route change does not stop capture unnecessarily.
+    @objc private func handleRouteChange(_ notification: Notification) {
+        guard
+            let info = notification.userInfo,
+            let reasonValue = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
+            let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue),
+            reason == .oldDeviceUnavailable
+        else { return }
         reportUnexpectedStop()
     }
 
