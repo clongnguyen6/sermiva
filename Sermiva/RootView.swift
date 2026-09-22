@@ -1,31 +1,49 @@
 import SwiftUI
 
-/// `Setup (no key) -> Conversation` per HANDOFF.md section 2. Only the
-/// demo path is wired; the real-key path stays on Setup, per scope.
+/// `Setup (no key) -> Conversation` per HANDOFF.md section 2. Setup shows
+/// only when Keychain has no key yet (section 2.1); once a key has been
+/// validated and stored, later launches go straight to a live
+/// `ConversationView`, the same way Setup itself hands off right after
+/// validating a key for the first time.
 struct RootView: View {
     private enum Mode {
         case setup
-        case conversation
+        case demoConversation
+        case liveConversation(apiKey: String)
     }
 
-    @State private var mode: Mode = .setup
+    @State private var mode: Mode
     @State private var demoEvents: [DemoEvent] = []
+
+    init() {
+        if let key = SonioxKeychainStore.loadKey() {
+            _mode = State(initialValue: .liveConversation(apiKey: key))
+        } else {
+            _mode = State(initialValue: .setup)
+        }
+    }
 
     var body: some View {
         switch mode {
         case .setup:
-            SetupView(onStartDemo: startDemo)
-        case .conversation:
+            SetupView(onKeyValidated: startLive, onStartDemo: startDemo)
+        case .demoConversation:
             ConversationView(events: demoEvents, isDemo: true)
+        case .liveConversation(let apiKey):
+            ConversationView(controller: LiveSessionController(apiKey: apiKey))
         }
     }
 
     private func startDemo() {
         do {
             demoEvents = try DemoFixtureLoader.loadCafeViEnEvents()
-            mode = .conversation
+            mode = .demoConversation
         } catch {
             assertionFailure("demo-data.json missing from the app bundle: \(error)")
         }
+    }
+
+    private func startLive(apiKey: String) {
+        mode = .liveConversation(apiKey: apiKey)
     }
 }

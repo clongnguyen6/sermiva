@@ -1,13 +1,28 @@
 import SwiftUI
 
-/// HANDOFF.md section 2.1. Only enough to reach demo mode: the real-key
-/// path ("Kiem tra va tiep tuc") is visible per the approved layout but
-/// disabled, since validating a real Soniox key is out of scope here.
+/// HANDOFF.md section 2.1. The real-key path validates against the actual
+/// Soniox service (`SonioxAPIClient`) and stores the key in Keychain only -
+/// AGENTS.md's rule that a key never appears anywhere else in the app or
+/// the repo. The prototype's `sx_...` key-pattern check and its
+/// "Dán khóa demo" affordance are `[mô phỏng]` per HANDOFF.md and are not
+/// reused here: a pasted demo key would predictably fail real validation,
+/// so there is no honest live meaning left for that button - dropped, and
+/// flagged as a question in the hand-off report rather than silently kept.
 struct SetupView: View {
+    let onKeyValidated: (String) -> Void
     let onStartDemo: () -> Void
+
+    private enum ValidationState: Equatable {
+        case notChecked
+        case checking
+        case valid(warning: String?)
+        case invalidKey
+        case networkError
+    }
 
     @State private var apiKey: String = ""
     @State private var isKeyVisible = false
+    @State private var validationState: ValidationState = .notChecked
 
     @ScaledMetric(relativeTo: .body) private var titleSize: CGFloat = 20
     @ScaledMetric(relativeTo: .body) private var bodySize: CGFloat = 15
@@ -15,6 +30,7 @@ struct SetupView: View {
     @ScaledMetric(relativeTo: .body) private var demoButtonSize: CGFloat = 15
     @ScaledMetric(relativeTo: .body) private var footerSize: CGFloat = 13
     @ScaledMetric(relativeTo: .body) private var fieldSize: CGFloat = 16
+    @ScaledMetric(relativeTo: .body) private var statusSize: CGFloat = 13
 
     var body: some View {
         ZStack {
@@ -38,16 +54,29 @@ struct SetupView: View {
 
                 keyField
 
-                Button(action: {}) {
-                    Text("Kiểm tra và tiếp tục")
-                        .font(.system(size: buttonSize, weight: .semibold))
-                        .frame(maxWidth: .infinity, minHeight: 52)
+                if let statusText {
+                    Text(statusText)
+                        .font(.system(size: statusSize, weight: .medium))
+                        .foregroundStyle(statusColor)
+                        .padding(.horizontal, 20)
                 }
-                .background(Tokens.accent.opacity(0.5))
+
+                Button(action: checkAndContinue) {
+                    if validationState == .checking {
+                        ProgressView().tint(Tokens.onAccent)
+                            .frame(maxWidth: .infinity, minHeight: 52)
+                    } else {
+                        Text("Kiểm tra và tiếp tục")
+                            .font(.system(size: buttonSize, weight: .semibold))
+                            .frame(maxWidth: .infinity, minHeight: 52)
+                    }
+                }
+                .background(canCheck ? Tokens.accent : Tokens.accent.opacity(0.5))
                 .foregroundStyle(Tokens.onAccent)
                 .clipShape(RoundedRectangle(cornerRadius: 14))
-                .disabled(true)
+                .disabled(!canCheck)
                 .padding(.horizontal, 20)
+                .accessibilityIdentifier("checkAndContinueButton")
 
                 Button(action: onStartDemo) {
                     Text("Dùng thử bản demo (không nối Soniox)")
@@ -64,6 +93,52 @@ struct SetupView: View {
                 Spacer()
             }
             .padding(.horizontal, 20)
+        }
+    }
+
+    private var trimmedKey: String {
+        apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var canCheck: Bool {
+        !trimmedKey.isEmpty && validationState != .checking
+    }
+
+    private var statusText: String? {
+        switch validationState {
+        case .notChecked: return nil
+        case .checking: return "Đang kiểm tra…"
+        case .valid(let warning): return warning ?? "Khóa hợp lệ"
+        case .invalidKey: return "Khóa không hợp lệ"
+        case .networkError: return "Lỗi mạng. Thử lại."
+        }
+    }
+
+    private var statusColor: Color {
+        switch validationState {
+        case .valid: return Tokens.ok
+        case .invalidKey, .networkError: return Tokens.danger
+        case .notChecked, .checking: return Tokens.text3
+        }
+    }
+
+    private func checkAndContinue() {
+        let key = trimmedKey
+        validationState = .checking
+        Task {
+            let outcome = await SonioxAPIClient.validateKey(key)
+            await MainActor.run {
+                switch outcome {
+                case .valid(let warning):
+                    validationState = .valid(warning: warning)
+                    SonioxKeychainStore.saveKey(key)
+                    onKeyValidated(key)
+                case .invalidKey:
+                    validationState = .invalidKey
+                case .networkError:
+                    validationState = .networkError
+                }
+            }
         }
     }
 
