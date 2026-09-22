@@ -14,15 +14,23 @@ enum SessionPresentation {
         if isDemo {
             return "Mic tắt"
         }
+        // Checked before the generic `isMicCapturing` rule below: per
+        // HANDOFF section 5, "Mic giữ, chờ mạng" describes this state
+        // specifically - the mic keeps capturing while reconnecting (it is
+        // never stopped for a network-only event), so the generic
+        // "Đang nghe" rule would otherwise always win here and make this
+        // string unreachable in the one situation it exists for.
+        if state == .reconnecting {
+            return "Mic giữ, chờ mạng"
+        }
         if isMicCapturing {
             return "Đang nghe"
         }
         switch state {
         case .paused: return "Đã tạm dừng"
         case .requestingMic, .connecting: return "Đang mở mic…"
-        case .reconnecting: return "Mic giữ, chờ mạng"
         case .micDenied: return "Chưa có quyền mic"
-        case .idle, .ended, .authError, .listening: return "Mic tắt"
+        case .idle, .ended, .authError, .listening, .reconnecting: return "Mic tắt"
         }
     }
 

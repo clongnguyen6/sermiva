@@ -276,13 +276,15 @@ final class SessionStateMachineTests: XCTestCase {
 
     /// Live (isDemo: false) path: the dock text is a pure function of
     /// `(isMicCapturing, state)`, not of `state` alone - `isMicCapturing:
-    /// true` must say "Dang nghe" no matter what `state` is, proving the
-    /// text really follows capture rather than session progress.
-    /// `listening` with capture off falls back to "Mic tat" - the one
-    /// string among the six that stays true when the session is genuinely
-    /// running but the mic never opened. This branch is not reachable by
-    /// the shipped demo (see the isDemo test below); it is kept for
-    /// Outcome 2's real session.
+    /// true` must say "Dang nghe" no matter what `state` is, with one
+    /// deliberate exception: `.reconnecting` (see the dedicated test right
+    /// below), where HANDOFF section 5 defines "Mic giữ, chờ mạng"
+    /// specifically for a mic that is still capturing while the network is
+    /// down. `listening` with capture off falls back to "Mic tat" - the
+    /// one string among the six that stays true when the session is
+    /// genuinely running but the mic never opened. This branch is not
+    /// reachable by the shipped demo (see the isDemo test below); it is
+    /// kept for Outcome 2's real session.
     func test_micDockTextFollowsCaptureNotSession() {
         XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: true, state: .paused, isDemo: false), "Đang nghe")
         XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: true, state: .idle, isDemo: false), "Đang nghe")
@@ -295,6 +297,15 @@ final class SessionStateMachineTests: XCTestCase {
         XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .connecting, isDemo: false), "Đang mở mic…")
         XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .micDenied, isDemo: false), "Chưa có quyền mic")
         XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .reconnecting, isDemo: false), "Mic giữ, chờ mạng")
+    }
+
+    /// The real live scenario finding 5 flagged: the mic is never stopped
+    /// for a network-only reconnect (HANDOFF: "mic giữ quyền"), so
+    /// `isMicCapturing` is `true` the whole time - the dock must still say
+    /// "Mic giữ, chờ mạng", not silently fall back to "Đang nghe" as if the
+    /// network were fine.
+    func test_micDockTextShowsMicHeldWaitingForNetworkDuringReconnectEvenWhileCapturing() {
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: true, state: .reconnecting, isDemo: false), "Mic giữ, chờ mạng")
     }
 
     /// Project owner's decision: in demo there is nothing capturing under
