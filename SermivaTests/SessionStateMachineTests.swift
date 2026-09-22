@@ -521,4 +521,31 @@ final class SessionStateMachineTests: XCTestCase {
 
         scheduler.drainAll()
     }
+
+    // MARK: - Live reopen finding 4: HANDOFF.md section 4's header formula,
+    // `{me} ↔ {guest|Tự nhận diện}` + ` · {target}` when `target ≠ guest`.
+
+    func test_languageHeaderTextWithAutoGuestShowsTheTargetSuffix() {
+        let text = SessionPresentation.languageHeaderText(config: .default)
+        XCTAssertEqual(text, "Tiếng Việt ↔ Tự nhận diện · Tiếng Anh")
+    }
+
+    func test_languageHeaderTextOmitsTheSuffixWhenTargetEqualsGuest() {
+        let config = LiveLanguageConfig(me: "vi", target: "en", guestHint: "en")
+        XCTAssertEqual(SessionPresentation.languageHeaderText(config: config), "Tiếng Việt ↔ Tiếng Anh", "target == guest must not repeat the language a second time")
+    }
+
+    func test_languageHeaderTextShowsTheSuffixWhenGuestIsSpecificAndDiffersFromTarget() {
+        let config = LiveLanguageConfig(me: "vi", target: "en", guestHint: "vi")
+        XCTAssertEqual(SessionPresentation.languageHeaderText(config: config), "Tiếng Việt ↔ Tiếng Việt · Tiếng Anh")
+    }
+
+    /// The demo path must genuinely match its own fixed configuration
+    /// (`LiveLanguageConfig.default`, the same vi/auto/en `demo-data.json`'s
+    /// top-level `defaultLanguageConfig` describes), not a hardcoded string
+    /// that happens to look right today.
+    func test_demoControllerHeaderTextMatchesTheFixedDefaultLanguageConfig() {
+        let (controller, _, _, _) = makeController()
+        XCTAssertEqual(controller.headerText, "Tiếng Việt ↔ Tự nhận diện · Tiếng Anh")
+    }
 }

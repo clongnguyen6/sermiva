@@ -6,15 +6,15 @@ import Foundation
 /// below the two simultaneous connections this app's two-stream session
 /// needs - reported before any session starts, not discovered mid-stream.
 ///
-/// `unusableConfiguration` covers a 200 response that does not actually
-/// confirm this app can work: undecodable JSON, no `stt-rt-v5` entry, or a
+/// `unusableConfiguration` covers a 200 response that decoded successfully
+/// but still does not confirm this app can work: no `stt-rt-v5` entry, or a
 /// model that does not support one_way translation for the configured
-/// `me`/`target` languages. The key itself was accepted, so calling it
-/// invalid would be dishonest; HANDOFF's SettingsView vocabulary
-/// ("Chưa kiểm tra / Đang kiểm tra… / Khóa hợp lệ / Khóa không hợp lệ /
-/// Lỗi mạng") has no case that fits this either, so `SetupView` maps it
-/// onto the existing "Lỗi mạng" copy - not literally accurate either, left
-/// for the project owner to decide.
+/// `me`/`target`/`guest` languages. The key itself was accepted, so calling
+/// it invalid would be dishonest; `SetupView` maps this to its own
+/// "Khóa hợp lệ, nhưng không hỗ trợ cấu hình ngôn ngữ này." status line - it
+/// never falls back to the generic "Lỗi mạng" copy. A 200 body that does
+/// not even decode has confirmed nothing about the model either way - that
+/// is `networkError`, not this; see `validateKey` below.
 enum SonioxKeyValidationOutcome: Equatable {
     case valid(concurrencyWarning: String?)
     case invalidKey
@@ -58,17 +58,11 @@ enum SonioxAPIClient {
         guard case .valid = outcome, let modelsData else {
             return outcome
         }
-        // A 200 only actually confirms the key works for this app once the
-        // response decodes, names `stt-rt-v5`, and that model supports
-        // one_way translation for both configured languages - anything
-        // less is reported honestly as unusable, never as an invalid key
-        // (the key itself was accepted) and never as a false "valid".
-        guard
-            let decoded = try? JSONDecoder().decode(SonioxModelsResponse.self, from: modelsData),
-            let model = decoded.realtimeModel,
-            modelSupportsConfiguredLanguages(model, meLanguage: meLanguage, targetLanguage: targetLanguage, guestLanguage: guestHint)
-        else {
-            return .unusableConfiguration
+        let decoded = try? JSONDecoder().decode(SonioxModelsResponse.self, from: modelsData)
+        switch outcomeForModelsResponse(decoded, meLanguage: meLanguage, targetLanguage: targetLanguage, guestLanguage: guestHint) {
+        case .networkError: return .networkError
+        case .unusableConfiguration: return .unusableConfiguration
+        case .qualifies: break
         }
 
         var concurrencyRequest = URLRequest(url: concurrencyURL)
@@ -101,6 +95,39 @@ enum SonioxAPIClient {
     static func concurrencyWarning(forLimit limit: Int?) -> String? {
         guard let limit, limit < 2 else { return nil }
         return "Giới hạn kết nối đồng thời của tài khoản là \(limit) - phiên này cần 2."
+    }
+
+    enum ModelsResponseOutcome: Equatable {
+        case networkError
+        case unusableConfiguration
+        case qualifies
+    }
+
+    /// The step `validateKey` takes right after a 200 `/v1/models` response:
+    /// `decoded == nil` stands for a body that did not decode at all - that
+    /// has established nothing about the model either way, so it is
+    /// `.networkError`, never the specific "khong ho tro cau hinh"
+    /// incompatibility. Only once the response decoded does "no `stt-rt-v5`
+    /// entry" or "does not support one_way translation for both configured
+    /// languages" actually mean something - `.unusableConfiguration`,
+    /// reported honestly, never as an invalid key (the key itself was
+    /// accepted). Pure and testable directly with a Swift-constructed
+    /// `SonioxModelsResponse?` - `nil` stands in for "did not decode",
+    /// never an actual malformed JSON string.
+    static func outcomeForModelsResponse(
+        _ decoded: SonioxModelsResponse?,
+        meLanguage: String,
+        targetLanguage: String,
+        guestLanguage: String?
+    ) -> ModelsResponseOutcome {
+        guard let decoded else { return .networkError }
+        guard
+            let model = decoded.realtimeModel,
+            modelSupportsConfiguredLanguages(model, meLanguage: meLanguage, targetLanguage: targetLanguage, guestLanguage: guestLanguage)
+        else {
+            return .unusableConfiguration
+        }
+        return .qualifies
     }
 
     /// `languages` (guest picker and support check) must list `me`,

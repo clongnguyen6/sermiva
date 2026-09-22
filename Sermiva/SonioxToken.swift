@@ -7,9 +7,19 @@ import Foundation
 /// through the unconfirmed wire contract. See docs/soniox-routing.md.
 struct SonioxToken: Equatable {
     enum TranslationStatus: Equatable {
+        /// Documented: original (spoken) text that this stream is not
+        /// translating, because the audio is already in this stream's own
+        /// target language. Built into segments exactly like `.original` -
+        /// see docs/soniox-routing.md's Unknowns table.
         case none
         case original
         case translation
+        /// Any wire value other than the three documented strings
+        /// (`none`/`original`/`translation`), including a missing field.
+        /// Kept distinct from `.none` on purpose - a live, undocumented
+        /// value must never be silently folded into a case that now carries
+        /// real meaning.
+        case unrecognized
     }
 
     var text: String

@@ -12,6 +12,7 @@ protocol SessionControlling: ObservableObject {
     var segments: [Segment] { get }
     var elapsed: TimeInterval { get }
     var isDemo: Bool { get }
+    var headerText: String { get }
     var micDockText: String { get }
     var micDotColorRole: SessionPresentation.MicDotColorRole { get }
     var micIconName: String { get }

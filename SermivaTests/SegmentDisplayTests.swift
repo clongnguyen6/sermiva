@@ -86,4 +86,27 @@ final class SegmentDisplayTests: XCTestCase {
         let display = SegmentDisplay.make(for: segment(lang: nil, isFinal: false), isActivityRunning: false)
         XCTAssertNil(display.languageText, "paused or ended must not claim language recognition is in progress")
     }
+
+    // MARK: - Live reopen finding 3: Soniox tokens carry their own leading
+    // space, which must not show as a leading gap at the start of the line.
+
+    func test_sourceTextTrimsLeadingWhitespaceButKeepsInnerSpacing() {
+        var withLeadingSpace = segment(isFinal: true)
+        withLeadingSpace.source = " My husband, who is also  going"
+        let display = SegmentDisplay.make(for: withLeadingSpace, isActivityRunning: true)
+
+        XCTAssertEqual(display.sourceText, "My husband, who is also  going", "only the leading edge is trimmed - the double space between words must survive untouched")
+    }
+
+    func test_targetTextTrimsLeadingWhitespace() {
+        let withLeadingSpace = segment(isFinal: true, target: " Chồng tôi")
+        let display = SegmentDisplay.make(for: withLeadingSpace, isActivityRunning: true)
+
+        XCTAssertEqual(display.targetText, "Chồng tôi")
+    }
+
+    func test_nilTargetStaysNilNotEmptyString() {
+        let display = SegmentDisplay.make(for: segment(isFinal: true, target: nil), isActivityRunning: true)
+        XCTAssertNil(display.targetText, "no target must stay nil, not become an empty trimmed string")
+    }
 }

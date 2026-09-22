@@ -277,7 +277,7 @@ Settings exists to change them (`LiveLanguageConfig.default`); not an open quest
 
 | Unknown | Until confirmed |
 |---|---|
-| One-way on speech already in the target language: skipped, echoed, or translated? | Discard same-language translation tokens; no placeholder. |
+| One-way on speech already in the target language: the app's first live session showed `me`-language speech simply never appearing at all - the app was silently dropping every token whose `translation_status` was `"none"`, treating it the same as an unrecognised value, instead of building segments from it like `.original`. Fixed. Still unconfirmed: the exact wire string was never logged during that session, so `"none"` is inferred from the docs' two-way example and the observed symptom, not read directly off the wire. | Treat `translation_status: "none"` as original (untranslated) speech on both streams, including for `<end>`/`<fin>` markers; log the raw string once a live session can confirm it. |
 | Are original tokens and `<end>` timing identical across two streams on the same audio? | Join by time window and language only; never by text. |
 | Do translation tokens carry `speaker`? Can a translation chunk arrive after the next `<end>`? | Attribute by the preceding original chunk; log shape/ordering only, never token text. |
 | Does the server ack the config before the first result? | listening on send; errors move state. |

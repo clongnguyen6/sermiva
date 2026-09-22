@@ -20,6 +20,16 @@ struct SegmentDisplay: Equatable {
     /// yet) is gated on `isActivityRunning`; a known language is a settled
     /// fact, not a claim of ongoing activity, so it always shows.
     let languageText: String?
+    /// `segment.source` with any leading whitespace dropped - Soniox tokens
+    /// carry their own leading space (live-confirmed: " My husband..."),
+    /// which is correct for joining tokens together but must not show as a
+    /// leading gap at the start of the line. Only the leading edge is
+    /// trimmed; the spacing between words inside `segment.source` itself is
+    /// untouched.
+    let sourceText: String
+    /// Same trim as `sourceText`, applied to `segment.target` - `nil` stays
+    /// `nil`, never becomes an empty string.
+    let targetText: String?
 
     static func make(for segment: Segment, isActivityRunning: Bool) -> SegmentDisplay {
         let isPartial = !segment.isFinal
@@ -35,7 +45,13 @@ struct SegmentDisplay: Equatable {
             showsCaret: isPartial && isActivityRunning,
             showsTranslatingPlaceholder: awaitingTranslation && isActivityRunning,
             updatesFrequently: isPartial && isActivityRunning,
-            languageText: segment.lang.map(LanguageNames.display) ?? (isActivityRunning ? "Đang nhận diện ngôn ngữ" : nil)
+            languageText: segment.lang.map(LanguageNames.display) ?? (isActivityRunning ? "Đang nhận diện ngôn ngữ" : nil),
+            sourceText: Self.trimmingLeadingWhitespace(segment.source),
+            targetText: segment.target.map(Self.trimmingLeadingWhitespace)
         )
+    }
+
+    private static func trimmingLeadingWhitespace(_ text: String) -> String {
+        String(text.drop { $0.isWhitespace })
     }
 }

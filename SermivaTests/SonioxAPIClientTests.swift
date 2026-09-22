@@ -102,4 +102,33 @@ final class SonioxAPIClientTests: XCTestCase {
         )
         XCTAssertTrue(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", targetLanguage: "en", guestLanguage: nil), "guestLanguage nil means auto - a recognition hint only - and must not require a languages entry")
     }
+
+    // MARK: - Live reopen finding 6: an undecodable 200 body has confirmed
+    // nothing about the model either way - it must not claim the specific
+    // "khong ho tro cau hinh" incompatibility. `nil` here stands in for "did
+    // not decode" as an app-owned Swift value, never an actual malformed
+    // JSON string.
+
+    func test_undecodedModelsBodyIsNetworkErrorNotUnusableConfiguration() {
+        let outcome = SonioxAPIClient.outcomeForModelsResponse(nil, meLanguage: "vi", targetLanguage: "en", guestLanguage: nil)
+        XCTAssertEqual(outcome, .networkError, "a body that did not decode has established nothing about the model - it must not claim the specific incompatibility")
+    }
+
+    func test_decodedResponseWithNoRealtimeModelIsUnusableConfiguration() {
+        let decoded = SonioxModelsResponse(models: [])
+        let outcome = SonioxAPIClient.outcomeForModelsResponse(decoded, meLanguage: "vi", targetLanguage: "en", guestLanguage: nil)
+        XCTAssertEqual(outcome, .unusableConfiguration, "a response that decoded fine but has no stt-rt-v5 entry is genuinely unusable, not a network error")
+    }
+
+    func test_decodedResponseWithQualifyingModelQualifies() {
+        let model = SonioxModelsResponse.Model(
+            id: "stt-rt-v5",
+            languages: [language("vi"), language("en")],
+            oneWayTranslation: "all_languages",
+            translationTargets: []
+        )
+        let decoded = SonioxModelsResponse(models: [model])
+        let outcome = SonioxAPIClient.outcomeForModelsResponse(decoded, meLanguage: "vi", targetLanguage: "en", guestLanguage: nil)
+        XCTAssertEqual(outcome, .qualifies)
+    }
 }

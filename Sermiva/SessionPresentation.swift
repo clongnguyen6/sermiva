@@ -49,6 +49,19 @@ enum SessionPresentation {
         state == .listening
     }
 
+    /// HANDOFF.md section 4: `{me} ↔ {guest|Tự nhận diện}` + ` · {target}`
+    /// when `target ≠ guest`. `guestHint == nil` means "auto" (Tự nhận
+    /// diện), which is never equal to any real target code, so the
+    /// ` · {target}` suffix always shows in that case.
+    static func languageHeaderText(config: LiveLanguageConfig) -> String {
+        let guestText = config.guestHint.map(LanguageNames.display) ?? "Tự nhận diện"
+        var text = "\(LanguageNames.display(for: config.me)) ↔ \(guestText)"
+        if config.guestHint != config.target {
+            text += " · \(LanguageNames.display(for: config.target))"
+        }
+        return text
+    }
+
     static func canEnd(for state: SessionState) -> Bool {
         switch state {
         case .requestingMic, .connecting, .listening, .paused, .reconnecting:

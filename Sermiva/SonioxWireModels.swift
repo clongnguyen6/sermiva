@@ -66,12 +66,18 @@ struct SonioxTokenWire: Decodable {
 
     /// Drops confidence and `source_language` on purpose - the app never
     /// reads either, and this is the boundary that keeps the adapter thin.
+    /// Live-confirmed: `"none"` is a real, meaningful value (original
+    /// speech this stream is not translating - see
+    /// docs/soniox-routing.md), so it is decoded on purpose, not left to
+    /// fall through a default - only a genuinely different or missing
+    /// value maps to `.unrecognized`.
     var appToken: SonioxToken {
         let status: SonioxToken.TranslationStatus
         switch translationStatus {
         case "original": status = .original
         case "translation": status = .translation
-        default: status = .none
+        case "none": status = .none
+        default: status = .unrecognized
         }
         return SonioxToken(
             text: text,

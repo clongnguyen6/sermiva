@@ -60,15 +60,15 @@ private struct CurrentRow: View {
                     Spacer(minLength: 0)
                 }
                 HStack(alignment: .bottom, spacing: 0) {
-                    Text(segment.source)
+                    Text(display.sourceText)
                         .font(.system(size: srcSize))
                         .foregroundStyle(Tokens.text2)
                     if display.showsCaret {
                         BlinkingCaret()
                     }
                 }
-                if let target = segment.target {
-                    Text(target)
+                if let targetText = display.targetText {
+                    Text(targetText)
                         .font(.system(size: tgtSize, weight: .semibold))
                         .foregroundStyle(Tokens.text)
                 } else if display.showsTranslatingPlaceholder {
@@ -108,11 +108,11 @@ private struct HistoryRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             SegmentMeta(display: display, fontSize: metaSize)
-            Text(segment.source)
+            Text(display.sourceText)
                 .font(.system(size: srcSize))
                 .foregroundStyle(Tokens.text2)
-            if let target = segment.target {
-                Text(target)
+            if let targetText = display.targetText {
+                Text(targetText)
                     .font(.system(size: tgtSize, weight: .medium))
                     .foregroundStyle(Tokens.text)
             } else if display.showsTranslatingPlaceholder {
@@ -149,15 +149,44 @@ private struct SegmentMeta: View {
         .foregroundStyle(Tokens.text3)
     }
 
-    @ViewBuilder
     private var speakerLabel: some View {
-        switch segment.speaker {
-        case "A":
-            Text("Người nói A").foregroundStyle(Tokens.speakerA)
-        case "B":
-            Text("Người nói B").foregroundStyle(Tokens.speakerB)
-        default:
-            Text("Chưa xác định")
+        Text(SpeakerLabel.text(for: segment.speaker))
+            .foregroundStyle(speakerLabelColor)
+    }
+
+    private var speakerLabelColor: Color {
+        switch SpeakerLabel.colorRole(for: segment.speaker) {
+        case .speakerA: return Tokens.speakerA
+        case .speakerB: return Tokens.speakerB
+        case .other: return Tokens.text2
+        case .unidentified: return Tokens.text3
+        }
+    }
+}
+
+/// The A/B/C.../"Chưa xác định" speaker label rule, owner-decided: every
+/// diarized speaker beyond A/B is a real, distinct person and must show its
+/// own "Người nói <letter>" label - AGENTS.md forbids merging different
+/// real speakers under "Chưa xác định" just because there are more than
+/// two. `SonioxJoinEngine.label(forRawSpeaker:)` only ever assigns single
+/// uppercase letters A through Z, so any non-nil `speaker` here is always
+/// one of those. Pure and SwiftUI-free so it is directly testable.
+enum SpeakerLabel {
+    enum ColorRole: Equatable {
+        case speakerA, speakerB, other, unidentified
+    }
+
+    static func text(for speaker: String?) -> String {
+        guard let speaker else { return "Chưa xác định" }
+        return "Người nói \(speaker)"
+    }
+
+    static func colorRole(for speaker: String?) -> ColorRole {
+        switch speaker {
+        case "A": return .speakerA
+        case "B": return .speakerB
+        case .some: return .other
+        case nil: return .unidentified
         }
     }
 }

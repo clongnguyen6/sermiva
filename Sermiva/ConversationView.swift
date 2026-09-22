@@ -62,7 +62,7 @@ struct ConversationView<Controller: SessionControlling>: View {
     private var topBar: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack {
-                Text("Tiếng Việt ↔ Tiếng Anh")
+                Text(controller.headerText)
                     .font(.system(size: headerSize, weight: .medium))
                     .foregroundStyle(Tokens.text)
                 if controller.isDemo {

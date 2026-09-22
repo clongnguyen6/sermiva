@@ -33,6 +33,11 @@ final class DemoSessionController: ObservableObject, SessionControlling {
     private let events: [DemoEvent]
     private let eventInterval: TimeInterval
     private let translationDelay: TimeInterval
+    /// `demo-data.json`'s top-level `defaultLanguageConfig` (vi/auto/en) -
+    /// the same fixed default `LiveLanguageConfig.default` uses, so demo's
+    /// own header genuinely matches the configuration it plays back, per
+    /// HANDOFF.md section 4.
+    private let languageConfig: LiveLanguageConfig
 
     private var eventIndex = 0
     private var playbackToken = UUID()
@@ -44,7 +49,8 @@ final class DemoSessionController: ObservableObject, SessionControlling {
         audioCapture: AudioCapturing = NullAudioCapture(),
         scheduler: DemoScheduler = DispatchScheduler(),
         eventInterval: TimeInterval = 0.9,
-        translationDelay: TimeInterval = 1.4
+        translationDelay: TimeInterval = 1.4,
+        languageConfig: LiveLanguageConfig = .default
     ) {
         self.events = events
         self.isDemo = isDemo
@@ -53,9 +59,14 @@ final class DemoSessionController: ObservableObject, SessionControlling {
         self.scheduler = scheduler
         self.eventInterval = eventInterval
         self.translationDelay = translationDelay
+        self.languageConfig = languageConfig
         self.audioCapture.onUnexpectedStop = { [weak self] in
             self?.handleCaptureStoppedExternally()
         }
+    }
+
+    var headerText: String {
+        SessionPresentation.languageHeaderText(config: languageConfig)
     }
 
     deinit {

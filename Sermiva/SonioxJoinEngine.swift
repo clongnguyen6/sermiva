@@ -163,12 +163,18 @@ final class SonioxJoinEngine {
         var sawTranslationTokenThisResponse = false
         for token in tokens {
             switch token.translationStatus {
-            case .original:
+            case .original, .none:
+                // `.none` on stream M (target_language = me) is speech
+                // already in `me` - nothing for this stream to translate,
+                // but still real original text that must build/close
+                // segments exactly like `.original` does, including
+                // `<end>`/`<fin>` markers, which can arrive tagged `.none`
+                // too (docs/soniox-routing.md's Unknowns table).
                 applyMOriginal(token, tailBySegment: &tailBySegment)
             case .translation:
                 applyMTranslation(token)
                 sawTranslationTokenThisResponse = true
-            case .none:
+            case .unrecognized:
                 continue
             }
         }
@@ -308,6 +314,14 @@ final class SonioxJoinEngine {
     private func closeSegment(id: Int) {
         guard let index = segments.firstIndex(where: { $0.id == id }) else { return }
         segments[index].isFinal = true
+        // A closed segment must show only its locked final text - never a
+        // non-final tail left over from whichever response last updated it
+        // (see `applyStreamM`'s end-of-response recompute, which only ever
+        // touches the CURRENTLY open segment). Without this, a segment cut
+        // by a speaker/language change or a reconnect - not by its own
+        // `<end>` - can freeze mid-word with a partial tail baked in as if
+        // it were final.
+        segments[index].source = finalSourceById[id] ?? ""
         guard segments[index].lang == meLanguage, let lastEntry = mFinalOriginalLog.last(where: { $0.segmentId == id }) else {
             return
         }
@@ -338,11 +352,17 @@ final class SonioxJoinEngine {
     func applyStreamT(_ tokens: [SonioxToken], finalAudioProcMs: Int) {
         for token in tokens {
             switch token.translationStatus {
-            case .original:
+            case .original, .none:
+                // `.none` on stream T (target_language = target) is speech
+                // already in `target` - still a real original token for
+                // the join's overlap check (check 1): e.g. the guest
+                // speaking `target` while the owner speaks `me` must still
+                // disqualify the join, exactly as a `.original` token
+                // would.
                 if token.isFinal { applyTOriginal(token) }
             case .translation:
                 applyTTranslation(token)
-            case .none:
+            case .unrecognized:
                 continue
             }
         }
@@ -426,9 +446,9 @@ final class SonioxJoinEngine {
         unmatchedTTokens = []
         for token in snapshot {
             switch token.translationStatus {
-            case .original: applyTOriginal(token)
+            case .original, .none: applyTOriginal(token)
             case .translation: applyTTranslation(token)
-            case .none: continue
+            case .unrecognized: continue
             }
         }
         unmatchedTTokens.removeAll { token in

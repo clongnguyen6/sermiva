@@ -20,6 +20,24 @@ final class SonioxJoinEngineTests: XCTestCase {
         SonioxToken(text: "<end>", isFinal: true, startMs: nil, endMs: nil, speaker: nil, language: nil, translationStatus: .original)
     }
 
+    /// Live-confirmed: original (spoken) text this stream is not
+    /// translating, because it is already in this stream's own target
+    /// language - see docs/soniox-routing.md's Unknowns table.
+    private func noneStatus(_ text: String, final: Bool, start: Int?, end: Int?, speaker: String? = "1", lang: String?) -> SonioxToken {
+        SonioxToken(text: text, isFinal: final, startMs: start, endMs: end, speaker: speaker, language: lang, translationStatus: .none)
+    }
+
+    private func endMarkerWithNoneStatus() -> SonioxToken {
+        SonioxToken(text: "<end>", isFinal: true, startMs: nil, endMs: nil, speaker: nil, language: nil, translationStatus: .none)
+    }
+
+    /// A wire value that is neither of the three documented strings - must
+    /// never be silently folded into `.none`, which now carries real
+    /// meaning.
+    private func unrecognizedStatus(_ text: String, final: Bool = true, start: Int? = 0, end: Int? = 500) -> SonioxToken {
+        SonioxToken(text: text, isFinal: final, startMs: start, endMs: end, speaker: "1", language: "vi", translationStatus: .unrecognized)
+    }
+
     // MARK: - M-only segment assembly
 
     func test_partialThenFinalBuildsSourceAndLocksLanguageOnFirstFinal() {
@@ -544,5 +562,100 @@ final class SonioxJoinEngineTests: XCTestCase {
 
         XCTAssertEqual(engine.segments[0].target, "Chào", "a late final translation must still land")
         XCTAssertFalse(engine.segments[0].targetAbandoned, "must never be simultaneously abandoned and translated")
+    }
+
+    // MARK: - Live reopen finding 1: `translation_status: "none"` is
+    // documented original speech this stream is not translating - it must
+    // build/close segments exactly like `.original`, on both streams,
+    // including `<end>`/`<fin>` markers - never be silently dropped like an
+    // unrecognised value.
+
+    func test_noneStatusTokenOnStreamMBuildsASegmentLikeOriginal() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([noneStatus("Xin chào", final: true, start: 0, end: 1000, lang: "vi")])
+
+        XCTAssertEqual(engine.segments.count, 1, "a 'none'-status token is original speech and must build a segment, same as 'original'")
+        XCTAssertEqual(engine.segments[0].source, "Xin chào")
+        XCTAssertEqual(engine.segments[0].lang, "vi")
+    }
+
+    func test_endMarkerWithNoneStatusClosesTheOpenSegment() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([noneStatus("Xin chào", final: true, start: 0, end: 1000, lang: "vi")])
+        XCTAssertFalse(engine.segments[0].isFinal, "sanity: still open before <end>")
+
+        engine.applyStreamM([endMarkerWithNoneStatus()])
+
+        XCTAssertTrue(engine.segments[0].isFinal, "<end> tagged 'none' must still close the segment, or segments never close and keep merging unrelated audio")
+    }
+
+    /// The T-side half of the same mistake: a 'none'-status original token
+    /// on stream T (speech already in `target`) is a real original token for
+    /// the join's check 1 - the guest speaking `target` overlapping a `me`
+    /// window must still disqualify the join, exactly as an `.original`
+    /// token would.
+    func test_noneStatusOriginalOnStreamTStillDisqualifiesOverlappingJoin() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
+            endMarker(),
+        ])
+
+        engine.applyStreamT(
+            [
+                original("Xin chào", final: true, start: 0, end: 400, speaker: "1", lang: "vi"),
+                noneStatus("hi there", final: true, start: 450, end: 900, speaker: "2", lang: "en"), // the guest, already in target, overlapping
+                translation("hi there in target"),
+            ],
+            finalAudioProcMs: 1200
+        )
+
+        XCTAssertNil(engine.segments[0].target, "a 'none'-status overlapping token must disqualify the join just like an 'original' one would")
+        XCTAssertTrue(engine.segments[0].targetAbandoned)
+    }
+
+    /// A genuinely unrecognised status - never the documented `"none"` -
+    /// must stay conservative: skipped, not built into a segment, exactly
+    /// the old default behaviour, now correctly scoped to only this case.
+    func test_unrecognizedStatusTokenOnStreamMIsIgnored() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([unrecognizedStatus("???")])
+
+        XCTAssertTrue(engine.segments.isEmpty, "a genuinely unrecognised status must not build a segment")
+    }
+
+    // MARK: - Live reopen finding 2: a closed segment must show only its
+    // locked final text, never a non-final tail left over from whichever
+    // response last updated it before the close.
+
+    /// A final token from a different speaker cuts a new segment without
+    /// ever finalizing the previous segment's own last (still partial)
+    /// word - closing must not leave that partial tail baked in.
+    func test_segmentClosedBySpeakerChangeHasNoStaleNonFinalTail() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        // A locked final token first (the speaker-change boundary check
+        // only fires once `lang` is locked), then a non-final tail that
+        // never gets finalized before the speaker changes.
+        engine.applyStreamM([original("Hello ", final: true, start: 0, end: 400, speaker: "1", lang: "en")])
+        engine.applyStreamM([original("worl", final: false, start: 400, end: 900, speaker: "1", lang: nil)])
+        XCTAssertEqual(engine.segments[0].source, "Hello worl", "sanity: the partial tail is showing")
+
+        engine.applyStreamM([original("Hi", final: true, start: 1000, end: 1200, speaker: "2", lang: "en")])
+
+        XCTAssertTrue(engine.segments[0].isFinal)
+        XCTAssertEqual(engine.segments[0].source, "Hello ", "a segment closed by a speaker change must show only its locked final text, never the previous response's partial tail")
+    }
+
+    /// The reconnect path closes the open segment the same way - it must
+    /// not leave a stale tail baked in either.
+    func test_segmentClosedByReconnectHasNoStaleNonFinalTail() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([original("Xin ch", final: false, start: 0, end: 500, speaker: "1", lang: nil)])
+        XCTAssertEqual(engine.segments[0].source, "Xin ch")
+
+        engine.closeOpenSegmentForReconnect()
+
+        XCTAssertTrue(engine.segments[0].isFinal)
+        XCTAssertEqual(engine.segments[0].source, "", "a segment closed for a reconnect, with no final token of its own, must not keep its partial tail")
     }
 }

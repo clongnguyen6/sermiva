@@ -77,6 +77,10 @@ final class LiveSessionController: ObservableObject, SessionControlling {
 
     // MARK: - SessionControlling presentation
 
+    var headerText: String {
+        SessionPresentation.languageHeaderText(config: languageConfig)
+    }
+
     var micDockText: String {
         SessionPresentation.micDockText(isMicCapturing: isMicCapturing, state: state, isDemo: isDemo)
     }
