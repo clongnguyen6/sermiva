@@ -360,8 +360,8 @@ struct ConversationView<Controller: SessionControlling>: View {
 }
 
 extension ConversationView where Controller == DemoSessionController {
-    init(events: [DemoEvent], isDemo: Bool) {
-        self.init(controller: DemoSessionController(events: events, isDemo: isDemo))
+    init(events: [DemoEvent], isDemo: Bool, languageConfig: LiveLanguageConfig = .default) {
+        self.init(controller: DemoSessionController(events: events, isDemo: isDemo, languageConfig: languageConfig))
     }
 }
 

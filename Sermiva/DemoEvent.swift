@@ -25,6 +25,16 @@ struct DemoEvent: Decodable {
 /// unparsed; adding them is follow-up work, not this outcome.
 struct DemoFixture: Decodable {
     struct Scenario: Decodable {
+        /// The scenario's own `me`/`guest`/`target`, distinct from the
+        /// top-level `defaultLanguageConfig` a live session uses - e.g.
+        /// `cafe_vi_en`'s guest is the specific `en`, not `auto`.
+        struct Config: Decodable {
+            let me: String
+            let guest: String
+            let target: String
+        }
+
+        let config: Config
         let events: [DemoEvent]
     }
 

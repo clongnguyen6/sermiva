@@ -6,8 +6,12 @@ import XCTest
 /// microphone permission prompt, audio capture and the playback clock.
 @MainActor
 final class SessionStateMachineTests: XCTestCase {
-    /// The real `cafe_vi_en` events from `demo-data.json`, loaded once.
+    /// The real `cafe_vi_en` events and its own `config` from
+    /// `demo-data.json`, loaded once.
     private static let allCafeEvents: [DemoEvent] = try! DemoFixtureLoader.loadCafeViEnEvents(
+        bundle: Bundle(for: SessionStateMachineTests.self)
+    )
+    private static let cafeLanguageConfig: LiveLanguageConfig = try! DemoFixtureLoader.loadCafeViEnConfig(
         bundle: Bundle(for: SessionStateMachineTests.self)
     )
 
@@ -39,7 +43,8 @@ final class SessionStateMachineTests: XCTestCase {
             audioCapture: audio,
             scheduler: scheduler,
             eventInterval: 0.01,
-            translationDelay: 0.01
+            translationDelay: 0.01,
+            languageConfig: Self.cafeLanguageConfig
         )
         return (controller, audio, scheduler, mic)
     }
@@ -540,12 +545,14 @@ final class SessionStateMachineTests: XCTestCase {
         XCTAssertEqual(SessionPresentation.languageHeaderText(config: config), "Tiếng Việt ↔ Tiếng Việt · Tiếng Anh")
     }
 
-    /// The demo path must genuinely match its own fixed configuration
-    /// (`LiveLanguageConfig.default`, the same vi/auto/en `demo-data.json`'s
-    /// top-level `defaultLanguageConfig` describes), not a hardcoded string
-    /// that happens to look right today.
-    func test_demoControllerHeaderTextMatchesTheFixedDefaultLanguageConfig() {
+    /// The demo path must genuinely match `cafe_vi_en`'s own `config`
+    /// (me vi, guest en, target en - decoded from `demo-data.json`'s
+    /// scenario, not the live path's fixed default), not a hardcoded
+    /// string, and not the unrelated top-level `defaultLanguageConfig`
+    /// either. Since `cafe_vi_en`'s guest already equals its target, the
+    /// header must not repeat the language a second time.
+    func test_demoControllerHeaderTextMatchesTheCafeScenariosOwnConfigNotTheLiveDefault() {
         let (controller, _, _, _) = makeController()
-        XCTAssertEqual(controller.headerText, "Tiếng Việt ↔ Tự nhận diện · Tiếng Anh")
+        XCTAssertEqual(controller.headerText, "Tiếng Việt ↔ Tiếng Anh")
     }
 }

@@ -14,6 +14,7 @@ struct RootView: View {
 
     @State private var mode: Mode
     @State private var demoEvents: [DemoEvent] = []
+    @State private var demoLanguageConfig: LiveLanguageConfig = .default
 
     init() {
         if let key = SonioxKeychainStore.loadKey() {
@@ -28,7 +29,7 @@ struct RootView: View {
         case .setup:
             SetupView(onKeyValidated: startLive, onStartDemo: startDemo)
         case .demoConversation:
-            ConversationView(events: demoEvents, isDemo: true)
+            ConversationView(events: demoEvents, isDemo: true, languageConfig: demoLanguageConfig)
         case .liveConversation(let apiKey):
             ConversationView(
                 controller: LiveSessionController(apiKey: apiKey),
@@ -40,6 +41,7 @@ struct RootView: View {
     private func startDemo() {
         do {
             demoEvents = try DemoFixtureLoader.loadCafeViEnEvents()
+            demoLanguageConfig = try DemoFixtureLoader.loadCafeViEnConfig()
             mode = .demoConversation
         } catch {
             assertionFailure("demo-data.json missing from the app bundle: \(error)")
