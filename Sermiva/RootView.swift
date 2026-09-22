@@ -30,7 +30,10 @@ struct RootView: View {
         case .demoConversation:
             ConversationView(events: demoEvents, isDemo: true)
         case .liveConversation(let apiKey):
-            ConversationView(controller: LiveSessionController(apiKey: apiKey))
+            ConversationView(
+                controller: LiveSessionController(apiKey: apiKey),
+                onReturnToSetupAfterAuthError: returnToSetupAfterAuthError
+            )
         }
     }
 
@@ -45,5 +48,16 @@ struct RootView: View {
 
     private func startLive(apiKey: String) {
         mode = .liveConversation(apiKey: apiKey)
+    }
+
+    /// The auth-error banner's "Nhập lại khóa" action. The rejected key is
+    /// removed from Keychain first, so neither this launch nor a later one
+    /// auto-starts a live session with it again; the live `ConversationView`
+    /// (and its `LiveSessionController`, which already ended the Soniox
+    /// session the moment `.authError` was entered) is then torn down by
+    /// switching `mode` away from it.
+    private func returnToSetupAfterAuthError() {
+        SonioxKeychainStore.deleteKey()
+        mode = .setup
     }
 }

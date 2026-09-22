@@ -10,9 +10,17 @@ import UIKit
 struct ConversationView<Controller: SessionControlling>: View {
     @StateObject private var controller: Controller
     @State private var showEndSheet = false
+    /// The auth-error banner's "Nhập lại khóa" action. `nil` in demo, which
+    /// never reaches `.authError`. Owner-approved temporary deviation from
+    /// HANDOFF section 2.2's "→ Mở Cài đặt": Settings does not exist in
+    /// this outcome, so this returns to Setup instead - the only place a
+    /// key can be re-entered - to be rewired to the real destination once
+    /// Settings exists (see docs/soniox-routing.md).
+    let onReturnToSetupAfterAuthError: (() -> Void)?
 
-    init(controller: @autoclosure @escaping () -> Controller) {
+    init(controller: @autoclosure @escaping () -> Controller, onReturnToSetupAfterAuthError: (() -> Void)? = nil) {
         _controller = StateObject(wrappedValue: controller())
+        self.onReturnToSetupAfterAuthError = onReturnToSetupAfterAuthError
     }
 
     var body: some View {
@@ -142,17 +150,13 @@ struct ConversationView<Controller: SessionControlling>: View {
         .padding(.vertical, 6)
     }
 
-    /// HANDOFF.md section 2.2's "lỗi xác thực (→ Mở Cài đặt)" banner. Its
-    /// approved action opens the app's own Settings screen, which this
-    /// outcome does not build - Setup is the only in-app surface where a
-    /// key exists, and it is not a Settings screen, so no honest
-    /// destination exists yet. Rather than wire the button to something
-    /// that would not really be "Mở Cài đặt" (or reuse the mic-denied
-    /// banner's iOS Settings deep link, which would be actively wrong for
-    /// a rejected API key), this shows the message only, with no action -
-    /// the smallest honest choice, left for the project owner to decide.
-    /// The message itself reuses `SetupView`'s own existing "Khóa không
-    /// hợp lệ" copy rather than inventing new text.
+    /// HANDOFF.md section 2.2's "lỗi xác thực (→ Mở Cài đặt)" banner.
+    /// Approved temporary deviation: its action opens the app's own
+    /// Settings screen, which this outcome does not build, so this returns
+    /// to Setup instead - the only in-app place a key can be re-entered -
+    /// to be rewired to Settings once it exists (see
+    /// docs/soniox-routing.md). The message reuses `SetupView`'s own
+    /// existing "Khóa không hợp lệ" copy rather than inventing new text.
     private var authErrorBanner: some View {
         HStack {
             Image(systemName: "exclamationmark.triangle")
@@ -161,6 +165,11 @@ struct ConversationView<Controller: SessionControlling>: View {
                 .font(.system(size: bannerTextSize))
                 .foregroundStyle(Tokens.danger)
             Spacer()
+            Button("Nhập lại khóa") {
+                onReturnToSetupAfterAuthError?()
+            }
+            .font(.system(size: bannerTextSize, weight: .semibold))
+            .foregroundStyle(Tokens.danger)
         }
         .padding(10)
         .background(Tokens.surface2)
