@@ -150,13 +150,11 @@ final class SonioxJoinEngineTests: XCTestCase {
         ])
         XCTAssertNil(engine.segments[0].target)
 
-        engine.applyStreamT(
-            [
-                original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
-                translation("Hello"),
-            ],
-            finalAudioProcMs: 1200
-        )
+        engine.applyStreamT([
+            original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
+            translation("Hello"),
+            endMarker(), // T's own <end>: the "complete" signal, not a timer
+        ])
 
         XCTAssertEqual(engine.segments[0].target, "Hello")
         XCTAssertFalse(engine.segments[0].targetAbandoned)
@@ -188,13 +186,10 @@ final class SonioxJoinEngineTests: XCTestCase {
             endMarker(),
         ])
 
-        engine.applyStreamT(
-            [
-                original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
-                translation("Hel", final: false),
-            ],
-            finalAudioProcMs: 500
-        )
+        engine.applyStreamT([
+            original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
+            translation("Hel", final: false),
+        ])
 
         let display = SegmentDisplay.make(for: engine.segments[0], isActivityRunning: true)
         XCTAssertTrue(display.showsTranslatingPlaceholder, "a non-final translation token is a real signal that translation is under way")
@@ -235,20 +230,17 @@ final class SonioxJoinEngineTests: XCTestCase {
     func test_translationArrivingBeforeMClosesTheSegmentStillLands() {
         let engine = SonioxJoinEngine(meLanguage: "vi")
 
-        engine.applyStreamT(
-            [
-                original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
-                translation("Hello"),
-            ],
-            finalAudioProcMs: 1000
-        )
+        engine.applyStreamT([
+            original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
+            translation("Hello"),
+        ])
 
         engine.applyStreamM([
             original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
             endMarker(),
         ])
 
-        engine.applyStreamT([], finalAudioProcMs: 1200)
+        engine.applyStreamT([endMarker()]) // T's own <end>, replayed against the now-open window
 
         XCTAssertEqual(engine.segments[0].target, "Hello", "a translation that arrived before M closed the segment must not be lost")
         XCTAssertFalse(engine.segments[0].targetAbandoned)
@@ -260,21 +252,20 @@ final class SonioxJoinEngineTests: XCTestCase {
     func test_translationArrivingBeforeMClosesStillRespectsDisqualification() {
         let engine = SonioxJoinEngine(meLanguage: "vi")
 
-        engine.applyStreamT(
-            [
-                original("Xin chào", final: true, start: 0, end: 400, speaker: "1", lang: "vi"),
-                original("hi there", final: true, start: 450, end: 900, speaker: "2", lang: "en"),
-                translation("hi there in target"),
-            ],
-            finalAudioProcMs: 1000
-        )
+        engine.applyStreamT([
+            original("Xin chào", final: true, start: 0, end: 400, speaker: "1", lang: "vi"),
+            original("hi there", final: true, start: 450, end: 900, speaker: "2", lang: "en"),
+            translation("hi there in target"),
+        ])
 
         engine.applyStreamM([
             original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
             endMarker(),
         ])
-        engine.applyStreamT([], finalAudioProcMs: 1200)
 
+        // Disqualification (check 1) is synchronous, the moment the
+        // wrong-language original replays against the newly opened window -
+        // no further T signal is needed to observe it.
         XCTAssertNil(engine.segments[0].target, "replaying buffered tokens must not bypass the no-guess certainty test")
         XCTAssertTrue(engine.segments[0].targetAbandoned)
     }
@@ -294,14 +285,11 @@ final class SonioxJoinEngineTests: XCTestCase {
             endMarker(),
         ])
 
-        engine.applyStreamT(
-            [
-                original("Xin chào", final: true, start: 0, end: 400, speaker: "1", lang: "vi"),
-                original("hi there", final: true, start: 450, end: 900, speaker: "2", lang: "en"), // the guest, overlapping
-                translation("hi there in target"), // belongs to the guest's chunk, not the owner's
-            ],
-            finalAudioProcMs: 1200
-        )
+        engine.applyStreamT([
+            original("Xin chào", final: true, start: 0, end: 400, speaker: "1", lang: "vi"),
+            original("hi there", final: true, start: 450, end: 900, speaker: "2", lang: "en"), // the guest, overlapping
+            translation("hi there in target"), // belongs to the guest's chunk, not the owner's
+        ])
 
         XCTAssertNil(engine.segments[0].target, "must never attach the guest's translation to the owner's line")
         XCTAssertTrue(engine.segments[0].targetAbandoned, "the join must be recorded as abandoned, not merely still pending")
@@ -311,8 +299,8 @@ final class SonioxJoinEngineTests: XCTestCase {
     }
 
     /// Issue 3b: disqualification must stop the placeholder immediately -
-    /// not linger until T's `final_audio_proc_ms` eventually passes the
-    /// window, long after the app already knows no translation is coming.
+    /// it is a synchronous check, never gated on any later resolution
+    /// signal (T's next original, its `<end>`, or otherwise).
     func test_disqualificationStopsThePlaceholderImmediatelyNotAtResolveTime() {
         let engine = SonioxJoinEngine(meLanguage: "vi")
         engine.applyStreamM([
@@ -320,12 +308,9 @@ final class SonioxJoinEngineTests: XCTestCase {
             endMarker(),
         ])
 
-        // Only the disqualifying guest token arrives - finalAudioProcMs
-        // stays well before windowEnd, so resolveJoins has not run yet.
-        engine.applyStreamT(
-            [original("hi there", final: true, start: 450, end: 900, speaker: "2", lang: "en")],
-            finalAudioProcMs: 900
-        )
+        // Only the disqualifying guest token arrives - no resolving signal
+        // (no T <end>, no next-window original) has happened yet.
+        engine.applyStreamT([original("hi there", final: true, start: 450, end: 900, speaker: "2", lang: "en")])
 
         XCTAssertTrue(engine.segments[0].targetAbandoned, "disqualification must mark abandoned the moment it happens, not wait for resolveJoins")
         let display = SegmentDisplay.make(for: engine.segments[0], isActivityRunning: true)
@@ -345,29 +330,34 @@ final class SonioxJoinEngineTests: XCTestCase {
         // Check 2 must abandon the segment immediately, before T ever says anything.
         XCTAssertTrue(engine.segments[0].targetAbandoned)
 
-        engine.applyStreamT(
-            [
-                original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
-                translation("Hello"),
-            ],
-            finalAudioProcMs: 1200
-        )
+        engine.applyStreamT([
+            original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
+            translation("Hello"),
+        ])
 
         XCTAssertNil(engine.segments[0].target, "M's own detected overlap must disqualify the join, per check 2")
         XCTAssertTrue(engine.segments[0].targetAbandoned)
     }
 
-    func test_noTranslationArrivesAtAllLeavesTargetNilNotStuckForever() {
+    /// If T genuinely never sends anything at all for a window - no
+    /// translation, no next original, no `<end>` - there is no real signal
+    /// to resolve on in either direction: the join must stay pending, not
+    /// be guessed into "abandoned" just because nothing has happened yet.
+    /// Abandoning on silence would be exactly as much a guess as showing a
+    /// translation would be. A genuine end - T's own `<end>`/`<fin>`, its
+    /// next original chunk, or a reconnect/session end via
+    /// `abandonAllPendingJoins` - is what actually settles it.
+    func test_noTSignalAtAllLeavesTheJoinPendingNeverGuessingAbandoned() {
         let engine = SonioxJoinEngine(meLanguage: "vi")
         engine.applyStreamM([
             original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
             endMarker(),
         ])
 
-        engine.applyStreamT([], finalAudioProcMs: 1200)
-
         XCTAssertNil(engine.segments[0].target)
-        XCTAssertTrue(engine.segments[0].targetAbandoned, "once T has passed the window with nothing collected, the placeholder must stop, not hang")
+        XCTAssertFalse(engine.segments[0].targetAbandoned, "no signal from T at all must never be guessed into a permanent abandon")
+        let display = SegmentDisplay.make(for: engine.segments[0], isActivityRunning: true)
+        XCTAssertFalse(display.showsTranslatingPlaceholder, "no signal from T at all means no placeholder either - the AGENTS.md activity-indicator rule")
     }
 
     // MARK: - Issue 4: reconnect
@@ -391,10 +381,7 @@ final class SonioxJoinEngineTests: XCTestCase {
         XCTAssertNil(engine.segments[0].target)
 
         // A T token for the now-abandoned window must not resurrect it.
-        engine.applyStreamT(
-            [original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"), translation("Hello")],
-            finalAudioProcMs: 1200
-        )
+        engine.applyStreamT([original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"), translation("Hello")])
         XCTAssertNil(engine.segments[0].target, "an abandoned window must never be revived by a stray later token")
     }
 
@@ -601,14 +588,11 @@ final class SonioxJoinEngineTests: XCTestCase {
             endMarker(),
         ])
 
-        engine.applyStreamT(
-            [
-                original("Xin chào", final: true, start: 0, end: 400, speaker: "1", lang: "vi"),
-                noneStatus("hi there", final: true, start: 450, end: 900, speaker: "2", lang: "en"), // the guest, already in target, overlapping
-                translation("hi there in target"),
-            ],
-            finalAudioProcMs: 1200
-        )
+        engine.applyStreamT([
+            original("Xin chào", final: true, start: 0, end: 400, speaker: "1", lang: "vi"),
+            noneStatus("hi there", final: true, start: 450, end: 900, speaker: "2", lang: "en"), // the guest, already in target, overlapping
+            translation("hi there in target"),
+        ])
 
         XCTAssertNil(engine.segments[0].target, "a 'none'-status overlapping token must disqualify the join just like an 'original' one would")
         XCTAssertTrue(engine.segments[0].targetAbandoned)
@@ -657,5 +641,111 @@ final class SonioxJoinEngineTests: XCTestCase {
 
         XCTAssertTrue(engine.segments[0].isFinal)
         XCTAssertEqual(engine.segments[0].source, "", "a segment closed for a reconnect, with no final token of its own, must not keep its partial tail")
+    }
+
+    // MARK: - Live reopen, second session: resolving a T-join on
+    // `final_audio_proc_ms` catching up to `segmentEnd` - instead of on a
+    // real T signal - truncated or dropped `me`-segment translations,
+    // because translation chunks carry no timestamp and trail their
+    // original, sometimes into a later response than the audio watermark
+    // that timing rule fired on.
+
+    /// The exact "của What's Up English" symptom: a translation split
+    /// across two responses, with nothing on T but the trailing chunk in
+    /// the second one, must still assemble in full - never truncate at
+    /// whatever happened to be the first response's chunk.
+    func test_translationSplitAcrossTwoResponsesStillAssemblesInFull() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Chào các bạn", final: true, start: 0, end: 2000, speaker: "1", lang: "vi"),
+            endMarker(),
+        ])
+
+        engine.applyStreamT([
+            original("Chào các bạn", final: true, start: 0, end: 2000, speaker: "1", lang: "vi"),
+            translation("Hello everyone"),
+        ])
+        // A later response with only the trailing translation chunk - no
+        // original token of its own, since it belongs to the same speech.
+        engine.applyStreamT([
+            translation(" from What's Up English"),
+            endMarker(),
+        ])
+
+        XCTAssertEqual(engine.segments[0].target, "Hello everyone from What's Up English", "a translation split across two responses must assemble in full, never truncate at a response boundary")
+    }
+
+    /// The "Bạn có nghe được tiếng Việt không?" symptom: T's original
+    /// arrives with no translation chunk yet - the translation itself
+    /// trails into a later response. It must still land, not be lost to an
+    /// early resolve that gave up before it ever arrived.
+    func test_translationArrivingInALaterResponseThanItsOriginalStillLands() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Bạn có nghe được tiếng Việt không?", final: true, start: 0, end: 1500, speaker: "1", lang: "vi"),
+            endMarker(),
+        ])
+
+        engine.applyStreamT([
+            original("Bạn có nghe được tiếng Việt không?", final: true, start: 0, end: 1500, speaker: "1", lang: "vi"),
+        ])
+        XCTAssertNil(engine.segments[0].target, "sanity: nothing landed yet")
+        XCTAssertFalse(engine.segments[0].targetAbandoned, "sanity: not abandoned yet either - the translation may simply not have started")
+
+        engine.applyStreamT([
+            translation("Can you understand Vietnamese?"),
+            endMarker(),
+        ])
+
+        XCTAssertEqual(engine.segments[0].target, "Can you understand Vietnamese?", "a translation arriving in a later response, with no intervening T original for a different window, must still land")
+    }
+
+    /// T's own next original chunk - for a genuinely different, later
+    /// window - is itself a real "complete" signal: it must resolve the
+    /// PREVIOUS window with exactly what was collected for it, and start
+    /// collecting fresh for the new one, never mixing the two.
+    func test_nextTOriginalForADifferentWindowResolvesThePreviousJoin() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Xin chào", final: true, start: 0, end: 500, speaker: "1", lang: "vi"),
+            endMarker(),
+            original("Tạm biệt", final: true, start: 1000, end: 1500, speaker: "1", lang: "vi"),
+            endMarker(),
+        ])
+
+        engine.applyStreamT([
+            original("Xin chào", final: true, start: 0, end: 500, speaker: "1", lang: "vi"),
+            translation("Hello"),
+            // T moves on to the second window's original before ever
+            // sending its own <end> for the first.
+            original("Tạm biệt", final: true, start: 1000, end: 1500, speaker: "1", lang: "vi"),
+            translation("Goodbye"),
+            endMarker(),
+        ])
+
+        XCTAssertEqual(engine.segments[0].target, "Hello", "T's next original for a different window must resolve the previous one with exactly what it collected")
+        XCTAssertEqual(engine.segments[1].target, "Goodbye")
+    }
+
+    /// Diagnosis for the "two consecutive B segments, both 'Why?'" live
+    /// observation: nothing in the engine can duplicate a segment - `id` is
+    /// assigned once per genuinely new segment and only ever increases, and
+    /// each `<end>` closes exactly the one segment `currentMSegmentId`
+    /// names. Two separately `<end>`-bounded utterances with identical text
+    /// from the same speaker are two distinct, correct segments, not a sign
+    /// of an engine bug - the live case is almost certainly genuine
+    /// repetition in the audio.
+    func test_twoConsecutiveIdenticalFinalsFromTheSameSpeakerAreTwoDistinctSegmentsNotADuplicate() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Why?", final: true, start: 0, end: 300, speaker: "2", lang: "en"),
+            endMarker(),
+            original("Why?", final: true, start: 400, end: 700, speaker: "2", lang: "en"),
+            endMarker(),
+        ])
+
+        XCTAssertEqual(engine.segments.count, 2, "two separately <end>-bounded utterances, even with identical text and the same speaker, must remain two distinct segments")
+        XCTAssertEqual(engine.segments[0].id, 1)
+        XCTAssertEqual(engine.segments[1].id, 2)
     }
 }

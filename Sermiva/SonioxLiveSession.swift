@@ -290,7 +290,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
             if isStreamM {
                 engine.applyStreamM(response.tokens)
             } else {
-                engine.applyStreamT(response.tokens, finalAudioProcMs: response.finalAudioProcMs)
+                engine.applyStreamT(response.tokens)
             }
             onSegmentsChanged?(engine.segments)
         case .closed:

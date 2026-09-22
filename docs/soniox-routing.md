@@ -98,11 +98,25 @@ window has no upper bound yet and the join simply keeps waiting):
    T original chunk in a different language interrupts them inside the window); they are
    concatenated in time order into the segment's `target`.
 
-If the test fails, or if T's `final_audio_proc_ms` has passed `segmentEnd` without ever satisfying
-check 1 or check 2, the join is **abandoned** for that segment: `target` stays `nil` permanently,
-and the app stops showing "Đang dịch…" for it immediately - the segment reads as translated-only-in-
-its-own-language-if-any, same as any other segment whose translation never arrived. Abandonment is
-final; a later T token for the same window never retroactively fills `target`.
+If the test fails, the join is **abandoned** for that segment: `target` stays `nil` permanently, and
+the app stops showing "Đang dịch…" for it immediately - the segment reads as translated-only-in-its-
+own-language-if-any, same as any other segment whose translation never arrived.
+
+**Complete** - the signal that decides when to actually fill `target` (from whatever was collected)
+or abandon (nothing collected): T's own next original chunk, whether it belongs to a different
+window or matches no window at all, or T's own `<end>`/`<fin>` - never `final_audio_proc_ms` catching
+up to `segmentEnd`. Found by the project owner's second live session: `final_audio_proc_ms` reflects
+T's own audio-processing watermark, which runs ahead of its translation generation - translation
+chunks carry no timestamp of their own and trail their original chunk, sometimes into a later
+response - so resolving on `final_audio_proc_ms` alone closed windows before all of a segment's
+translation chunks had arrived, landing a truncated prefix as if it were the complete translation, or
+abandoning a window whose translation simply had not started yet. The window currently receiving T's
+translation chunks persists across responses on its own, so a translation split across two or more
+responses still assembles in full as long as no other T original token intervenes first. Abandonment
+is final; a later T token for an already-resolved window never retroactively fills `target`. A window
+with no resolving signal at all - T never sends anything more for it - stays pending forever, not
+abandoned and not translated: itself the no-guess outcome, shown as nothing per AGENTS.md's
+activity-indicator rule, not guessed into a false "abandoned" just because nothing has happened yet.
 
 ### Acceptance
 
@@ -149,10 +163,10 @@ actually billed).
 - `startedAt`: `start_ms` of the first original token.
 - `overlap`: always `false` (no live signal exists; see above).
 - "Đang dịch…" (`target` (lang == `me`), via the T-join): shown only while the segment is final,
-  `target` is `nil`, and the join has not been abandoned. Cleared once that stream's
-  `final_audio_proc_ms` has passed the segment's `end_ms` and its next original chunk has begun, or
-  once the join is abandoned by the certainty test. Never shown for a discarded same-language
-  translation.
+  `target` is `nil`, and the join has not been abandoned. Cleared once T signals **Complete** above
+  (its own `<end>`/`<fin>`, or its next original chunk) or once the join is abandoned by the
+  certainty test - never on `final_audio_proc_ms` timing (see No-guess join). Never shown for a
+  discarded same-language translation.
 - "Đang dịch…" (`target` (lang != `me`), M-direct): reflects a live signal, not a timer. Non-final
   tokens are replaced in full on every M response, so "the latest response still carries a
   translation token for this segment" is itself the signal - shown while that holds, cleared

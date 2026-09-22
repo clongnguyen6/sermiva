@@ -349,7 +349,7 @@ final class SonioxJoinEngine {
 
     // MARK: - Stream T (join only - T's own original text is never shown)
 
-    func applyStreamT(_ tokens: [SonioxToken], finalAudioProcMs: Int) {
+    func applyStreamT(_ tokens: [SonioxToken]) {
         for token in tokens {
             switch token.translationStatus {
             case .original, .none:
@@ -366,7 +366,6 @@ final class SonioxJoinEngine {
                 continue
             }
         }
-        resolveJoins(pastMs: finalAudioProcMs)
     }
 
     private func findOpenCandidate(forStartMs startMs: Int) -> (id: Int, join: PendingJoin)? {
@@ -377,13 +376,32 @@ final class SonioxJoinEngine {
     }
 
     private func applyTOriginal(_ token: SonioxToken) {
+        if isEndMarker(token) {
+            // T's own end-of-utterance marker: a genuine signal that
+            // nothing more is coming for whatever window was active - see
+            // "Complete" in docs/soniox-routing.md. Not a timer.
+            resolveActiveJoin()
+            activeJoinId = nil
+            return
+        }
         guard let startMs = token.startMs, let match = findOpenCandidate(forStartMs: startMs) else {
             // No window exists for this timestamp yet - M may simply not
             // have closed the segment yet. Buffer it so a window opening
-            // later can still claim it; never guessed in the meantime.
+            // later can still claim it; never guessed in the meantime. T
+            // has moved past whatever it was translating, though, so
+            // whichever join was active is done receiving chunks.
+            resolveActiveJoin()
             activeJoinId = nil
             bufferUnmatched(token)
             return
+        }
+        if match.id != activeJoinId {
+            // T has moved on to a different window's audio (or to none
+            // before this one) - the previously active window is done
+            // receiving translation chunks, whether or not it ever got
+            // any. This transition, not `final_audio_proc_ms` catching up,
+            // is the "complete" signal - see docs/soniox-routing.md.
+            resolveActiveJoin()
         }
         guard var join = pendingJoins[match.id], !join.disqualified else {
             // A window exists but is already disqualified: permanent, not
@@ -481,23 +499,31 @@ final class SonioxJoinEngine {
         }
     }
 
-    /// Closes out any pending join whose window has fully passed T's
-    /// processed audio: fills `target` if the join was never disqualified
-    /// and something was actually collected, marks it abandoned (never
-    /// retried) otherwise. Either way `resolved` stops the "Đang dịch…"
-    /// placeholder and stops accepting any further T tokens for that
-    /// window.
-    private func resolveJoins(pastMs finalAudioProcMs: Int) {
-        for (id, join) in pendingJoins where !join.resolved && finalAudioProcMs > join.windowEnd {
-            var resolvedJoin = join
-            resolvedJoin.resolved = true
-            pendingJoins[id] = resolvedJoin
-            guard let index = segments.firstIndex(where: { $0.id == id }) else { continue }
-            if !join.disqualified, !join.collectedTarget.isEmpty {
-                segments[index].target = join.collectedTarget
-            } else {
-                segments[index].targetAbandoned = true
-            }
+    /// Commits or abandons the join for `id`, once T has actually signalled
+    /// it is done sending chunks for that window (see `applyTOriginal`'s
+    /// three triggers: T's next original chunk for a different window, T
+    /// finding no window at all for its next chunk, or T's own `<end>`/
+    /// `<fin>`) - never on `final_audio_proc_ms` catching up, which lags
+    /// translation generation and was the source of the live-observed
+    /// truncated/missing `me`-translation bug (docs/soniox-routing.md).
+    /// `target` fills only if the join was never disqualified and actually
+    /// collected something real; otherwise it is abandoned. Either way
+    /// `resolved` stops the "Đang dịch…" placeholder and stops accepting
+    /// any further T tokens for that window.
+    private func resolveJoin(id: Int) {
+        guard var join = pendingJoins[id], !join.resolved else { return }
+        join.resolved = true
+        pendingJoins[id] = join
+        guard let index = segments.firstIndex(where: { $0.id == id }) else { return }
+        if !join.disqualified, !join.collectedTarget.isEmpty {
+            segments[index].target = join.collectedTarget
+        } else {
+            segments[index].targetAbandoned = true
         }
+    }
+
+    private func resolveActiveJoin() {
+        guard let id = activeJoinId else { return }
+        resolveJoin(id: id)
     }
 }
