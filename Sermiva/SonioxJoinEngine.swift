@@ -162,14 +162,27 @@ final class SonioxJoinEngine {
         var tailBySegment: [Int: String] = [:]
         var sawTranslationTokenThisResponse = false
         for token in tokens {
+            // Markers close the open segment regardless of
+            // `translationStatus` - live-confirmed they are not reliably
+            // tagged `.original`/`.none`: one arriving `.unrecognized` was
+            // silently dropped (segments never closed), and one arriving
+            // `.translation` was appended as translation text. Checked
+            // before the status dispatch on purpose, so a marker never
+            // reaches either path.
+            if isEndMarker(token) {
+                if isCurrentMSegmentOpen, let id = currentMSegmentId {
+                    closeSegment(id: id)
+                }
+                isCurrentMSegmentOpen = false
+                continue
+            }
             switch token.translationStatus {
             case .original, .none:
                 // `.none` on stream M (target_language = me) is speech
                 // already in `me` - nothing for this stream to translate,
                 // but still real original text that must build/close
-                // segments exactly like `.original` does, including
-                // `<end>`/`<fin>` markers, which can arrive tagged `.none`
-                // too (docs/soniox-routing.md's Unknowns table).
+                // segments exactly like `.original` does
+                // (docs/soniox-routing.md's Unknowns table).
                 applyMOriginal(token, tailBySegment: &tailBySegment)
             case .translation:
                 applyMTranslation(token)
@@ -213,15 +226,9 @@ final class SonioxJoinEngine {
         token.text == "<end>" || token.text == "<fin>"
     }
 
+    /// Markers are filtered out by `applyStreamM` before this is ever
+    /// called - every token reaching here is genuine original text.
     private func applyMOriginal(_ token: SonioxToken, tailBySegment: inout [Int: String]) {
-        if isEndMarker(token) {
-            if isCurrentMSegmentOpen, let id = currentMSegmentId {
-                closeSegment(id: id)
-            }
-            isCurrentMSegmentOpen = false
-            return
-        }
-
         let speakerLabel = label(forRawSpeaker: token.speaker)
 
         if !isCurrentMSegmentOpen {
@@ -351,6 +358,21 @@ final class SonioxJoinEngine {
 
     func applyStreamT(_ tokens: [SonioxToken]) {
         for token in tokens {
+            // Markers resolve whatever join was active regardless of
+            // `translationStatus` - live-confirmed they are not reliably
+            // tagged `.original`/`.none`: one arriving `.unrecognized`
+            // would leave a join hanging forever, and one arriving
+            // `.translation` would be appended into `collectedTarget` as
+            // translation text. Checked before the status dispatch on
+            // purpose, so a marker never reaches either path.
+            if isEndMarker(token) {
+                // T's own end-of-utterance marker: a genuine signal that
+                // nothing more is coming for whatever window was active -
+                // see "Complete" in docs/soniox-routing.md. Not a timer.
+                resolveActiveJoin()
+                activeJoinId = nil
+                continue
+            }
             switch token.translationStatus {
             case .original, .none:
                 // `.none` on stream T (target_language = target) is speech
@@ -375,15 +397,9 @@ final class SonioxJoinEngine {
         return (id: match.key, join: match.value)
     }
 
+    /// Markers are filtered out by `applyStreamT` before this is ever
+    /// called - every token reaching here is a genuine original token.
     private func applyTOriginal(_ token: SonioxToken) {
-        if isEndMarker(token) {
-            // T's own end-of-utterance marker: a genuine signal that
-            // nothing more is coming for whatever window was active - see
-            // "Complete" in docs/soniox-routing.md. Not a timer.
-            resolveActiveJoin()
-            activeJoinId = nil
-            return
-        }
         guard let startMs = token.startMs, let match = findOpenCandidate(forStartMs: startMs) else {
             // No window exists for this timestamp yet - M may simply not
             // have closed the segment yet. Buffer it so a window opening

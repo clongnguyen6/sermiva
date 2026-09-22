@@ -61,7 +61,10 @@ stream start ahead of the other.
   (string number), `language`, `source_language` (translated tokens only), `translation_status` in
   `none | original | translation`.
 - Non-final tokens are replaced in full on every response. Final tokens arrive once.
-- Marker tokens `<end>` and `<fin>` are final and are stripped from text.
+- Marker tokens `<end>` and `<fin>` are final and are stripped from text. Live-confirmed not to
+  arrive reliably tagged `.original`/`.none`: the app checks marker text before dispatching on
+  `translation_status` at all, on both streams, so a marker closes/resolves regardless of whatever
+  status it happens to carry and never becomes displayed or translated text.
 - Tokens arrive in order: an original chunk, then its translation chunk for the same speaker (SDK
   source, not docs).
 - Keepalive at least every 20 s when no audio flows; 5-10 s recommended. The keepalive page says a

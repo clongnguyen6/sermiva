@@ -16,8 +16,12 @@ final class SonioxJoinEngineTests: XCTestCase {
         SonioxToken(text: text, isFinal: final, startMs: nil, endMs: nil, speaker: nil, language: nil, translationStatus: .translation)
     }
 
-    private func endMarker() -> SonioxToken {
-        SonioxToken(text: "<end>", isFinal: true, startMs: nil, endMs: nil, speaker: nil, language: nil, translationStatus: .original)
+    /// Live-confirmed: markers are not reliably tagged `.original` - a
+    /// `status` parameter lets a test send `<end>`/`<fin>` under any of the
+    /// four `TranslationStatus` cases and check it still closes/resolves
+    /// regardless.
+    private func endMarker(status: SonioxToken.TranslationStatus = .original) -> SonioxToken {
+        SonioxToken(text: "<end>", isFinal: true, startMs: nil, endMs: nil, speaker: nil, language: nil, translationStatus: status)
     }
 
     /// Live-confirmed: original (spoken) text this stream is not
@@ -25,10 +29,6 @@ final class SonioxJoinEngineTests: XCTestCase {
     /// language - see docs/soniox-routing.md's Unknowns table.
     private func noneStatus(_ text: String, final: Bool, start: Int?, end: Int?, speaker: String? = "1", lang: String?) -> SonioxToken {
         SonioxToken(text: text, isFinal: final, startMs: start, endMs: end, speaker: speaker, language: lang, translationStatus: .none)
-    }
-
-    private func endMarkerWithNoneStatus() -> SonioxToken {
-        SonioxToken(text: "<end>", isFinal: true, startMs: nil, endMs: nil, speaker: nil, language: nil, translationStatus: .none)
     }
 
     /// A wire value that is neither of the three documented strings - must
@@ -571,7 +571,7 @@ final class SonioxJoinEngineTests: XCTestCase {
         engine.applyStreamM([noneStatus("Xin chào", final: true, start: 0, end: 1000, lang: "vi")])
         XCTAssertFalse(engine.segments[0].isFinal, "sanity: still open before <end>")
 
-        engine.applyStreamM([endMarkerWithNoneStatus()])
+        engine.applyStreamM([endMarker(status: .none)])
 
         XCTAssertTrue(engine.segments[0].isFinal, "<end> tagged 'none' must still close the segment, or segments never close and keep merging unrelated audio")
     }
@@ -747,5 +747,80 @@ final class SonioxJoinEngineTests: XCTestCase {
         XCTAssertEqual(engine.segments.count, 2, "two separately <end>-bounded utterances, even with identical text and the same speaker, must remain two distinct segments")
         XCTAssertEqual(engine.segments[0].id, 1)
         XCTAssertEqual(engine.segments[1].id, 2)
+    }
+
+    // MARK: - Reviewer finding, third round: markers close/resolve
+    // regardless of `translationStatus` - checked before the status
+    // dispatch, on both streams, never folded into "build text" (M) or
+    // "append to the collected translation" (T), and never silently
+    // dropped for a status neither stream ever tags a real word with.
+
+    func test_mEndMarkerTaggedTranslationClosesTheSegmentAndIsNeverAppendedAsTarget() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([original("Hi", final: true, start: 0, end: 500, lang: "en")])
+        XCTAssertFalse(engine.segments[0].isFinal)
+
+        engine.applyStreamM([endMarker(status: .translation)])
+
+        XCTAssertTrue(engine.segments[0].isFinal, "<end> tagged 'translation' must still close the segment")
+        XCTAssertNil(engine.segments[0].target, "the marker's own text must never be appended as translation text")
+    }
+
+    func test_mEndMarkerTaggedUnrecognizedClosesTheSegment() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([original("Chào", final: true, start: 0, end: 500, lang: "vi")])
+        XCTAssertFalse(engine.segments[0].isFinal)
+
+        engine.applyStreamM([endMarker(status: .unrecognized)])
+
+        XCTAssertTrue(engine.segments[0].isFinal, "<end> tagged 'unrecognized' must still close the segment, or it never closes at all")
+    }
+
+    func test_tEndMarkerTaggedNoneStillResolvesTheJoin() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
+            endMarker(),
+        ])
+
+        engine.applyStreamT([
+            original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
+            translation("Hello"),
+            endMarker(status: .none),
+        ])
+
+        XCTAssertEqual(engine.segments[0].target, "Hello", "T's own <end>, tagged 'none', must still resolve the join")
+    }
+
+    func test_tEndMarkerTaggedTranslationResolvesTheJoinAndIsNeverAppendedToTarget() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
+            endMarker(),
+        ])
+
+        engine.applyStreamT([
+            original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
+            translation("Hello"),
+            endMarker(status: .translation),
+        ])
+
+        XCTAssertEqual(engine.segments[0].target, "Hello", "T's own <end>, even tagged 'translation', must resolve the join with exactly what was collected - never append the marker's own text")
+    }
+
+    func test_tEndMarkerTaggedUnrecognizedStillResolvesTheJoin() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
+            endMarker(),
+        ])
+
+        engine.applyStreamT([
+            original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
+            translation("Hello"),
+            endMarker(status: .unrecognized),
+        ])
+
+        XCTAssertEqual(engine.segments[0].target, "Hello", "T's own <end>, even tagged 'unrecognized', must still resolve the join - not leave it pending forever")
     }
 }
