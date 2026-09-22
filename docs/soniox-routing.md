@@ -148,16 +148,23 @@ actually billed).
 - `isFinal`: on `<end>` or `<fin>`.
 - `startedAt`: `start_ms` of the first original token.
 - `overlap`: always `false` (no live signal exists; see above).
-- "Đang dịch…": shown only while the segment is final, `target` is `nil`, and the contributing
-  stream still has non-final tokens for that window and the join has not been abandoned. Cleared
-  with no translation once that stream's `final_audio_proc_ms` has passed the segment's `end_ms`
-  and its next original chunk has begun, or once the join is abandoned by the certainty test.
-  Never shown for a discarded same-language translation.
+- "Đang dịch…" (`target` (lang == `me`), via the T-join): shown only while the segment is final,
+  `target` is `nil`, and the join has not been abandoned. Cleared once that stream's
+  `final_audio_proc_ms` has passed the segment's `end_ms` and its next original chunk has begun, or
+  once the join is abandoned by the certainty test. Never shown for a discarded same-language
+  translation.
+- "Đang dịch…" (`target` (lang != `me`), M-direct): shown only once a real translation token - final
+  or not - has actually arrived from M for that segment (`target == nil` alone is not a signal, it is
+  only the absence of a result). Cleared the moment the next M segment starts with nothing landed, or
+  once M's own `final_audio_proc_ms` has passed well beyond that segment's `end_ms` with still nothing
+  landed - the same kind of real signal the T-join case already trusts, covering the case where
+  `<end>` closes the segment and M simply never sends a final translation chunk for it at all.
 
 ## Session lifecycle
 
 - connecting: open both sockets, send both configs, buffer audio until both accepted. listening
-  once both are sent (see Unknowns). 401/402/403 on either -> authError.
+  once both are sent (see Unknowns). 401/402/403 on either -> authError, which wins over everything
+  else, including a reconnect already in progress.
 - listening: AVAudioEngine tap -> AVAudioConverter -> Int16 16 kHz mono -> same bytes to both
   sockets. Check `channelCount`/`sampleRate` before `installTapOnBus`.
 - paused: stop audio, keepalive every 10 s on both. Streams stay open so labels survive resume -
@@ -166,17 +173,41 @@ actually billed).
 - reconnecting: entered when either socket drops. Owner-decided (option B requires a shared origin,
   and a one-sided reconnect never restores one): the app closes BOTH sockets and reopens both
   together as a fresh pair, buffering captured audio and sending identical bytes from byte zero to
-  both new sockets, exactly as at session start - never just the dropped one. Every T-join window
-  still in flight against the old origin is abandoned the moment either socket drops, before the new
-  pair even starts connecting, and so is any non-`me` segment whose M-direct translation was already
-  under way but not yet complete - M's old connection is gone too, so nothing is ever coming to
-  finish it either; no "Đang dịch…" lingers for either case. M's diarization is always a brand-new
-  connection too (it is part of the pair), so its speaker numbering always restarts on any reconnect,
-  not only when M itself was the one that dropped; post-drop raw ids get letters never shown
-  pre-drop (see Segment mapping above) rather than being displayed as the same person, since the app
-  has no way to know a post-drop "1" is the same person as any pre-drop speaker. The mic keeps
-  capturing throughout - only the network side is affected. Reconnect completes before the 300-minute
-  cap.
+  both new sockets, exactly as at session start - never just the dropped one. Before the new pair
+  even starts connecting: the M segment open at the moment of the drop is closed exactly like a
+  genuine `<end>` would close it (otherwise it would keep absorbing post-reconnect tokens under its
+  pre-drop label); every T-join window still in flight against the old origin is abandoned; and so is
+  any non-`me` segment whose M-direct translation was already under way but not yet complete - M's
+  old connection is gone too, so nothing is ever coming to finish it either. No "Đang dịch…" lingers
+  for any of these. M's diarization is always a brand-new connection too (it is part of the pair), so
+  its speaker numbering always restarts on any reconnect, not only when M itself was the one that
+  dropped; post-drop raw ids get letters never shown pre-drop (see Segment mapping above) rather than
+  being displayed as the same person, since the app has no way to know a post-drop "1" is the same
+  person as any pre-drop speaker. The mic keeps capturing throughout - only the network side is
+  affected; captured audio keeps being buffered while reconnecting (see below).
+  If the replacement pair itself fails to connect before its config is sent, the app retries with
+  exponential backoff (HANDOFF section 6: "retry backoff") - 1 s, 2 s, 4 s, ... capped at 30 s,
+  reset to 1 s the moment a pair fully connects again - opening a fresh pair each attempt, never
+  reusing a failed socket. Every socket is tagged with the connection attempt that created it, so a
+  stale event arriving from a socket the app itself already superseded (an old attempt's pair, or
+  the pair a fresh reconnect just closed) is discarded rather than mistaken for the current attempt's
+  own status - this is what lets retry converge instead of getting stuck on one dead attempt forever.
+  Buffered audio is capped at 200 chunks (roughly 50 s at the capture tap's buffer size); a
+  reconnect stuck retrying for longer than that drops the OLDEST buffered audio to make room for
+  new, rather than growing without bound - that audio is lost for both streams once dropped, same as
+  any other gap a reconnect's timeline restart already creates. Ending the session (`endImmediately`
+  for a 401/402/403, `end` otherwise) at any point during a reconnect stops the retry loop; a
+  scheduled retry checks this again right before it actually fires. Reconnect completes before the
+  300-minute cap.
+
+## Known UI deviations from HANDOFF
+
+- **Auth-error banner action.** HANDOFF section 2.2 specifies "lỗi xác thực (→ Mở Cài đặt)" - opening
+  the app's own Settings screen. Settings does not exist in this outcome, so the banner's button
+  ("Nhập lại khóa") returns to Setup instead - the only in-app place a key can be re-entered - and
+  Setup's own key field starts empty, since the rejected key is deleted from Keychain the moment the
+  button is tapped. Owner-approved temporary deviation, to be rewired to open Settings once it
+  exists.
 - ended: `finalize` on both, wait for `<fin>`, empty frame, wait for `finished`, close; close on
   timeout.
 
