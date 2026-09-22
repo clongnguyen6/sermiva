@@ -28,6 +28,33 @@ final class SonioxJoinEngine {
     private var currentMSegmentId: Int?
     /// Whether `currentMSegmentId` is still open (no `<end>`/boundary yet).
     private var isCurrentMSegmentOpen = false
+    /// The permanently-locked (final) source text per segment id. `source`
+    /// on the segment itself is recomputed each response as this plus the
+    /// current response's own non-final tail - never accumulated across
+    /// responses - because non-final tokens are replaced in full on every
+    /// response, not appended to (docs/soniox-routing.md).
+    private var finalSourceById: [Int: String] = [:]
+
+    /// Raw Soniox speaker id ("1", "2", ...) to the app-assigned letter,
+    /// for the current M connection only. Assigned in order of first
+    /// appearance within that connection - not by the raw id's numeric
+    /// value - since diarization is not guaranteed to hand out "1" to
+    /// whoever speaks first. Cleared (but `nextSpeakerLetterIndex` is not)
+    /// on `handleStreamMReconnected`, so a post-reconnect raw id never
+    /// silently reuses a letter already shown pre-reconnect - see that
+    /// method and docs/soniox-routing.md's reconnecting section.
+    private var speakerLetterByRawId: [String: String] = [:]
+    private var nextSpeakerLetterIndex = 0
+
+    private func label(forRawSpeaker raw: String?) -> String? {
+        guard let raw else { return nil }
+        if let existing = speakerLetterByRawId[raw] { return existing }
+        guard nextSpeakerLetterIndex < 26 else { return nil }
+        let letter = String(UnicodeScalar(UInt8(ascii: "A") + UInt8(nextSpeakerLetterIndex)))
+        speakerLetterByRawId[raw] = letter
+        nextSpeakerLetterIndex += 1
+        return letter
+    }
 
     private struct MLogEntry {
         let segmentId: Int
@@ -60,22 +87,64 @@ final class SonioxJoinEngine {
     /// immediately preceded them, never guessed by proximity alone.
     private var activeJoinId: Int?
 
+    /// T tokens (final, original or translation) that found no matching
+    /// pending join when first seen - either because M has not closed that
+    /// segment yet, or because nothing matches at all. Replayed whenever a
+    /// new pending join opens, so a translation that legitimately arrives
+    /// before M's `<end>` is not lost to independent-stream ordering (see
+    /// docs/soniox-routing.md). Capped so a token that will truly never
+    /// match (e.g. pure guest speech outside any `me` window) cannot grow
+    /// this without bound over a long session.
+    private var unmatchedTTokens: [SonioxToken] = []
+    private let unmatchedTTokensLimit = 200
+
     init(meLanguage: String) {
         self.meLanguage = meLanguage
+    }
+
+    // MARK: - Reconnect (docs/soniox-routing.md's reconnecting section)
+
+    /// M's diarization restarts its own speaker numbering after a
+    /// reconnect, so a post-reconnect raw id "1" is not known to be the
+    /// same person as any pre-reconnect speaker. Clearing the raw-id map
+    /// (without resetting the letter counter) means the next new speaker
+    /// gets a letter never shown before, rather than silently reusing "A"
+    /// for someone who is not provably the original "A".
+    func handleStreamMReconnected() {
+        speakerLetterByRawId.removeAll()
+    }
+
+    /// Either stream reconnecting invalidates the shared time origin the
+    /// join depends on (see docs/soniox-routing.md): abandon every join
+    /// still in flight rather than let a pre-drop window be compared
+    /// against post-drop timestamps that no longer share an origin with it.
+    func abandonAllPendingJoins() {
+        for (id, join) in pendingJoins where !join.resolved {
+            var resolved = join
+            resolved.resolved = true
+            pendingJoins[id] = resolved
+            markAbandoned(segmentId: id)
+        }
+        unmatchedTTokens.removeAll()
+        activeJoinId = nil
     }
 
     // MARK: - Stream M
 
     func applyStreamM(_ tokens: [SonioxToken]) {
+        var tailBySegment: [Int: String] = [:]
         for token in tokens {
             switch token.translationStatus {
             case .original:
-                applyMOriginal(token)
+                applyMOriginal(token, tailBySegment: &tailBySegment)
             case .translation:
                 applyMTranslation(token)
             case .none:
                 continue
             }
+        }
+        if isCurrentMSegmentOpen, let id = currentMSegmentId, let index = segments.firstIndex(where: { $0.id == id }) {
+            segments[index].source = (finalSourceById[id] ?? "") + (tailBySegment[id] ?? "")
         }
     }
 
@@ -83,7 +152,7 @@ final class SonioxJoinEngine {
         token.text == "<end>" || token.text == "<fin>"
     }
 
-    private func applyMOriginal(_ token: SonioxToken) {
+    private func applyMOriginal(_ token: SonioxToken, tailBySegment: inout [Int: String]) {
         if isEndMarker(token) {
             if isCurrentMSegmentOpen, let id = currentMSegmentId {
                 closeSegment(id: id)
@@ -92,43 +161,69 @@ final class SonioxJoinEngine {
             return
         }
 
-        let label = SonioxSpeakerLabel.label(for: token.speaker)
+        let speakerLabel = label(forRawSpeaker: token.speaker)
 
         if !isCurrentMSegmentOpen {
-            startNewMSegment(firstToken: token, label: label)
+            startNewMSegment(firstToken: token, label: speakerLabel)
+            if !token.isFinal, let id = currentMSegmentId {
+                tailBySegment[id, default: ""] += token.text
+            }
+            return
+        }
+
+        if !token.isFinal {
+            if let id = currentMSegmentId {
+                tailBySegment[id, default: ""] += token.text
+            }
             return
         }
 
         guard let id = currentMSegmentId, let index = segments.firstIndex(where: { $0.id == id }) else {
-            startNewMSegment(firstToken: token, label: label)
+            startNewMSegment(firstToken: token, label: speakerLabel)
             return
         }
 
-        if token.isFinal, let lockedLang = segments[index].lang,
-           (label != segments[index].speaker || token.language != lockedLang) {
+        if let lockedLang = segments[index].lang,
+           (speakerLabel != segments[index].speaker || token.language != lockedLang) {
             // A final token changed speaker or language from the open
             // segment's locked values: cut a new segment rather than
             // silently relabelling the one already on screen.
             closeSegment(id: id)
             isCurrentMSegmentOpen = false
-            startNewMSegment(firstToken: token, label: label)
+            startNewMSegment(firstToken: token, label: speakerLabel)
             return
         }
 
-        appendMOriginal(token, to: id, at: index, label: label)
+        appendMOriginalFinal(token, to: id, at: index, label: speakerLabel)
     }
 
     private func startNewMSegment(firstToken token: SonioxToken, label: String?) {
+        // The chunk that is about to close: per SDK ordering (original
+        // chunk, then its own translation chunk), by the time a genuinely
+        // new segment starts, any M-direct translation for the previous
+        // one should already have arrived. If it never did and the
+        // previous segment isn't `me` (so it was never going through the
+        // T-join instead), M is not going to send one - stop the
+        // "Đang dịch…" placeholder rather than leave it hanging forever.
+        if let previousId = currentMSegmentId, let previousIndex = segments.firstIndex(where: { $0.id == previousId }) {
+            let previous = segments[previousIndex]
+            if previous.isFinal, previous.target == nil, previous.lang != meLanguage {
+                segments[previousIndex].targetAbandoned = true
+            }
+        }
+
         let id = nextId
         nextId += 1
         currentMSegmentId = id
         isCurrentMSegmentOpen = true
+        let initialFinalText = token.isFinal ? token.text : ""
+        finalSourceById[id] = initialFinalText
         segments.append(
             Segment(
                 id: id,
                 speaker: label,
                 lang: token.isFinal ? token.language : nil,
-                source: token.text,
+                source: initialFinalText,
                 target: nil,
                 isFinal: false,
                 startedAt: TimeInterval(token.startMs ?? 0) / 1000,
@@ -142,21 +237,16 @@ final class SonioxJoinEngine {
         }
     }
 
-    private func appendMOriginal(_ token: SonioxToken, to id: Int, at index: Int, label: String?) {
-        if token.isFinal {
-            segments[index].source += token.text
-            if segments[index].lang == nil {
-                segments[index].lang = token.language
-            }
-            if let startMs = token.startMs, let language = token.language {
-                let endMs = token.endMs ?? startMs
-                mFinalOriginalLog.append(MLogEntry(segmentId: id, startMs: startMs, endMs: endMs, speaker: label, language: language))
-                reevaluatePendingJoins(against: mFinalOriginalLog.last!)
-            }
-        } else {
-            // Non-final tokens are replaced in full on every response - the
-            // partial tail is provisional display text only.
-            segments[index].source = segments[index].source + token.text
+    private func appendMOriginalFinal(_ token: SonioxToken, to id: Int, at index: Int, label: String?) {
+        finalSourceById[id, default: ""] += token.text
+        segments[index].source = finalSourceById[id] ?? ""
+        if segments[index].lang == nil {
+            segments[index].lang = token.language
+        }
+        if let startMs = token.startMs, let language = token.language {
+            let endMs = token.endMs ?? startMs
+            mFinalOriginalLog.append(MLogEntry(segmentId: id, startMs: startMs, endMs: endMs, speaker: label, language: language))
+            reevaluatePendingJoins(against: mFinalOriginalLog.last!)
         }
     }
 
@@ -167,14 +257,9 @@ final class SonioxJoinEngine {
             return
         }
         let windowStart = Int(segments[index].startedAt * 1000)
-        let join = PendingJoin(segmentId: id, windowStart: windowStart, windowEnd: max(lastEntry.endMs, windowStart))
-        pendingJoins[id] = join
-        // T's tokens for this window are expected to arrive at, or shortly
-        // after, the same wall-clock time as M's - the window only opens
-        // once the segment is final, but `resolveJoins` still waits for
-        // T's own `final_audio_proc_ms` to actually pass `windowEnd` before
-        // giving up, so a T response that is merely running a little behind
-        // M is not penalised.
+        let windowEnd = max(lastEntry.endMs, windowStart)
+        pendingJoins[id] = PendingJoin(segmentId: id, windowStart: windowStart, windowEnd: windowEnd)
+        replayUnmatchedTTokens(newWindowStart: windowStart)
     }
 
     private func applyMTranslation(_ token: SonioxToken) {
@@ -203,18 +288,25 @@ final class SonioxJoinEngine {
         resolveJoins(pastMs: finalAudioProcMs)
     }
 
+    private func findOpenCandidate(forStartMs startMs: Int) -> (id: Int, join: PendingJoin)? {
+        guard let match = pendingJoins.first(where: { _, join in !join.resolved && startMs >= join.windowStart && startMs <= join.windowEnd }) else {
+            return nil
+        }
+        return (id: match.key, join: match.value)
+    }
+
     private func applyTOriginal(_ token: SonioxToken) {
-        guard let startMs = token.startMs else {
+        guard let startMs = token.startMs, let match = findOpenCandidate(forStartMs: startMs) else {
+            // No window exists for this timestamp yet - M may simply not
+            // have closed the segment yet. Buffer it so a window opening
+            // later can still claim it; never guessed in the meantime.
             activeJoinId = nil
+            bufferUnmatched(token)
             return
         }
-        guard let (id, _) = pendingJoins.first(where: { _, join in
-            !join.resolved && startMs >= join.windowStart && startMs <= join.windowEnd
-        }) else {
-            activeJoinId = nil
-            return
-        }
-        guard var join = pendingJoins[id], !join.disqualified else {
+        guard var join = pendingJoins[match.id], !join.disqualified else {
+            // A window exists but is already disqualified: permanent, not
+            // buffered - replaying it later would not change the verdict.
             activeJoinId = nil
             return
         }
@@ -223,18 +315,61 @@ final class SonioxJoinEngine {
             // guest speaking target while the owner also speaks - fails the
             // join permanently. Never guessed past this point.
             join.disqualified = true
-            pendingJoins[id] = join
+            pendingJoins[match.id] = join
+            markAbandoned(segmentId: join.segmentId)
             activeJoinId = nil
             return
         }
-        pendingJoins[id] = join
-        activeJoinId = id
+        pendingJoins[match.id] = join
+        activeJoinId = match.id
     }
 
     private func applyTTranslation(_ token: SonioxToken) {
-        guard let id = activeJoinId, var join = pendingJoins[id], !join.disqualified, !join.resolved else { return }
+        guard let id = activeJoinId, var join = pendingJoins[id], !join.disqualified, !join.resolved else {
+            // No currently-active, still-open window to attach to - buffer
+            // it in case its own original gets matched on a later replay.
+            bufferUnmatched(token)
+            return
+        }
         join.collectedTarget += token.text
         pendingJoins[id] = join
+    }
+
+    private func bufferUnmatched(_ token: SonioxToken) {
+        unmatchedTTokens.append(token)
+        if unmatchedTTokens.count > unmatchedTTokensLimit {
+            unmatchedTTokens.removeFirst(unmatchedTTokens.count - unmatchedTTokensLimit)
+        }
+    }
+
+    /// Replays every buffered T token against the pending joins now that a
+    /// new window (starting at `newWindowStart`) has just opened, in
+    /// original arrival order so `activeJoinId` reconstructs correctly for
+    /// an original-then-translation pair. Tokens that still do not match
+    /// land back in the buffer via the same `bufferUnmatched` calls above;
+    /// afterwards, any buffered original token whose timestamp is now
+    /// provably in the past (before the earliest window that could ever
+    /// exist) is dropped for good, since M only opens windows in
+    /// increasing chronological order.
+    private func replayUnmatchedTTokens(newWindowStart: Int) {
+        let snapshot = unmatchedTTokens
+        unmatchedTTokens = []
+        for token in snapshot {
+            switch token.translationStatus {
+            case .original: applyTOriginal(token)
+            case .translation: applyTTranslation(token)
+            case .none: continue
+            }
+        }
+        unmatchedTTokens.removeAll { token in
+            guard let startMs = token.startMs else { return false }
+            return startMs < newWindowStart
+        }
+    }
+
+    private func markAbandoned(segmentId: Int) {
+        guard let index = segments.firstIndex(where: { $0.id == segmentId }) else { return }
+        segments[index].targetAbandoned = true
     }
 
     /// Check 2: M itself saw no overlap in the window. Runs against every
@@ -247,6 +382,7 @@ final class SonioxJoinEngine {
             guard entry.startMs >= join.windowStart, entry.startMs <= join.windowEnd else { continue }
             join.disqualified = true
             pendingJoins[id] = join
+            markAbandoned(segmentId: id)
         }
     }
 
