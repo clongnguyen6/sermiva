@@ -131,7 +131,8 @@ struct SetupView: View {
             let outcome = await SonioxAPIClient.validateKey(
                 key,
                 meLanguage: LiveLanguageConfig.default.me,
-                targetLanguage: LiveLanguageConfig.default.target
+                targetLanguage: LiveLanguageConfig.default.target,
+                guestHint: LiveLanguageConfig.default.guestHint
             )
             await MainActor.run {
                 switch outcome {

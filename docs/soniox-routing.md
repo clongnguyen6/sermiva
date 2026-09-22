@@ -239,10 +239,27 @@ actually billed).
 ## Key validation and language list
 
 `GET https://api.soniox.com/v1/models` with `Authorization: Bearer <key>`. 401 -> key rejected.
-200 -> the `stt-rt-v5` entry supplies `languages` (guest picker) and
-`one_way_translation`/`translation_targets` (me and target pickers). Then
-`GET /v1/concurrency-limits`; a project limit below 2 is reported before any session starts. No
-metering is documented for either call. Keys stay in Keychain only.
+200 -> decode only what this app uses from the `stt-rt-v5` entry: `languages` (array of
+`{code, name}` objects - the guest picker, and the me/target/guest support check, matched by
+`code`), `one_way_translation` (a string; the docs' own wording: "When contains string
+'all_languages', any language from languages can be used"), and `translation_targets` (array of
+`{target_language, source_languages, exclude_source_languages}` objects - the docs' own wording:
+"List of supported one-way translation targets. If list is empty, check for one_way_translation
+field"). A language is a usable one-way translation target when
+`one_way_translation == "all_languages"`, or else when it appears as a `target_language` in
+`translation_targets`. The key/model is usable when the `stt-rt-v5` entry exists, its `languages`
+codes include `me` and `target`, plus `guest` when `guest` is a specific (non-auto) language, and
+both `me` and `target` pass the one-way-translation check above. Then `GET /v1/concurrency-limits`;
+a project limit below 2 is reported before any session starts. No metering is documented for either
+call. Keys stay in Keychain only.
+
+Found by the project owner's first live key check, on a real key that should have passed: this
+section previously described `languages` as an array of strings (it is actually an array of
+`{code, name}` objects, so decoding it as `[String]` silently failed) and checked
+`translation_targets` alone (ignoring the `one_way_translation == "all_languages"` shortcut the
+docs document) - together these reported a working key as unusable. Corrected against the live
+https://soniox.com/docs/api-reference/stt/get_models page's embedded JSON example and field
+descriptions, not the page's prose summary alone.
 
 Owner-approved: a live session uses the fixed `me = vi`, `guest = auto`, `target = en` default until
 Settings exists to change them (`LiveLanguageConfig.default`); not an open question.
@@ -269,3 +286,5 @@ Settings exists to change them (`LiveLanguageConfig.default`); not an open quest
 | Owner's project and organization concurrency limits. | Read them at key entry. |
 | Is keepalive-only time billed? | Assume yes, on both streams; confirm in Live measurements above. |
 | Does `speaker` ever go missing with diarization on? | Keep `nil` reachable. |
+| The live `/v1/models` response has not been observed yet against a real key. | If `stt-rt-v5` is ever absent from it, the app reports the key as unusable; it never silently falls back to another model. |
+| What an `one_way_translation` value other than `"all_languages"` (or absent) means, when `translation_targets` might also be empty. | Treat `translation_targets` as the sole authority for a specific target in that case; never guess meaning into another `one_way_translation` value. |

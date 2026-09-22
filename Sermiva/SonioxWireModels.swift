@@ -108,16 +108,33 @@ struct SonioxStreamResponse: Decodable {
 }
 
 /// `GET /v1/models` - only the fields the Setup screen's key validation and
-/// the language pickers need.
+/// the language pickers need. Shapes verified against the live
+/// https://soniox.com/docs/api-reference/stt/get_models page's embedded
+/// JSON example, not guessed - see docs/soniox-routing.md's "Key validation
+/// and language list" section.
 struct SonioxModelsResponse: Decodable {
+    struct Language: Decodable {
+        let code: String
+    }
+
+    struct TranslationTarget: Decodable {
+        let targetLanguage: String
+
+        enum CodingKeys: String, CodingKey {
+            case targetLanguage = "target_language"
+        }
+    }
+
     struct Model: Decodable {
         let id: String
-        let languages: [String]?
-        let translationTargets: [String]?
+        let languages: [Language]?
+        let oneWayTranslation: String?
+        let translationTargets: [TranslationTarget]?
 
         enum CodingKeys: String, CodingKey {
             case id
             case languages
+            case oneWayTranslation = "one_way_translation"
             case translationTargets = "translation_targets"
         }
     }

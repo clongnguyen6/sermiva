@@ -36,6 +36,7 @@ enum SonioxAPIClient {
         _ key: String,
         meLanguage: String,
         targetLanguage: String,
+        guestHint: String?,
         urlSession: URLSession = .shared
     ) async -> SonioxKeyValidationOutcome {
         var request = URLRequest(url: modelsURL)
@@ -65,7 +66,7 @@ enum SonioxAPIClient {
         guard
             let decoded = try? JSONDecoder().decode(SonioxModelsResponse.self, from: modelsData),
             let model = decoded.realtimeModel,
-            modelSupportsConfiguredLanguages(model, meLanguage: meLanguage, targetLanguage: targetLanguage)
+            modelSupportsConfiguredLanguages(model, meLanguage: meLanguage, targetLanguage: targetLanguage, guestLanguage: guestHint)
         else {
             return .unusableConfiguration
         }
@@ -102,16 +103,31 @@ enum SonioxAPIClient {
         return "Giới hạn kết nối đồng thời của tài khoản là \(limit) - phiên này cần 2."
     }
 
-    /// This app's two-stream session needs `stt-rt-v5` to support one_way
-    /// translation into both the configured `me` and `target` languages -
-    /// checked against `translation_targets`, the field the docs say
-    /// supplies the me/target pickers.
+    /// `languages` (guest picker and support check) must list `me`,
+    /// `target`, and `guest` when `guest` is a specific, non-auto language -
+    /// `languages` entries are `{code, name}` objects, matched by `code`.
+    /// This app's two-stream session then needs `stt-rt-v5` to support
+    /// one_way translation into both `me` and `target`: per the docs, a
+    /// language is covered when `one_way_translation == "all_languages"`,
+    /// or else when it appears as a `target_language` in
+    /// `translation_targets`. Any other `one_way_translation` value is
+    /// undocumented (see docs/soniox-routing.md's Unknowns table) and is
+    /// never treated as covering anything beyond what `translation_targets`
+    /// itself lists.
     static func modelSupportsConfiguredLanguages(
         _ model: SonioxModelsResponse.Model,
         meLanguage: String,
-        targetLanguage: String
+        targetLanguage: String,
+        guestLanguage: String?
     ) -> Bool {
-        guard let targets = model.translationTargets else { return false }
-        return targets.contains(meLanguage) && targets.contains(targetLanguage)
+        let languageCodes = Set((model.languages ?? []).map(\.code))
+        guard languageCodes.contains(meLanguage), languageCodes.contains(targetLanguage) else { return false }
+        if let guestLanguage, !languageCodes.contains(guestLanguage) { return false }
+        return translationCovers(meLanguage, in: model) && translationCovers(targetLanguage, in: model)
+    }
+
+    private static func translationCovers(_ language: String, in model: SonioxModelsResponse.Model) -> Bool {
+        if model.oneWayTranslation == "all_languages" { return true }
+        return (model.translationTargets ?? []).contains { $0.targetLanguage == language }
     }
 }
