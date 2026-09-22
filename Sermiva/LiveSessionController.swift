@@ -154,8 +154,25 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         }
     }
 
+    /// Capture is attempted BEFORE the (metered) Soniox sockets are opened,
+    /// per the owner's ruling: a startup capture failure must not leave two
+    /// billed sockets open with no audio ever reaching them. A capture
+    /// failure returns to `.idle` - which already renders "Mic tắt" via
+    /// `SessionPresentation.micDockText` (idle + not capturing), the exact
+    /// existing string HANDOFF's outcome asks for, with no new state and no
+    /// new copy - rather than `.listening`, which would claim a session
+    /// that in fact never started.
     private func beginConnecting() {
         state = .connecting
+        do {
+            try audioCapture.start()
+            isMicCapturing = true
+        } catch {
+            isMicCapturing = false
+            state = .idle
+            return
+        }
+
         let config = SonioxSessionConfig(
             apiKey: apiKey,
             meLanguage: languageConfig.me,
@@ -165,27 +182,26 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         liveSession.start(config: config) { [weak self] ok in
             guard let self, self.state == .connecting else { return }
             if ok {
-                self.startCaptureAndListening()
+                self.state = .listening
+                self.startElapsedTimer()
             } else {
-                // No distinct "could not connect" state exists in HANDOFF's
-                // section 5 - authError is the closest existing terminal
-                // state that stops the stream and points at fixing the key,
-                // even though a plain network failure is not really an
-                // auth problem. Flagged in the hand-off report.
-                self.state = .authError
+                // `onAuthError` (wired in init) already handles a genuine
+                // 401/402/403 on its own, independent of this completion.
+                // A `false` here is a plain connect/network failure with no
+                // matching state in HANDOFF section 5's vocabulary - the
+                // honest, no-new-copy choice is to stop (closing the
+                // sockets that never really started) and return to `.idle`
+                // so the existing "Bắt đầu" flow can simply retry. Flagged
+                // as an owner question in the hand-off report.
+                self.audioCapture.stop()
+                self.isMicCapturing = false
+                self.state = .idle
+                // A connect failure can still leave the other socket open
+                // (or reconnecting) in the background; end the session
+                // outright so nothing keeps billing behind an idle screen.
+                self.liveSession.end { }
             }
         }
-    }
-
-    private func startCaptureAndListening() {
-        do {
-            try audioCapture.start()
-            isMicCapturing = true
-        } catch {
-            isMicCapturing = false
-        }
-        state = .listening
-        startElapsedTimer()
     }
 
     private func resume() {
@@ -221,6 +237,10 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         audioCapture.stop()
         isMicCapturing = false
         state = .authError
+        // A rejected key is not going to start working mid-stream; stop
+        // both sockets rather than leave them open and billing behind an
+        // error banner with no retry path.
+        liveSession.end { }
     }
 
     private func handleDisconnected() {

@@ -22,6 +22,10 @@ struct ConversationView<Controller: SessionControlling>: View {
                 topBar
                 if controller.state == .micDenied {
                     micDeniedBanner
+                } else if controller.state == .authError {
+                    authErrorBanner
+                } else if controller.state == .reconnecting {
+                    networkLostBanner
                 }
                 content
                 bottomDock
@@ -130,6 +134,52 @@ struct ConversationView<Controller: SessionControlling>: View {
             }
             .font(.system(size: bannerTextSize, weight: .semibold))
             .foregroundStyle(Tokens.danger)
+        }
+        .padding(10)
+        .background(Tokens.surface2)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+    }
+
+    /// HANDOFF.md section 2.2's "lỗi xác thực (→ Mở Cài đặt)" banner. Its
+    /// approved action opens the app's own Settings screen, which this
+    /// outcome does not build - Setup is the only in-app surface where a
+    /// key exists, and it is not a Settings screen, so no honest
+    /// destination exists yet. Rather than wire the button to something
+    /// that would not really be "Mở Cài đặt" (or reuse the mic-denied
+    /// banner's iOS Settings deep link, which would be actively wrong for
+    /// a rejected API key), this shows the message only, with no action -
+    /// the smallest honest choice, flagged as an owner question in the
+    /// hand-off report. The message itself reuses `SetupView`'s own
+    /// existing "Khóa không hợp lệ" copy rather than inventing new text.
+    private var authErrorBanner: some View {
+        HStack {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(Tokens.danger)
+            Text("Khóa không hợp lệ.")
+                .font(.system(size: bannerTextSize))
+                .foregroundStyle(Tokens.danger)
+            Spacer()
+        }
+        .padding(10)
+        .background(Tokens.surface2)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+    }
+
+    /// HANDOFF.md section 2.2's "mất mạng (spinner, 'nội dung được giữ')"
+    /// banner, verbatim: a spinner plus that exact quoted text - no new
+    /// copy invented beyond what the handoff already specifies.
+    private var networkLostBanner: some View {
+        HStack {
+            ProgressView()
+                .tint(Tokens.warn)
+            Text("Mất mạng. Nội dung được giữ.")
+                .font(.system(size: bannerTextSize))
+                .foregroundStyle(Tokens.text2)
+            Spacer()
         }
         .padding(10)
         .background(Tokens.surface2)

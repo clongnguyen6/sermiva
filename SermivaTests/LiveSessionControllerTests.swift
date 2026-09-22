@@ -43,17 +43,38 @@ final class LiveSessionControllerTests: XCTestCase {
         XCTAssertEqual(session.startCount, 0, "a denied permission must never open a Soniox session")
     }
 
-    func test_sessionStartFailureGoesToAuthErrorAndStopsCapture() {
+    /// Issue 5: a plain connect/network failure (as opposed to a genuine
+    /// 401/402/403, which arrives through `onAuthError` instead) has no
+    /// matching state in HANDOFF section 5 - the honest, no-new-copy
+    /// choice is to fall back to `.idle`, not invent or misuse `.authError`.
+    func test_genericSessionStartFailureGoesToIdleNotAuthErrorAndEndsTheSession() {
         let session = FakeSonioxLiveSession()
         session.nextStartResult = false
         let (controller, audio, _, _) = makeController(session: session)
 
         controller.primaryButtonTapped()
 
-        XCTAssertEqual(controller.state, .authError)
+        XCTAssertEqual(controller.state, .idle, "a plain connect failure must not be reported as an auth error")
         XCTAssertFalse(controller.isMicCapturing)
-        XCTAssertFalse(controller.canEnd, "authError must not offer Ket thuc on a session that never started")
+        XCTAssertFalse(controller.canEnd)
+        XCTAssertEqual(session.endCount, 1, "a connect failure must not leave the other socket billing in the background")
         _ = audio
+    }
+
+    /// Issue 6: a startup capture failure must not still open two metered
+    /// sockets with no audio ever reaching them, and must not claim the
+    /// session is listening when it never really started.
+    func test_startupCaptureFailurePreventsOpeningTheSonioxSessionEntirely() {
+        let audio = FakeAudioCapture()
+        audio.failNextStart = true
+        let (controller, _, session, _) = makeController(audio: audio)
+
+        controller.primaryButtonTapped()
+
+        XCTAssertEqual(controller.state, .idle, "must not claim listening when capture never opened")
+        XCTAssertFalse(controller.isMicCapturing)
+        XCTAssertEqual(session.startCount, 0, "a startup capture failure must not open the metered Soniox sockets at all")
+        XCTAssertEqual(controller.micDockText, "Mic tắt", "the existing Mic tat state, no new copy")
     }
 
     func test_pauseStopsCaptureAndBeginsKeepalive() {
@@ -90,6 +111,7 @@ final class LiveSessionControllerTests: XCTestCase {
         XCTAssertEqual(controller.state, .authError)
         XCTAssertFalse(controller.isMicCapturing)
         XCTAssertEqual(audio.stopCount, 1)
+        XCTAssertEqual(session.endCount, 1, "a rejected key must not leave the sockets open and billing")
     }
 
     func test_disconnectedWhileListeningMovesToReconnectingAndReconnectedReturnsToListening() {
