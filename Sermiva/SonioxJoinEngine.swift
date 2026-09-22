@@ -115,9 +115,15 @@ final class SonioxJoinEngine {
     }
 
     /// Either stream reconnecting invalidates the shared time origin the
-    /// join depends on (see docs/soniox-routing.md): abandon every join
-    /// still in flight rather than let a pre-drop window be compared
-    /// against post-drop timestamps that no longer share an origin with it.
+    /// join depends on (see docs/soniox-routing.md): abandon every T-join
+    /// window still in flight rather than let a pre-drop window be
+    /// compared against post-drop timestamps that no longer share an
+    /// origin with it. Since a reconnect always tears down and reopens M
+    /// too, this also abandons any non-`me` segment whose M-direct
+    /// translation was already under way but not yet complete - M's old
+    /// connection is gone, so nothing is ever coming to finish it, and it
+    /// must not keep showing "Đang dịch…" against a connection that no
+    /// longer exists.
     func abandonAllPendingJoins() {
         for (id, join) in pendingJoins where !join.resolved {
             var resolved = join
@@ -127,6 +133,13 @@ final class SonioxJoinEngine {
         }
         unmatchedTTokens.removeAll()
         activeJoinId = nil
+
+        for index in segments.indices {
+            let segment = segments[index]
+            guard segment.isFinal, segment.target == nil, segment.translationInProgress,
+                  !segment.targetAbandoned, segment.lang != meLanguage else { continue }
+            segments[index].targetAbandoned = true
+        }
     }
 
     // MARK: - Stream M

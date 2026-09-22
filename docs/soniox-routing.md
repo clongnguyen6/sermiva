@@ -137,7 +137,8 @@ actually billed).
   guaranteed to hand "1" to whoever spoke first. Missing -> `nil` -> "Chưa xác định". Never derived
   from language. The map is per-connection: an M reconnect clears it (never resets the letter
   counter), so a post-reconnect raw id gets a letter never shown before, rather than risk falsely
-  implying it is the same person as a pre-reconnect speaker (see Session lifecycle below).
+  implying it is the same person as a pre-reconnect speaker. M reconnects on every drop, since both
+  sockets always reconnect together (see Session lifecycle below).
 - `lang`: `nil` until the first original token is final, then locked.
 - `source`: final original tokens plus the current non-final tail.
 - `target`, lang != `me`: M's translation chunk following the segment's original chunk, set when
@@ -162,23 +163,20 @@ actually billed).
 - paused: stop audio, keepalive every 10 s on both. Streams stay open so labels survive resume -
   M's speaker numbering must not restart mid-session. Pause time may be billed (see Live
   measurements above).
-- reconnecting: entered when either socket drops. Reopen that socket with its own fresh config; its
-  timeline restarts at zero. The app abandons every join still in flight the moment either socket
-  drops - not just the ones on the dropped side - since a shared origin no longer exists to compare
-  windows against; no "Đang dịch…" lingers for them. The surviving socket keeps receiving live audio
-  without interruption; only the reconnecting one misses audio during its own gap. Implemented
-  simplification, not a general fix: reconnect does not attempt to realign the reconnected socket's
-  new zero-based clock with the surviving socket's old one. If only one side reconnects, new joins on
-  that side simply never find a match again (safe - never a wrong translation - but no `me`-language
-  translation either) **for the rest of the session**: a second, later reconnect of the other side
-  does not fix this either, since each reconnect resets that socket's own clock to its own zero at a
-  different wall-clock moment - two independently-reset clocks are not a shared origin, and the code
-  makes no attempt to establish one. If M drops, its speaker numbering restarts; post-drop raw ids
-  get letters never shown pre-drop (see Segment mapping above) rather than being displayed as the
-  same person. Reconnect both before the 300-minute cap. **Owner question:** is this permanent
-  degrade (no `me`-segment translation for the rest of the session after any one-sided reconnect)
-  acceptable, or should the app reconnect both sockets together instead, so they always share one
-  origin? Not implemented pending that decision.
+- reconnecting: entered when either socket drops. Owner-decided (option B requires a shared origin,
+  and a one-sided reconnect never restores one): the app closes BOTH sockets and reopens both
+  together as a fresh pair, buffering captured audio and sending identical bytes from byte zero to
+  both new sockets, exactly as at session start - never just the dropped one. Every T-join window
+  still in flight against the old origin is abandoned the moment either socket drops, before the new
+  pair even starts connecting, and so is any non-`me` segment whose M-direct translation was already
+  under way but not yet complete - M's old connection is gone too, so nothing is ever coming to
+  finish it either; no "Đang dịch…" lingers for either case. M's diarization is always a brand-new
+  connection too (it is part of the pair), so its speaker numbering always restarts on any reconnect,
+  not only when M itself was the one that dropped; post-drop raw ids get letters never shown
+  pre-drop (see Segment mapping above) rather than being displayed as the same person, since the app
+  has no way to know a post-drop "1" is the same person as any pre-drop speaker. The mic keeps
+  capturing throughout - only the network side is affected. Reconnect completes before the 300-minute
+  cap.
 - ended: `finalize` on both, wait for `<fin>`, empty frame, wait for `finished`, close; close on
   timeout.
 
@@ -189,6 +187,9 @@ actually billed).
 `one_way_translation`/`translation_targets` (me and target pickers). Then
 `GET /v1/concurrency-limits`; a project limit below 2 is reported before any session starts. No
 metering is documented for either call. Keys stay in Keychain only.
+
+Owner-approved: a live session uses the fixed `me = vi`, `guest = auto`, `target = en` default until
+Settings exists to change them (`LiveLanguageConfig.default`); not an open question.
 
 ## Limits
 

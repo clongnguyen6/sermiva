@@ -2,9 +2,9 @@ import Foundation
 
 /// The three independent settings from HANDOFF.md section 4. Settings (the
 /// screen where the owner would change these) is out of scope for this
-/// outcome, so a live session always uses the same defaults demo already
-/// ships with `demo-data.json`'s `defaultLanguageConfig`. What this means
-/// once Settings exists is an open question for the project owner.
+/// outcome, so a live session always uses the fixed vi/auto/en default
+/// demo already ships with `demo-data.json`'s `defaultLanguageConfig` -
+/// approved by the project owner as fixed until Settings exists.
 struct LiveLanguageConfig {
     let me: String
     let target: String

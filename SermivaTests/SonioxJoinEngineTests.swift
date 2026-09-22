@@ -413,4 +413,51 @@ final class SonioxJoinEngineTests: XCTestCase {
         engine.applyStreamM([original("Again", final: true, start: 1000, end: 1300, speaker: "7", lang: "en")])
         XCTAssertEqual(engine.segments[2].speaker, "A", "the same raw id, still within the same connection, must keep its earlier letter")
     }
+
+    /// This round: `SonioxLiveSession` now reconnects both sockets
+    /// together on any drop, so it always calls both
+    /// `abandonAllPendingJoins()` and `handleStreamMReconnected()` for
+    /// every reconnect, regardless of which socket actually dropped - the
+    /// engine must support both effects landing together, not just each in
+    /// isolation.
+    func test_reconnectAbandonsInFlightJoinsAndResetsSpeakerLettersTogether() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Xin chào", final: true, start: 0, end: 1000, speaker: "1", lang: "vi"),
+            endMarker(),
+        ])
+        XCTAssertEqual(engine.segments[0].speaker, "A")
+        XCTAssertFalse(engine.segments[0].targetAbandoned)
+
+        engine.abandonAllPendingJoins()
+        engine.handleStreamMReconnected()
+
+        XCTAssertTrue(engine.segments[0].targetAbandoned, "the pre-drop join must be abandoned")
+
+        engine.applyStreamM([original("New", final: true, start: 2000, end: 2500, speaker: "1", lang: "vi")])
+
+        XCTAssertEqual(engine.segments[1].speaker, "B", "a reconnect must never let a post-drop speaker reuse a pre-drop letter")
+    }
+
+    /// A reconnect always tears down and reopens M too, so a non-`me`
+    /// segment whose M-direct translation was already under way (but not
+    /// yet complete) when the drop happened must also stop showing
+    /// "Đang dịch…" - M's old connection is gone and nothing will ever
+    /// finish it.
+    func test_reconnectAbandonsAnInProgressNonMeMDirectTranslationToo() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Hi", final: true, start: 0, end: 500, speaker: "1", lang: "en"),
+            endMarker(),
+        ])
+        engine.applyStreamM([translation("Ch", final: false)])
+        var display = SegmentDisplay.make(for: engine.segments[0], isActivityRunning: true)
+        XCTAssertTrue(display.showsTranslatingPlaceholder, "sanity check: the M-direct translation is genuinely in progress")
+
+        engine.abandonAllPendingJoins()
+
+        XCTAssertTrue(engine.segments[0].targetAbandoned, "an in-progress M-direct translation must be abandoned on reconnect, same as a T-join window")
+        display = SegmentDisplay.make(for: engine.segments[0], isActivityRunning: true)
+        XCTAssertFalse(display.showsTranslatingPlaceholder, "must not keep showing Đang dịch… against a connection that no longer exists")
+    }
 }
