@@ -25,14 +25,21 @@ protocol SonioxLiveSessionProtocol: AnyObject {
     func beginPauseKeepalive()
     func endPauseKeepalive()
     func end(completion: @escaping @MainActor () -> Void)
+    /// Closes both sockets synchronously, with no finalize/empty-frame
+    /// sequence and no wait - appropriate once the server has already
+    /// rejected the key (401/402/403): a graceful finalize has nothing
+    /// left to accomplish, and the caller (an auth-error exit) needs the
+    /// guarantee that no socket survives past this call.
+    func endImmediately(completion: @escaping @MainActor () -> Void)
 }
 
 /// Owns the two `one_way` sockets from docs/soniox-routing.md, the audio
 /// buffering that gives both streams the same origin, keepalive during
-/// pause, and reconnect on an unexpected drop. Everything it decides about
-/// what a token *means* is delegated to `SonioxJoinEngine`; this class only
-/// moves bytes and lifecycle events. Not covered by
-/// `SermivaTests` - see `SonioxStreamSocket`'s header for why.
+/// pause, and reconnect (with retry/backoff) on an unexpected drop.
+/// Everything it decides about what a token *means* is delegated to
+/// `SonioxJoinEngine`; this class only moves bytes and lifecycle events.
+/// Not covered by `SermivaTests` - see `SonioxStreamSocket`'s header for
+/// why.
 @MainActor
 final class SonioxLiveSession: SonioxLiveSessionProtocol {
     var onSegmentsChanged: (@MainActor ([Segment]) -> Void)?
@@ -48,6 +55,12 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     private var mConfigSent = false
     private var tConfigSent = false
     private var bufferedAudio: [Data] = []
+    /// Audio keeps arriving from a mic that never stops capturing during a
+    /// reconnect (HANDOFF: "mic giữ quyền"); if reconnecting is slow or
+    /// stuck retrying, this bounds memory instead of growing forever.
+    /// Beyond the bound, the OLDEST buffered audio is dropped - see
+    /// docs/soniox-routing.md's reconnecting section for what that means.
+    private let bufferedAudioLimit = 200
     /// Set once the current pair of sockets has genuinely started
     /// streaming (both configs sent, first buffered flush done). `false`
     /// during the initial connect and during a reconnect, so `ingestAudio`
@@ -56,14 +69,29 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// docs/soniox-routing.md.
     private var hasStartedStreaming = false
     private var isEnding = false
-    /// `true` from the moment either socket drops until the new pair has
-    /// both reported their config sent. Guards against a second `.closed`
-    /// (the other socket dropping too, or a stale event from a socket this
-    /// class itself just closed) re-triggering a second reconnect cycle.
+    /// `true` from the moment a drop is first detected until a replacement
+    /// pair has both reported their config sent. Distinguishes "this is
+    /// the first drop, run the abandon/notify dance" from "this is a
+    /// retry's own pair failing again, just retry" - see `handleDrop`.
     private var isReconnecting = false
+    /// Every socket this session ever opens is stamped with the
+    /// generation active when it was created. `handle` discards any event
+    /// whose generation does not match the current one - the guard that
+    /// tells a stale event, from a socket this class itself already
+    /// superseded (an old attempt's pair, or the pair a fresh reconnect
+    /// deliberately closed), apart from a genuine failure of the pair that
+    /// is actually current right now.
+    private var connectionGeneration = 0
+    private var reconnectAttempt = 0
+    private let reconnectBaseDelay: TimeInterval = 1
+    private let reconnectMaxDelay: TimeInterval = 30
     /// Set only while `start(config:completion:)` has not yet settled, so
     /// `handle` can tell an initial connection failure/success apart from
     /// a later reconnect's - the two must not share one completion path.
+    /// Per HANDOFF section 6, retry/backoff is a `reconnecting` (mid-
+    /// session) behaviour; an initial connect failure is not retried here -
+    /// `LiveSessionController` already gives the user their own retry via
+    /// tapping Bắt đầu again.
     private var pendingStartCompletion: (@MainActor (Bool) -> Void)?
     private var keepaliveTimer: Timer?
 
@@ -73,10 +101,21 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     // enclosing type's actor isolation.
     nonisolated init() {}
 
+    /// Guarantees no socket survives this object, even if `end`/
+    /// `endImmediately` was never called (e.g. the owning
+    /// `LiveSessionController` was simply torn down) or its completion
+    /// never got to fire - see `SonioxStreamSocket.close()`'s own
+    /// synchronous cancel.
+    deinit {
+        streamM?.close()
+        streamT?.close()
+    }
+
     func start(config: SonioxSessionConfig, completion: @escaping @MainActor (Bool) -> Void) {
         self.config = config
         isEnding = false
         isReconnecting = false
+        reconnectAttempt = 0
         mConfigSent = false
         tConfigSent = false
         bufferedAudio = []
@@ -100,6 +139,9 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
             // docs/soniox-routing.md's audio-origin rule.
             guard mConfigSent, tConfigSent else {
                 bufferedAudio.append(data)
+                if bufferedAudio.count > bufferedAudioLimit {
+                    bufferedAudio.removeFirst(bufferedAudio.count - bufferedAudioLimit)
+                }
                 return
             }
             hasStartedStreaming = true
@@ -127,10 +169,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     }
 
     func end(completion: @escaping @MainActor () -> Void) {
-        isEnding = true
-        isReconnecting = false
-        pendingStartCompletion = nil
-        endPauseKeepalive()
+        prepareToEnd()
         streamM?.sendFinalize()
         streamT?.sendFinalize()
         streamM?.sendEmptyFrame()
@@ -146,12 +185,30 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         }
     }
 
-    private func handle(_ event: SonioxStreamSocket.Event, isStreamM: Bool) {
+    func endImmediately(completion: @escaping @MainActor () -> Void) {
+        prepareToEnd()
+        streamM?.close()
+        streamT?.close()
+        completion()
+    }
+
+    private func prepareToEnd() {
+        isEnding = true
+        isReconnecting = false
+        reconnectAttempt = 0
+        connectionGeneration += 1
+        pendingStartCompletion = nil
+        endPauseKeepalive()
+    }
+
+    private func handle(_ event: SonioxStreamSocket.Event, isStreamM: Bool, generation: Int) {
+        guard generation == connectionGeneration else { return }
         switch event {
         case .configSent:
             if isStreamM { mConfigSent = true } else { tConfigSent = true }
             flushBufferedAudioIfReady()
             guard mConfigSent, tConfigSent else { return }
+            reconnectAttempt = 0
             if let completion = pendingStartCompletion {
                 pendingStartCompletion = nil
                 completion(true)
@@ -161,7 +218,8 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
             }
         case .response(let response):
             // 401/402/403 are the docs' auth-class errors; 400 is not, and
-            // must not be treated as one.
+            // must not be treated as one. An auth error wins over
+            // everything else, including a reconnect already in progress.
             if let code = response.errorCode, (401...403).contains(code) {
                 onAuthError?()
                 return
@@ -169,7 +227,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
             guard let engine = joinEngine else { return }
             let tokens = (response.tokens ?? []).map { $0.appToken }
             if isStreamM {
-                engine.applyStreamM(tokens)
+                engine.applyStreamM(tokens, finalAudioProcMs: response.finalAudioProcMs ?? 0)
             } else {
                 engine.applyStreamT(tokens, finalAudioProcMs: response.finalAudioProcMs ?? 0)
             }
@@ -181,7 +239,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
                 completion(false)
                 return
             }
-            beginDualReconnect()
+            handleDrop()
         }
     }
 
@@ -197,25 +255,23 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// A drop on either socket reconnects BOTH together, so they share one
     /// fresh audio origin again from byte zero - a one-sided reconnect can
     /// never restore a shared origin between two independently-reset
-    /// clocks (see docs/soniox-routing.md's reconnecting section for why
-    /// that was the previous, now-replaced, approach). Every join still in
-    /// flight against the old origin is abandoned immediately - not left
-    /// to time out - and M's speaker-letter map is always cleared here,
-    /// since M always gets a brand-new diarization connection too: a
-    /// post-reconnect speaker must never be displayed with a letter
-    /// already shown pre-reconnect unless the data actually says so, and
-    /// it never can here, since the app has no way to know a post-drop "1"
-    /// is the same person as any pre-drop speaker.
-    private func beginDualReconnect() {
-        guard !isReconnecting else { return }
-        isReconnecting = true
-
-        joinEngine?.abandonAllPendingJoins()
-        joinEngine?.handleStreamMReconnected()
-        if let engine = joinEngine {
-            onSegmentsChanged?(engine.segments)
+    /// clocks. The first drop runs the abandon/notify dance once; if the
+    /// replacement pair itself then fails before ever finishing that
+    /// dance, this just retries - `isReconnecting` already being `true` is
+    /// what tells the two cases apart, so the dance never repeats and
+    /// `onDisconnected` never fires twice for one continuous outage.
+    private func handleDrop() {
+        if !isReconnecting {
+            isReconnecting = true
+            reconnectAttempt = 0
+            joinEngine?.closeOpenSegmentForReconnect()
+            joinEngine?.abandonAllPendingJoins()
+            joinEngine?.handleStreamMReconnected()
+            if let engine = joinEngine {
+                onSegmentsChanged?(engine.segments)
+            }
+            onDisconnected?()
         }
-        onDisconnected?()
 
         streamM?.close()
         streamT?.close()
@@ -226,15 +282,37 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         hasStartedStreaming = false
         bufferedAudio = []
 
-        connectBothFresh()
+        scheduleReconnectAttempt()
+    }
+
+    /// HANDOFF section 6: "retry backoff". Doubles from `reconnectBaseDelay`
+    /// up to `reconnectMaxDelay`, resetting to zero the moment a pair fully
+    /// connects again (`handle`'s `.configSent` branch). Checks
+    /// `isReconnecting`/`isEnding` again when it actually fires, since a
+    /// lot can happen during the wait: the session could have ended, or an
+    /// auth error could have already won.
+    private func scheduleReconnectAttempt() {
+        let delay = min(reconnectMaxDelay, reconnectBaseDelay * pow(2, Double(reconnectAttempt)))
+        reconnectAttempt += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.isReconnecting, !self.isEnding else { return }
+            self.connectBothFresh()
+        }
     }
 
     /// Opens a brand-new pair of sockets against the current `config` and
-    /// wires both back into `handle`. Used both for the initial connect and
-    /// for a reconnect - in both cases the two sockets must come up as one
-    /// pair sharing a fresh origin, never independently.
+    /// wires both back into `handle`, stamped with a freshly-incremented
+    /// generation so any lingering event from a superseded pair (the one
+    /// `handleDrop` just closed, or an earlier failed retry attempt) is
+    /// discarded rather than mistaken for this pair's own status. Used both
+    /// for the initial connect and for every reconnect/retry attempt - in
+    /// every case the two sockets must come up as one pair sharing a fresh
+    /// origin, never independently.
     private func connectBothFresh() {
         guard let config else { return }
+        connectionGeneration += 1
+        let generation = connectionGeneration
+
         var hints = [config.meLanguage, config.targetLanguage]
         if let guestHint = config.guestHint { hints.append(guestHint) }
 
@@ -243,8 +321,8 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         streamM = m
         streamT = t
 
-        m.onEvent = { [weak self] event in self?.handle(event, isStreamM: true) }
-        t.onEvent = { [weak self] event in self?.handle(event, isStreamM: false) }
+        m.onEvent = { [weak self] event in self?.handle(event, isStreamM: true, generation: generation) }
+        t.onEvent = { [weak self] event in self?.handle(event, isStreamM: false, generation: generation) }
 
         m.connect(config: SonioxStreamConfig(apiKey: config.apiKey, languageHints: hints, translation: .init(targetLanguage: config.meLanguage)))
         t.connect(config: SonioxStreamConfig(apiKey: config.apiKey, languageHints: hints, translation: .init(targetLanguage: config.targetLanguage)))

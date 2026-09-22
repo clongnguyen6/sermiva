@@ -130,7 +130,8 @@ final class LiveSessionControllerTests: XCTestCase {
         XCTAssertEqual(controller.state, .authError)
         XCTAssertFalse(controller.isMicCapturing)
         XCTAssertEqual(audio.stopCount, 1)
-        XCTAssertEqual(session.endCount, 1, "a rejected key must not leave the sockets open and billing")
+        XCTAssertEqual(session.endImmediatelyCount, 1, "a rejected key must close immediately, not via the graceful finalize sequence")
+        XCTAssertEqual(session.endCount, 0, "finalize is pointless after a 401/402/403")
     }
 
     func test_disconnectedWhileListeningMovesToReconnectingAndReconnectedReturnsToListening() {

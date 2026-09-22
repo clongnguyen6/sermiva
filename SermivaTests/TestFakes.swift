@@ -61,6 +61,7 @@ final class FakeSonioxLiveSession: SonioxLiveSessionProtocol {
 
     private(set) var startCount = 0
     private(set) var endCount = 0
+    private(set) var endImmediatelyCount = 0
     private(set) var ingestedAudioCount = 0
     private(set) var pauseKeepaliveCount = 0
     private(set) var resumeCount = 0
@@ -88,6 +89,11 @@ final class FakeSonioxLiveSession: SonioxLiveSessionProtocol {
 
     func end(completion: @escaping @MainActor () -> Void) {
         endCount += 1
+        completion()
+    }
+
+    func endImmediately(completion: @escaping @MainActor () -> Void) {
+        endImmediatelyCount += 1
         completion()
     }
 }

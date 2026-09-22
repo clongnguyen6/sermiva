@@ -246,10 +246,12 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         audioCapture.stop()
         isMicCapturing = false
         state = .authError
-        // A rejected key is not going to start working mid-stream; stop
-        // both sockets rather than leave them open and billing behind an
-        // error banner with no retry path.
-        liveSession.end { }
+        // A rejected key is not going to start working mid-stream, and a
+        // graceful finalize sequence has nothing left to accomplish after
+        // a 401/402/403 - close both sockets immediately rather than wait
+        // 1.5 s (or leave them open at all if the user taps "Nhập lại
+        // khóa" before that wait finishes).
+        liveSession.endImmediately { }
     }
 
     private func handleDisconnected() {

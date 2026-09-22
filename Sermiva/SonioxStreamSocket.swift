@@ -30,7 +30,14 @@ final class SonioxStreamSocket: NSObject {
     private static let endpoint = URL(string: "wss://stt-rt.soniox.com/transcribe-websocket")!
 
     private let urlSession: URLSession
-    private var task: URLSessionWebSocketTask?
+    /// `nonisolated(unsafe)` so `close()` can run from a nonisolated
+    /// context - specifically `SonioxLiveSession.deinit`, which needs to
+    /// guarantee this socket's underlying task is cancelled even when
+    /// nothing else ever calls `close()`. `URLSessionWebSocketTask.cancel`
+    /// itself is documented thread-safe; every other access to `task`
+    /// still only ever happens from this class's own MainActor-isolated
+    /// methods.
+    nonisolated(unsafe) private var task: URLSessionWebSocketTask?
 
     init(urlSession: URLSession = URLSession(configuration: .default)) {
         self.urlSession = urlSession
@@ -80,7 +87,9 @@ final class SonioxStreamSocket: NSObject {
         task?.send(.data(Data())) { _ in }
     }
 
-    func close() {
+    /// `nonisolated` so this can also be called from
+    /// `SonioxLiveSession.deinit` (a nonisolated context) - see `task`.
+    nonisolated func close() {
         task?.cancel(with: .normalClosure, reason: nil)
         task = nil
     }
