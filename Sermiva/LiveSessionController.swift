@@ -3,9 +3,8 @@ import Foundation
 /// The three independent settings from HANDOFF.md section 4. Settings (the
 /// screen where the owner would change these) is out of scope for this
 /// outcome, so a live session always uses the same defaults demo already
-/// ships with `demo-data.json`'s `defaultLanguageConfig` - see the
-/// hand-off report's open questions for what that means once Settings
-/// exists.
+/// ships with `demo-data.json`'s `defaultLanguageConfig`. What this means
+/// once Settings exists is an open question for the project owner.
 struct LiveLanguageConfig {
     let me: String
     let target: String
@@ -191,8 +190,9 @@ final class LiveSessionController: ObservableObject, SessionControlling {
                 // matching state in HANDOFF section 5's vocabulary - the
                 // honest, no-new-copy choice is to stop (closing the
                 // sockets that never really started) and return to `.idle`
-                // so the existing "Bắt đầu" flow can simply retry. Flagged
-                // as an owner question in the hand-off report.
+                // so the existing "Bắt đầu" flow can simply retry - left
+                // for the project owner to decide whether this deserves a
+                // real state of its own.
                 self.audioCapture.stop()
                 self.isMicCapturing = false
                 self.state = .idle
@@ -204,14 +204,23 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         }
     }
 
+    /// Capture is attempted before anything else changes, the same
+    /// ordering `beginConnecting` uses for the startup case: a resume
+    /// capture failure must end in a true state, not one that claims
+    /// listening while silently having left the keepalive stopped on
+    /// sockets that are still open. On failure, nothing here changes - the
+    /// session simply stays `.paused`, keepalive keeps running exactly as
+    /// `pause()` left it, and the elapsed timer stays frozen - so the user
+    /// can just try Tiếp tục again.
     private func resume() {
-        liveSession.endPauseKeepalive()
         do {
             try audioCapture.start()
-            isMicCapturing = true
         } catch {
             isMicCapturing = false
+            return
         }
+        isMicCapturing = true
+        liveSession.endPauseKeepalive()
         state = .listening
         startElapsedTimer()
     }

@@ -101,6 +101,25 @@ final class LiveSessionControllerTests: XCTestCase {
         XCTAssertEqual(session.resumeCount, 1, "resume must end the pause keepalive")
     }
 
+    /// A resume capture failure must end in a true state: still paused
+    /// (not claiming listening), and the keepalive that `pause()` started
+    /// must still be running on the sockets that are still open - not
+    /// silently stopped for a resume that never actually happened.
+    func test_resumeCaptureFailureStaysPausedAndKeepsKeepaliveRunning() {
+        let audio = FakeAudioCapture()
+        let (controller, _, session, _) = makeController(audio: audio)
+        controller.primaryButtonTapped() // -> listening
+        controller.primaryButtonTapped() // -> paused
+        XCTAssertEqual(session.pauseKeepaliveCount, 1)
+
+        audio.failNextStart = true
+        controller.primaryButtonTapped() // attempt resume, capture fails
+
+        XCTAssertEqual(controller.state, .paused, "a resume capture failure must not claim listening")
+        XCTAssertFalse(controller.isMicCapturing)
+        XCTAssertEqual(session.resumeCount, 0, "keepalive must not stop for a resume that never truly happened")
+    }
+
     func test_authErrorCallbackStopsCaptureAndMovesState() {
         let (controller, audio, session, _) = makeController()
         controller.primaryButtonTapped() // -> listening
