@@ -125,3 +125,67 @@ final class ManualScheduler: DemoScheduler {
         }
     }
 }
+
+/// Stands in for one Soniox socket at the `SonioxSocketConnecting` seam -
+/// app-owned lifecycle events only, never Soniox JSON or a real
+/// `URLSessionWebSocketTask` - so `SonioxLiveSession`'s reconnect/retry
+/// policy is testable without ever going through `SonioxStreamSocket`. A
+/// test drives the server side by calling `simulateConfigSent()` etc.
+/// directly on whichever fake `FakeSonioxSocketFactory` handed out.
+@MainActor
+final class FakeSonioxSocketConnection: SonioxSocketConnecting {
+    var onEvent: ((SonioxSocketEvent) -> Void)?
+    private(set) var connectCount = 0
+    private(set) var sentAudioChunks: [Data] = []
+    private(set) var lastConfig: SonioxStreamConfig?
+    // `nonisolated(unsafe)` so `close()` can update this synchronously from
+    // a nonisolated context, matching the real `SonioxStreamSocket.close()`
+    // this fake stands in for - tests only ever run single-threaded on the
+    // main actor, so there is no real concurrent access to guard against.
+    nonisolated(unsafe) private(set) var closeCount = 0
+    var isClosed: Bool { closeCount > 0 }
+
+    func connect(config: SonioxStreamConfig) {
+        connectCount += 1
+        lastConfig = config
+    }
+
+    func sendAudio(_ data: Data) {
+        sentAudioChunks.append(data)
+    }
+
+    func sendKeepalive() {}
+    func sendFinalize() {}
+    func sendEmptyFrame() {}
+
+    nonisolated func close() {
+        closeCount += 1
+    }
+
+    func simulateConfigSent() {
+        onEvent?(.configSent)
+    }
+
+    func simulateAuthRejected() {
+        onEvent?(.authRejected)
+    }
+
+    func simulateClosed(_ error: Error? = nil) {
+        onEvent?(.closed(error))
+    }
+}
+
+/// Hands out a fresh `FakeSonioxSocketConnection` on every call, in the
+/// same order `SonioxLiveSession.connectBothFresh` creates them (M then T,
+/// once per connect/reconnect attempt) - so a test can index
+/// `createdSockets` to reach any specific attempt's specific socket.
+@MainActor
+final class FakeSonioxSocketFactory {
+    private(set) var createdSockets: [FakeSonioxSocketConnection] = []
+
+    func make() -> SonioxSocketConnecting {
+        let socket = FakeSonioxSocketConnection()
+        createdSockets.append(socket)
+        return socket
+    }
+}

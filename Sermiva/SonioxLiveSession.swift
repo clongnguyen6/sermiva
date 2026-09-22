@@ -35,11 +35,14 @@ protocol SonioxLiveSessionProtocol: AnyObject {
 
 /// Owns the two `one_way` sockets from docs/soniox-routing.md, the audio
 /// buffering that gives both streams the same origin, keepalive during
-/// pause, and reconnect (with retry/backoff) on an unexpected drop.
-/// Everything it decides about what a token *means* is delegated to
-/// `SonioxJoinEngine`; this class only moves bytes and lifecycle events.
-/// Not covered by `SermivaTests` - see `SonioxStreamSocket`'s header for
-/// why.
+/// pause, and reconnect (with retry/backoff) on an unexpected drop. This
+/// reconnect/retry policy is app-owned logic - not Soniox's wire shape -
+/// so it is exercised in `SonioxLiveSessionTests` through a fake conforming
+/// to `SonioxSocketConnecting`, injected via `makeSocket`. Everything this
+/// class decides about what a token *means* is delegated to
+/// `SonioxJoinEngine`; the one thing that stays untested is the adapter
+/// that turns real WebSocket bytes into `SonioxSocketEvent` -
+/// `SonioxStreamSocket` itself - per AGENTS.md.
 @MainActor
 final class SonioxLiveSession: SonioxLiveSessionProtocol {
     var onSegmentsChanged: (@MainActor ([Segment]) -> Void)?
@@ -47,20 +50,30 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     var onDisconnected: (@MainActor () -> Void)?
     var onReconnected: (@MainActor () -> Void)?
 
+    // `nonisolated(unsafe)`: both are set once, only from `init` (itself
+    // `nonisolated`, for the default-parameter-value reason below), and
+    // never mutated again - only ever read from this class's own
+    // MainActor-isolated methods afterward.
+    nonisolated(unsafe) private let makeSocket: @MainActor () -> SonioxSocketConnecting
+    nonisolated(unsafe) private let scheduler: DemoScheduler
+
     private var config: SonioxSessionConfig?
-    private var streamM: SonioxStreamSocket?
-    private var streamT: SonioxStreamSocket?
+    private var streamM: SonioxSocketConnecting?
+    private var streamT: SonioxSocketConnecting?
     private var joinEngine: SonioxJoinEngine?
 
     private var mConfigSent = false
     private var tConfigSent = false
     private var bufferedAudio: [Data] = []
-    /// Audio keeps arriving from a mic that never stops capturing during a
-    /// reconnect (HANDOFF: "mic giữ quyền"); if reconnecting is slow or
-    /// stuck retrying, this bounds memory instead of growing forever.
-    /// Beyond the bound, the OLDEST buffered audio is dropped - see
-    /// docs/soniox-routing.md's reconnecting section for what that means.
-    private let bufferedAudioLimit = 200
+    private var bufferedAudioByteCount = 0
+    /// 60 s of the converted 16 kHz mono Int16 stream (32,000 bytes/s) -
+    /// an exact duration, independent of whatever sample rate the device's
+    /// microphone hardware happens to be capturing at (a chunk-count bound
+    /// would not have this property: each tap callback's own duration
+    /// varies with the hardware rate). See docs/soniox-routing.md's
+    /// reconnecting section for what happens to audio beyond this bound,
+    /// and what the buffer means across a multi-attempt outage.
+    private let bufferedAudioMaxBytes = 60 * 32_000
     /// Set once the current pair of sockets has genuinely started
     /// streaming (both configs sent, first buffered flush done). `false`
     /// during the initial connect and during a reconnect, so `ingestAudio`
@@ -76,11 +89,13 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     private var isReconnecting = false
     /// Every socket this session ever opens is stamped with the
     /// generation active when it was created. `handle` discards any event
-    /// whose generation does not match the current one - the guard that
-    /// tells a stale event, from a socket this class itself already
-    /// superseded (an old attempt's pair, or the pair a fresh reconnect
-    /// deliberately closed), apart from a genuine failure of the pair that
-    /// is actually current right now.
+    /// whose generation does not match the current one. Bumped the moment
+    /// a drop is first processed (before anything else runs) - not only
+    /// when a replacement pair is actually created - so a *second* close
+    /// event from the SAME dropped pair (e.g. T detecting the same outage
+    /// moments after M did) is immediately recognised as stale, rather
+    /// than being treated as an independent second drop that would
+    /// schedule an overlapping retry timer.
     private var connectionGeneration = 0
     private var reconnectAttempt = 0
     private let reconnectBaseDelay: TimeInterval = 1
@@ -99,7 +114,13 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     // (`= SonioxLiveSession()`) can construct one without already running
     // on the main actor - default argument expressions do not inherit the
     // enclosing type's actor isolation.
-    nonisolated init() {}
+    nonisolated init(
+        makeSocket: @escaping @MainActor () -> SonioxSocketConnecting = { SonioxStreamSocket() },
+        scheduler: DemoScheduler = DispatchScheduler()
+    ) {
+        self.makeSocket = makeSocket
+        self.scheduler = scheduler
+    }
 
     /// Guarantees no socket survives this object, even if `end`/
     /// `endImmediately` was never called (e.g. the owning
@@ -119,6 +140,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         mConfigSent = false
         tConfigSent = false
         bufferedAudio = []
+        bufferedAudioByteCount = 0
         hasStartedStreaming = false
         joinEngine = SonioxJoinEngine(meLanguage: config.meLanguage)
 
@@ -138,10 +160,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
             // pair of sockets both share one byte-identical origin, per
             // docs/soniox-routing.md's audio-origin rule.
             guard mConfigSent, tConfigSent else {
-                bufferedAudio.append(data)
-                if bufferedAudio.count > bufferedAudioLimit {
-                    bufferedAudio.removeFirst(bufferedAudio.count - bufferedAudioLimit)
-                }
+                appendBufferedAudio(data)
                 return
             }
             hasStartedStreaming = true
@@ -151,6 +170,19 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         }
         streamM?.sendAudio(data)
         streamT?.sendAudio(data)
+    }
+
+    private func appendBufferedAudio(_ data: Data) {
+        bufferedAudio.append(data)
+        bufferedAudioByteCount += data.count
+        while bufferedAudioByteCount > bufferedAudioMaxBytes, !bufferedAudio.isEmpty {
+            bufferedAudioByteCount -= bufferedAudio.removeFirst().count
+        }
+    }
+
+    private func clearBufferedAudio() {
+        bufferedAudio = []
+        bufferedAudioByteCount = 0
     }
 
     func beginPauseKeepalive() {
@@ -178,7 +210,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         // this app is not the one that gets to hold a metered stream open
         // indefinitely waiting for it, so a short grace window stands in
         // for that wait, and `close()` always runs after it either way.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+        scheduler.schedule(after: 1.5) { [weak self] in
             self?.streamM?.close()
             self?.streamT?.close()
             completion()
@@ -201,9 +233,21 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         endPauseKeepalive()
     }
 
-    private func handle(_ event: SonioxStreamSocket.Event, isStreamM: Bool, generation: Int) {
+    private func handle(_ event: SonioxSocketEvent, isStreamM: Bool, generation: Int) {
+        // Auth wins at any point, even from a socket this class has
+        // already superseded (e.g. the pair a fresh reconnect just closed,
+        // if its rejection response was already in flight) - deliberately
+        // NOT behind the generation guard below, which exists to filter
+        // stale lifecycle noise, not a terminal "the key is rejected"
+        // signal that matters regardless of which attempt reported it.
+        if case .authRejected = event {
+            onAuthError?()
+            return
+        }
         guard generation == connectionGeneration else { return }
         switch event {
+        case .authRejected:
+            break // handled above, unreachable here
         case .configSent:
             if isStreamM { mConfigSent = true } else { tConfigSent = true }
             flushBufferedAudioIfReady()
@@ -217,17 +261,10 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
                 onReconnected?()
             }
         case .response(let response):
-            // 401/402/403 are the docs' auth-class errors; 400 is not, and
-            // must not be treated as one. An auth error wins over
-            // everything else, including a reconnect already in progress.
-            if let code = response.errorCode, (401...403).contains(code) {
-                onAuthError?()
-                return
-            }
             guard let engine = joinEngine else { return }
             let tokens = (response.tokens ?? []).map { $0.appToken }
             if isStreamM {
-                engine.applyStreamM(tokens, finalAudioProcMs: response.finalAudioProcMs ?? 0)
+                engine.applyStreamM(tokens)
             } else {
                 engine.applyStreamT(tokens, finalAudioProcMs: response.finalAudioProcMs ?? 0)
             }
@@ -239,6 +276,11 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
                 completion(false)
                 return
             }
+            // Move this pair out of "current" immediately - a second close
+            // event from the SAME pair (e.g. T also detecting the drop
+            // moments after M) must be recognised as stale by the guard
+            // above, not treated as an independent second drop.
+            connectionGeneration += 1
             handleDrop()
         }
     }
@@ -249,7 +291,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
             streamM?.sendAudio(chunk)
             streamT?.sendAudio(chunk)
         }
-        bufferedAudio.removeAll()
+        clearBufferedAudio()
     }
 
     /// A drop on either socket reconnects BOTH together, so they share one
@@ -258,8 +300,12 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// clocks. The first drop runs the abandon/notify dance once; if the
     /// replacement pair itself then fails before ever finishing that
     /// dance, this just retries - `isReconnecting` already being `true` is
-    /// what tells the two cases apart, so the dance never repeats and
-    /// `onDisconnected` never fires twice for one continuous outage.
+    /// what tells the two cases apart. Captured audio is NOT cleared here:
+    /// it keeps accumulating (bounded by `bufferedAudioMaxBytes`) across
+    /// every attempt of one continuous outage, and is only ever cleared by
+    /// a successful flush (`flushBufferedAudioIfReady`) or by ending the
+    /// session - a failed attempt must not throw away what the mic
+    /// captured while the app was still trying.
     private func handleDrop() {
         if !isReconnecting {
             isReconnecting = true
@@ -280,7 +326,6 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         mConfigSent = false
         tConfigSent = false
         hasStartedStreaming = false
-        bufferedAudio = []
 
         scheduleReconnectAttempt()
     }
@@ -294,7 +339,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     private func scheduleReconnectAttempt() {
         let delay = min(reconnectMaxDelay, reconnectBaseDelay * pow(2, Double(reconnectAttempt)))
         reconnectAttempt += 1
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+        scheduler.schedule(after: delay) { [weak self] in
             guard let self, self.isReconnecting, !self.isEnding else { return }
             self.connectBothFresh()
         }
@@ -302,8 +347,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
 
     /// Opens a brand-new pair of sockets against the current `config` and
     /// wires both back into `handle`, stamped with a freshly-incremented
-    /// generation so any lingering event from a superseded pair (the one
-    /// `handleDrop` just closed, or an earlier failed retry attempt) is
+    /// generation so any lingering event from a superseded pair is
     /// discarded rather than mistaken for this pair's own status. Used both
     /// for the initial connect and for every reconnect/retry attempt - in
     /// every case the two sockets must come up as one pair sharing a fresh
@@ -316,8 +360,8 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         var hints = [config.meLanguage, config.targetLanguage]
         if let guestHint = config.guestHint { hints.append(guestHint) }
 
-        let m = SonioxStreamSocket()
-        let t = SonioxStreamSocket()
+        let m = makeSocket()
+        let t = makeSocket()
         streamM = m
         streamT = t
 

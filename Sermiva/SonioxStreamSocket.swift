@@ -2,30 +2,24 @@ import Foundation
 
 /// The thin WebSocket adapter for one Soniox stream, per
 /// docs/soniox-routing.md's "Stream contract" section. Deliberately dumb:
-/// it sends bytes and control frames, and decodes whatever comes back into
-/// `SonioxStreamResponse` - all the join and segment logic lives in
-/// `SonioxJoinEngine`, which never sees this type. AGENTS.md forbids
-/// testing through this adapter, since Soniox's exact stream shape is
-/// unconfirmed; nothing in `SermivaTests` references this file.
+/// it sends bytes and control frames, decodes whatever comes back, and maps
+/// it onto `SonioxSocketEvent` - including classifying 401/402/403 as
+/// `.authRejected` rather than a plain `.response`, so everything upstream
+/// of this adapter (`SonioxLiveSession`'s reconnect/retry policy) reacts to
+/// app-level lifecycle events, never Soniox's own error-code shape
+/// directly. All the join and segment logic lives in `SonioxJoinEngine`,
+/// which never sees this type either. AGENTS.md forbids testing through
+/// this adapter, since Soniox's exact stream shape is unconfirmed; nothing
+/// in `SermivaTests` references this file - see `SonioxSocketConnecting`
+/// for the seam that is tested instead.
 ///
 /// `URLSessionWebSocketTask`'s completion and receive handlers are not
 /// guaranteed to run on the main actor, so every one of them hops back with
 /// `Task { @MainActor in ... }` before touching `onEvent` or any other
 /// actor-isolated state.
 @MainActor
-final class SonioxStreamSocket: NSObject {
-    enum Event {
-        /// The config text frame was sent without error. Per the docs'
-        /// Unknowns table, whether the server acks the config before the
-        /// first result is unconfirmed, so this is "sent", not "accepted
-        /// by the server" - `SonioxLiveSession` buffers audio until both
-        /// sockets report this, per the audio-origin rule.
-        case configSent
-        case response(SonioxStreamResponse)
-        case closed(Error?)
-    }
-
-    var onEvent: ((Event) -> Void)?
+final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
+    var onEvent: ((SonioxSocketEvent) -> Void)?
 
     private static let endpoint = URL(string: "wss://stt-rt.soniox.com/transcribe-websocket")!
 
@@ -125,6 +119,14 @@ final class SonioxStreamSocket: NSObject {
         @unknown default: data = nil
         }
         guard let data, let response = try? JSONDecoder().decode(SonioxStreamResponse.self, from: data) else { return }
+        // 401/402/403 are the docs' auth-class errors; 400 is not, and
+        // must not be treated as one. Classified here, in the adapter, so
+        // everything upstream reacts to the app-level `.authRejected`
+        // event rather than inspecting Soniox's own error-code shape.
+        if let code = response.errorCode, (401...403).contains(code) {
+            onEvent?(.authRejected)
+            return
+        }
         onEvent?(.response(response))
     }
 }
