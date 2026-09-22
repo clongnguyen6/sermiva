@@ -4,11 +4,10 @@ import SwiftUI
 /// Soniox service (`SonioxAPIClient`) and stores the key in Keychain only -
 /// AGENTS.md's rule that a key never appears anywhere else in the app or
 /// the repo. The prototype's `sx_...` key-pattern check and its
-/// "Dán khóa demo" affordance are `[mô phỏng]` per HANDOFF.md; a pasted
-/// demo key would predictably fail real validation, so this file does not
-/// reuse either. Whether to keep, drop, or replace that affordance for a
-/// live build is an open question for the project owner, not a decision
-/// made here.
+/// "Dán khóa demo" affordance are `[mô phỏng]` per HANDOFF.md, and the
+/// project owner has approved dropping both: a pasted demo key would
+/// predictably fail real validation, so neither has a place here.
+/// "Dùng thử bản demo (không nối Soniox)" is unaffected and stays.
 struct SetupView: View {
     let onKeyValidated: (String) -> Void
     let onStartDemo: () -> Void
@@ -18,6 +17,7 @@ struct SetupView: View {
         case checking
         case valid(warning: String?)
         case invalidKey
+        case unusableConfiguration
         case networkError
     }
 
@@ -111,6 +111,7 @@ struct SetupView: View {
         case .checking: return "Đang kiểm tra…"
         case .valid(let warning): return warning ?? "Khóa hợp lệ"
         case .invalidKey: return "Khóa không hợp lệ"
+        case .unusableConfiguration: return "Khóa hợp lệ, nhưng không hỗ trợ cấu hình ngôn ngữ này."
         case .networkError: return "Lỗi mạng. Thử lại."
         }
     }
@@ -118,7 +119,7 @@ struct SetupView: View {
     private var statusColor: Color {
         switch validationState {
         case .valid: return Tokens.ok
-        case .invalidKey, .networkError: return Tokens.danger
+        case .invalidKey, .unusableConfiguration, .networkError: return Tokens.danger
         case .notChecked, .checking: return Tokens.text3
         }
     }
@@ -140,13 +141,12 @@ struct SetupView: View {
                     onKeyValidated(key)
                 case .invalidKey:
                     validationState = .invalidKey
-                case .networkError, .unusableConfiguration:
-                    // The key itself was accepted for `.unusableConfiguration` -
-                    // HANDOFF's status vocabulary has no case for "valid key,
-                    // unusable model/languages", so this reuses the existing
-                    // "Lỗi mạng" copy rather than inventing new text. That
-                    // copy is not literally accurate here either - left as
-                    // is pending the project owner's decision.
+                case .unusableConfiguration:
+                    // The key itself was accepted, but the model cannot
+                    // serve the fixed vi/auto/en configuration - not stored,
+                    // not passed on to onKeyValidated.
+                    validationState = .unusableConfiguration
+                case .networkError:
                     validationState = .networkError
                 }
             }
