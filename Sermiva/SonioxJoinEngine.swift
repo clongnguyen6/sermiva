@@ -142,9 +142,23 @@ final class SonioxJoinEngine {
         }
     }
 
+    /// Called before the above, when a reconnect begins: the M segment
+    /// open at the moment of the drop must be closed exactly like a
+    /// genuine `<end>` would close it - otherwise it keeps absorbing
+    /// tokens from the brand-new post-reconnect connection under its
+    /// pre-drop label and locked language, since neither the non-final
+    /// tail path nor a same-speaker/same-language final token would ever
+    /// cut a new boundary for it on their own.
+    func closeOpenSegmentForReconnect() {
+        if isCurrentMSegmentOpen, let id = currentMSegmentId {
+            closeSegment(id: id)
+        }
+        isCurrentMSegmentOpen = false
+    }
+
     // MARK: - Stream M
 
-    func applyStreamM(_ tokens: [SonioxToken]) {
+    func applyStreamM(_ tokens: [SonioxToken], finalAudioProcMs: Int = 0) {
         var tailBySegment: [Int: String] = [:]
         for token in tokens {
             switch token.translationStatus {
@@ -158,6 +172,26 @@ final class SonioxJoinEngine {
         }
         if isCurrentMSegmentOpen, let id = currentMSegmentId, let index = segments.firstIndex(where: { $0.id == id }) {
             segments[index].source = (finalSourceById[id] ?? "") + (tailBySegment[id] ?? "")
+        }
+        resolveStalledMDirectTranslations(pastMs: finalAudioProcMs)
+    }
+
+    /// A non-`me` segment's M-direct translation can start (a non-final
+    /// translation token arrives, docs/soniox-routing.md) and then simply
+    /// never finish - `<end>` closes the segment and M moves on without
+    /// ever sending a final chunk for it. `final_audio_proc_ms` passing
+    /// well beyond that segment's own audio range is the same kind of real
+    /// signal `resolveJoins` already trusts for the T-join case: once M's
+    /// own processed-audio clock is past that segment's `end_ms`, M is
+    /// done with that time range entirely, so nothing further is coming.
+    private func resolveStalledMDirectTranslations(pastMs finalAudioProcMs: Int) {
+        for index in segments.indices {
+            let segment = segments[index]
+            guard segment.isFinal, segment.target == nil, segment.translationInProgress,
+                  !segment.targetAbandoned, segment.lang != meLanguage else { continue }
+            guard let lastEntry = mFinalOriginalLog.last(where: { $0.segmentId == segment.id }) else { continue }
+            guard finalAudioProcMs > lastEntry.endMs else { continue }
+            segments[index].targetAbandoned = true
         }
     }
 

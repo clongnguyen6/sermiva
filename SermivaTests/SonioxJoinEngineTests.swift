@@ -460,4 +460,57 @@ final class SonioxJoinEngineTests: XCTestCase {
         display = SegmentDisplay.make(for: engine.segments[0], isActivityRunning: true)
         XCTAssertFalse(display.showsTranslatingPlaceholder, "must not keep showing Đang dịch… against a connection that no longer exists")
     }
+
+    /// Re-review finding 3: the M segment still open at the moment of a
+    /// drop must be closed, or post-drop tokens silently join it under its
+    /// pre-drop label. The non-final tail path (unlike the final-token
+    /// boundary check) has no speaker/language comparison at all, so this
+    /// is only exploitable through a non-final post-drop token - which is
+    /// exactly what a real reconnect's first tokens are likely to be.
+    func test_reconnectClosesTheOpenPreDropSegmentSoPostDropTokensDontJoinIt() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([original("Xin", final: true, start: 0, end: 400, speaker: "1", lang: "vi")])
+        XCTAssertFalse(engine.segments[0].isFinal, "sanity: segment 1 is still open, no <end> yet")
+
+        engine.closeOpenSegmentForReconnect()
+        engine.abandonAllPendingJoins()
+        engine.handleStreamMReconnected()
+        XCTAssertTrue(engine.segments[0].isFinal, "the pre-drop open segment must be closed at the drop")
+
+        engine.applyStreamM([original("Hello", final: false, start: 5000, end: 5300, speaker: "1", lang: "vi")])
+
+        XCTAssertEqual(engine.segments.count, 2, "a post-drop token must start a new segment, never join the pre-drop open one")
+        XCTAssertEqual(engine.segments[0].source, "Xin", "the pre-drop segment's text must not gain any post-drop content")
+    }
+
+    // MARK: - Re-review finding 4
+
+    /// A non-`me` M-direct translation can start (a non-final translation
+    /// token arrives) and then simply never finish: `<end>` closes the
+    /// segment and M moves on to other audio without ever sending a final
+    /// chunk for it. `final_audio_proc_ms` passing well beyond that
+    /// segment's own audio range is the same real signal `resolveJoins`
+    /// already trusts for the T-join case.
+    func test_mDirectTranslationInProgressIsAbandonedOnceMProcessesWellPastItWithNoFinalChunk() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM(
+            [
+                original("Hi", final: true, start: 0, end: 500, speaker: "1", lang: "en"),
+                translation("Ch", final: false),
+                endMarker(),
+            ],
+            finalAudioProcMs: 500
+        )
+        var display = SegmentDisplay.make(for: engine.segments[0], isActivityRunning: true)
+        XCTAssertTrue(display.showsTranslatingPlaceholder, "sanity: still genuinely in progress right at the drop")
+
+        // M keeps processing audio (silence, or unrelated content) well
+        // past this segment's own end_ms, without ever sending a final
+        // chunk for it.
+        engine.applyStreamM([], finalAudioProcMs: 5000)
+
+        XCTAssertTrue(engine.segments[0].targetAbandoned, "must stop claiming translation is in progress once M has moved well past this segment's audio with nothing landed")
+        display = SegmentDisplay.make(for: engine.segments[0], isActivityRunning: true)
+        XCTAssertFalse(display.showsTranslatingPlaceholder)
+    }
 }
