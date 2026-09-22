@@ -5,9 +5,20 @@ import Foundation
 /// `concurrencyWarning` is set when the account's own concurrency limit is
 /// below the two simultaneous connections this app's two-stream session
 /// needs - reported before any session starts, not discovered mid-stream.
+///
+/// `unusableConfiguration` covers a 200 response that does not actually
+/// confirm this app can work: undecodable JSON, no `stt-rt-v5` entry, or a
+/// model that does not support one_way translation for the configured
+/// `me`/`target` languages. The key itself was accepted, so calling it
+/// invalid would be dishonest; HANDOFF's SettingsView vocabulary
+/// ("Chưa kiểm tra / Đang kiểm tra… / Khóa hợp lệ / Khóa không hợp lệ /
+/// Lỗi mạng") has no case that fits this either, so `SetupView` maps it
+/// onto the existing "Lỗi mạng" copy rather than inventing new text - see
+/// the hand-off report's owner questions.
 enum SonioxKeyValidationOutcome: Equatable {
     case valid(concurrencyWarning: String?)
     case invalidKey
+    case unusableConfiguration
     case networkError
 }
 
@@ -21,7 +32,12 @@ enum SonioxAPIClient {
     private static let modelsURL = URL(string: "https://api.soniox.com/v1/models")!
     private static let concurrencyURL = URL(string: "https://api.soniox.com/v1/concurrency-limits")!
 
-    static func validateKey(_ key: String, urlSession: URLSession = .shared) async -> SonioxKeyValidationOutcome {
+    static func validateKey(
+        _ key: String,
+        meLanguage: String,
+        targetLanguage: String,
+        urlSession: URLSession = .shared
+    ) async -> SonioxKeyValidationOutcome {
         var request = URLRequest(url: modelsURL)
         request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
 
@@ -41,7 +57,18 @@ enum SonioxAPIClient {
         guard case .valid = outcome, let modelsData else {
             return outcome
         }
-        _ = try? JSONDecoder().decode(SonioxModelsResponse.self, from: modelsData)
+        // A 200 only actually confirms the key works for this app once the
+        // response decodes, names `stt-rt-v5`, and that model supports
+        // one_way translation for both configured languages - anything
+        // less is reported honestly as unusable, never as an invalid key
+        // (the key itself was accepted) and never as a false "valid".
+        guard
+            let decoded = try? JSONDecoder().decode(SonioxModelsResponse.self, from: modelsData),
+            let model = decoded.realtimeModel,
+            modelSupportsConfiguredLanguages(model, meLanguage: meLanguage, targetLanguage: targetLanguage)
+        else {
+            return .unusableConfiguration
+        }
 
         var concurrencyRequest = URLRequest(url: concurrencyURL)
         concurrencyRequest.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
@@ -73,5 +100,18 @@ enum SonioxAPIClient {
     static func concurrencyWarning(forLimit limit: Int?) -> String? {
         guard let limit, limit < 2 else { return nil }
         return "Giới hạn kết nối đồng thời của tài khoản là \(limit) - phiên này cần 2."
+    }
+
+    /// This app's two-stream session needs `stt-rt-v5` to support one_way
+    /// translation into both the configured `me` and `target` languages -
+    /// checked against `translation_targets`, the field the docs say
+    /// supplies the me/target pickers.
+    static func modelSupportsConfiguredLanguages(
+        _ model: SonioxModelsResponse.Model,
+        meLanguage: String,
+        targetLanguage: String
+    ) -> Bool {
+        guard let targets = model.translationTargets else { return false }
+        return targets.contains(meLanguage) && targets.contains(targetLanguage)
     }
 }

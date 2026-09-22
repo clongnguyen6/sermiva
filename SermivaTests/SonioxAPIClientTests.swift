@@ -28,4 +28,21 @@ final class SonioxAPIClientTests: XCTestCase {
         XCTAssertNotNil(SonioxAPIClient.concurrencyWarning(forLimit: 1))
         XCTAssertNotNil(SonioxAPIClient.concurrencyWarning(forLimit: 0))
     }
+
+    // MARK: - Issue 8: a 200 must not be reported as a usable key unless it actually is
+
+    func test_modelSupportsConfiguredLanguagesWhenBothInTranslationTargets() {
+        let model = SonioxModelsResponse.Model(id: "stt-rt-v5", languages: ["vi", "en"], translationTargets: ["vi", "en", "ja"])
+        XCTAssertTrue(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", targetLanguage: "en"))
+    }
+
+    func test_modelDoesNotSupportConfiguredLanguagesWhenOneIsMissingFromTargets() {
+        let model = SonioxModelsResponse.Model(id: "stt-rt-v5", languages: ["vi", "en"], translationTargets: ["vi"])
+        XCTAssertFalse(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", targetLanguage: "en"), "target missing from translation_targets must not be reported as usable")
+    }
+
+    func test_modelWithNoTranslationTargetsAtAllIsUnusable() {
+        let model = SonioxModelsResponse.Model(id: "stt-rt-v5", languages: ["vi", "en"], translationTargets: nil)
+        XCTAssertFalse(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", targetLanguage: "en"))
+    }
 }

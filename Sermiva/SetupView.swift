@@ -4,10 +4,11 @@ import SwiftUI
 /// Soniox service (`SonioxAPIClient`) and stores the key in Keychain only -
 /// AGENTS.md's rule that a key never appears anywhere else in the app or
 /// the repo. The prototype's `sx_...` key-pattern check and its
-/// "Dán khóa demo" affordance are `[mô phỏng]` per HANDOFF.md and are not
-/// reused here: a pasted demo key would predictably fail real validation,
-/// so there is no honest live meaning left for that button - dropped, and
-/// flagged as a question in the hand-off report rather than silently kept.
+/// "Dán khóa demo" affordance are `[mô phỏng]` per HANDOFF.md; a pasted
+/// demo key would predictably fail real validation, so this file does not
+/// reuse either. Whether to keep, drop, or replace that affordance for a
+/// live build is an open question for the project owner, not a decision
+/// made here.
 struct SetupView: View {
     let onKeyValidated: (String) -> Void
     let onStartDemo: () -> Void
@@ -126,7 +127,11 @@ struct SetupView: View {
         let key = trimmedKey
         validationState = .checking
         Task {
-            let outcome = await SonioxAPIClient.validateKey(key)
+            let outcome = await SonioxAPIClient.validateKey(
+                key,
+                meLanguage: LiveLanguageConfig.default.me,
+                targetLanguage: LiveLanguageConfig.default.target
+            )
             await MainActor.run {
                 switch outcome {
                 case .valid(let warning):
@@ -135,7 +140,12 @@ struct SetupView: View {
                     onKeyValidated(key)
                 case .invalidKey:
                     validationState = .invalidKey
-                case .networkError:
+                case .networkError, .unusableConfiguration:
+                    // The key itself was accepted for `.unusableConfiguration` -
+                    // HANDOFF's status vocabulary has no case for "valid key,
+                    // unusable model/languages", so this reuses the existing
+                    // "Lỗi mạng" copy rather than inventing new text. See the
+                    // hand-off report's owner questions.
                     validationState = .networkError
                 }
             }
