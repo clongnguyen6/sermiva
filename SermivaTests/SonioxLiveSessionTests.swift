@@ -259,4 +259,51 @@ final class SonioxLiveSessionTests: XCTestCase {
 
         XCTAssertEqual(factory.createdSockets[2].sentAudioChunks.count, 1, "only the new session's own buffered audio may be flushed, never the previous ended session's leftover buffer")
     }
+
+    // MARK: - Reviewer finding, fourth round: end/endImmediately must
+    // abandon any still-pending T-join, exactly like a reconnect already
+    // does, so the internal state stays honest rather than silently
+    // depending on the server's own `<fin>` arriving before `close()`.
+
+    private func meSegmentResponseTokens() -> [SonioxToken] {
+        [
+            SonioxToken(text: "Xin chào", isFinal: true, startMs: 0, endMs: 1000, speaker: "1", language: "vi", translationStatus: .original),
+            SonioxToken(text: "<end>", isFinal: true, startMs: nil, endMs: nil, speaker: nil, language: nil, translationStatus: .original),
+        ]
+    }
+
+    func test_endAbandonsAStillPendingJoinSoInternalStateStaysHonest() {
+        let (session, factory, scheduler) = makeSession()
+        startAndEstablish(session, factory: factory)
+        // M creates and closes a me-language segment with no T signal at
+        // all - an open, never-resolved join.
+        factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens())
+
+        var lastSegments: [Segment] = []
+        session.onSegmentsChanged = { lastSegments = $0 }
+
+        var ended = false
+        session.end { ended = true }
+        scheduler.drainAll()
+
+        XCTAssertTrue(ended)
+        XCTAssertEqual(lastSegments.count, 1)
+        XCTAssertTrue(lastSegments[0].targetAbandoned, "end must abandon a still-pending join, same as reconnect does, so the internal state stays honest")
+    }
+
+    func test_endImmediatelyAbandonsAStillPendingJoinSoInternalStateStaysHonest() {
+        let (session, factory, _) = makeSession()
+        startAndEstablish(session, factory: factory)
+        factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens())
+
+        var lastSegments: [Segment] = []
+        session.onSegmentsChanged = { lastSegments = $0 }
+
+        var ended = false
+        session.endImmediately { ended = true }
+
+        XCTAssertTrue(ended)
+        XCTAssertEqual(lastSegments.count, 1)
+        XCTAssertTrue(lastSegments[0].targetAbandoned, "endImmediately must abandon a still-pending join, same as reconnect does, so the internal state stays honest")
+    }
 }

@@ -253,6 +253,16 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         // immediately after `end`/`endImmediately`, not only once
         // something later happens to call `start` again.
         clearBufferedAudio()
+        // Same reasoning for the join engine's own pending joins: a
+        // reconnect already abandons them explicitly (docs/soniox-routing.md)
+        // so the internal state stays honest rather than silently
+        // depending on the server's own `<fin>` arriving before `close()`
+        // fires - `end`/`endImmediately` must not be the one path left
+        // where a still-pending join's state quietly goes stale instead.
+        joinEngine?.abandonAllPendingJoins()
+        if let engine = joinEngine {
+            onSegmentsChanged?(engine.segments)
+        }
     }
 
     private func handle(_ event: SonioxSocketEvent, isStreamM: Bool, generation: Int, epoch: Int) {

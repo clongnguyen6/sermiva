@@ -79,24 +79,50 @@ final class SonioxJoinEngine {
     }
 
     private var pendingJoins: [Int: PendingJoin] = [:]
-    /// The pending join currently receiving T's translation tokens, i.e.
-    /// the join whose qualifying original token was the most recent T
-    /// token processed. `nil` whenever the most recent T original token did
-    /// not qualify (wrong language, or outside every window) - translation
-    /// tokens are only ever attributed to a window whose original token
-    /// immediately preceded them, never guessed by proximity alone.
-    private var activeJoinId: Int?
 
-    /// T tokens (final, original or translation) that found no matching
-    /// pending join when first seen - either because M has not closed that
-    /// segment yet, or because nothing matches at all. Replayed whenever a
-    /// new pending join opens, so a translation that legitimately arrives
-    /// before M's `<end>` is not lost to independent-stream ordering (see
-    /// docs/soniox-routing.md). Capped so a token that will truly never
-    /// match (e.g. pure guest speech outside any `me` window) cannot grow
-    /// this without bound over a long session.
-    private var unmatchedTTokens: [SonioxToken] = []
-    private let unmatchedTTokensLimit = 200
+    /// One unit of T's stream, in the wire's own order: an original run -
+    /// every original/none token, final and non-final alike, until
+    /// translation begins - followed by its translation run - every
+    /// translation token, final and non-final, until the next original
+    /// token (of any finality) or a marker ends it. See
+    /// docs/soniox-routing.md's "T chunks" section.
+    private struct TChunk {
+        var originals: [SonioxToken] = []
+        var translations: [SonioxToken] = []
+    }
+
+    /// The chunk currently being collected from live T tokens.
+    private var currentTChunk = TChunk()
+
+    /// What the chunk currently being collected looks like it is heading
+    /// for, tracked live (token by token, before the chunk itself has
+    /// completed) purely so the placeholder can reflect a genuine
+    /// in-progress signal. Never used to decide where translated text
+    /// actually lands - only a completed chunk's own `attemptAttach`
+    /// result decides that, using every one of its tokens at once.
+    private enum ChunkCandidate: Equatable {
+        case unknown
+        case window(Int)
+        case ambiguous
+    }
+    private var currentChunkCandidate: ChunkCandidate = .unknown
+
+    /// The window most recently, actually attached to by a completed
+    /// chunk - the one still receiving further qualifying chunks'
+    /// translated text, and the one that resolves when a later completed
+    /// chunk's attribution moves away from it (a different window, no
+    /// window, or a marker). Distinct from `currentChunkCandidate`, which
+    /// is a live, still-unsettled guess about the chunk in progress.
+    private var activeWindowId: Int?
+
+    /// Completed chunks (and whether a marker ended them) whose originals
+    /// matched no open window at all when they completed - replayed as
+    /// whole units, in original order, once a new window opens (see
+    /// docs/soniox-routing.md's "T chunks" section). Capped so a chunk
+    /// that will truly never match (e.g. pure guest speech outside any
+    /// `me` window) cannot grow this without bound over a long session.
+    private var bufferedTChunks: [(chunk: TChunk, endedByMarker: Bool)] = []
+    private let bufferedTChunksLimit = 50
 
     init(meLanguage: String) {
         self.meLanguage = meLanguage
@@ -131,8 +157,10 @@ final class SonioxJoinEngine {
             pendingJoins[id] = resolved
             markAbandoned(segmentId: id)
         }
-        unmatchedTTokens.removeAll()
-        activeJoinId = nil
+        bufferedTChunks.removeAll()
+        currentTChunk = TChunk()
+        currentChunkCandidate = .unknown
+        activeWindowId = nil
 
         for index in segments.indices {
             let segment = segments[index]
@@ -163,12 +191,13 @@ final class SonioxJoinEngine {
         var sawTranslationTokenThisResponse = false
         for token in tokens {
             // Markers close the open segment regardless of
-            // `translationStatus` - live-confirmed they are not reliably
-            // tagged `.original`/`.none`: one arriving `.unrecognized` was
-            // silently dropped (segments never closed), and one arriving
-            // `.translation` was appended as translation text. Checked
-            // before the status dispatch on purpose, so a marker never
-            // reaches either path.
+            // `translationStatus` - not documented as reliably tagged
+            // `.original`/`.none`, and never logged live to confirm either
+            // way: by inspection, the previous dispatch order would have
+            // appended one to translation text as `.translation`, or
+            // silently dropped one entirely as `.unrecognized`, leaving the
+            // segment never closed. Checked before the status dispatch on
+            // purpose, so a marker never reaches either path.
             if isEndMarker(token) {
                 if isCurrentMSegmentOpen, let id = currentMSegmentId {
                     closeSegment(id: id)
@@ -335,7 +364,8 @@ final class SonioxJoinEngine {
         let windowStart = Int(segments[index].startedAt * 1000)
         let windowEnd = max(lastEntry.endMs, windowStart)
         pendingJoins[id] = PendingJoin(segmentId: id, windowStart: windowStart, windowEnd: windowEnd)
-        replayUnmatchedTTokens(newWindowStart: windowStart)
+        replayBufferedTChunks(newWindowStart: windowStart)
+        recheckCurrentTChunkAgainstOpenWindows()
     }
 
     private func applyMTranslation(_ token: SonioxToken) {
@@ -355,39 +385,59 @@ final class SonioxJoinEngine {
     }
 
     // MARK: - Stream T (join only - T's own original text is never shown)
+    //
+    // Modelled explicitly as a sequence of chunks - see docs/soniox-routing.md's
+    // "T chunks" section, which this code must match line by line. An
+    // original run (every `.original`/`.none` token, final and non-final)
+    // followed by its translation run (every `.translation` token, final
+    // and non-final), ending the instant another original arrives (any
+    // finality) or a marker does. Attribution - which window, if any, a
+    // completed chunk's translated text belongs to - is decided once, using
+    // every one of the chunk's original tokens at once (`attemptAttach`),
+    // never per raw token and never by finality. Check 1 (wrong-language
+    // disqualification) is separate and immediate, live, per original
+    // token, the instant it is seen - not deferred to chunk completion.
 
     func applyStreamT(_ tokens: [SonioxToken]) {
+        var sawTranslationTokenThisResponse = false
         for token in tokens {
-            // Markers resolve whatever join was active regardless of
-            // `translationStatus` - live-confirmed they are not reliably
-            // tagged `.original`/`.none`: one arriving `.unrecognized`
-            // would leave a join hanging forever, and one arriving
-            // `.translation` would be appended into `collectedTarget` as
-            // translation text. Checked before the status dispatch on
-            // purpose, so a marker never reaches either path.
             if isEndMarker(token) {
-                // T's own end-of-utterance marker: a genuine signal that
-                // nothing more is coming for whatever window was active -
-                // see "Complete" in docs/soniox-routing.md. Not a timer.
-                resolveActiveJoin()
-                activeJoinId = nil
+                finishCurrentTChunk(endedByMarker: true)
                 continue
             }
             switch token.translationStatus {
             case .original, .none:
                 // `.none` on stream T (target_language = target) is speech
                 // already in `target` - still a real original token for
-                // the join's overlap check (check 1): e.g. the guest
-                // speaking `target` while the owner speaks `me` must still
-                // disqualify the join, exactly as a `.original` token
-                // would.
-                if token.isFinal { applyTOriginal(token) }
+                // check 1: e.g. the guest speaking target while the owner
+                // speaks `me` must still disqualify the window, exactly as
+                // an `.original` token would.
+                if !currentTChunk.translations.isEmpty {
+                    // The translation run for the current chunk has ended -
+                    // this original token, whatever its own finality,
+                    // starts the next chunk.
+                    finishCurrentTChunk(endedByMarker: false)
+                }
+                checkOriginalAgainstOpenWindow(token)
+                noteOriginalForCandidate(token)
+                currentTChunk.originals.append(token)
             case .translation:
-                applyTTranslation(token)
+                currentTChunk.translations.append(token)
+                if case .window(let id) = currentChunkCandidate,
+                   let join = pendingJoins[id], !join.disqualified, !join.resolved {
+                    // Any translation token at all - final or not - is the
+                    // real "translation is under way" signal for the
+                    // window this chunk currently looks like it belongs
+                    // to; only final ones are ever committed to text (no
+                    // karaoke reveal), decided later at chunk completion.
+                    sawTranslationTokenThisResponse = true
+                    markTranslationInProgress(segmentId: id)
+                }
             case .unrecognized:
                 continue
             }
         }
+        clearStaleTTranslationSignal(sawTranslationTokenThisResponse: sawTranslationTokenThisResponse)
     }
 
     private func findOpenCandidate(forStartMs startMs: Int) -> (id: Int, join: PendingJoin)? {
@@ -397,98 +447,172 @@ final class SonioxJoinEngine {
         return (id: match.key, join: match.value)
     }
 
-    /// Markers are filtered out by `applyStreamT` before this is ever
-    /// called - every token reaching here is a genuine original token.
-    private func applyTOriginal(_ token: SonioxToken) {
-        guard let startMs = token.startMs, let match = findOpenCandidate(forStartMs: startMs) else {
-            // No window exists for this timestamp yet - M may simply not
-            // have closed the segment yet. Buffer it so a window opening
-            // later can still claim it; never guessed in the meantime. T
-            // has moved past whatever it was translating, though, so
-            // whichever join was active is done receiving chunks.
-            resolveActiveJoin()
-            activeJoinId = nil
-            bufferUnmatched(token)
-            return
-        }
-        if match.id != activeJoinId {
-            // T has moved on to a different window's audio (or to none
-            // before this one) - the previously active window is done
-            // receiving translation chunks, whether or not it ever got
-            // any. This transition, not `final_audio_proc_ms` catching up,
-            // is the "complete" signal - see docs/soniox-routing.md.
-            resolveActiveJoin()
-        }
-        guard var join = pendingJoins[match.id], !join.disqualified else {
-            // A window exists but is already disqualified: permanent, not
-            // buffered - replaying it later would not change the verdict.
-            activeJoinId = nil
-            return
-        }
-        if token.language != meLanguage {
-            // Check 1: a non-me original token inside the window - e.g. the
-            // guest speaking target while the owner also speaks - fails the
-            // join permanently. Never guessed past this point.
-            join.disqualified = true
-            pendingJoins[match.id] = join
-            markAbandoned(segmentId: join.segmentId)
-            activeJoinId = nil
-            return
-        }
+    /// Check 1: a non-me original token inside a window - final or not -
+    /// fails that window's join permanently, the instant it is seen. E.g.
+    /// the guest speaking target while the owner also speaks `me` in the
+    /// same window. Independent of chunk boundaries entirely: this is a
+    /// property of the window (did ANY T original token's timestamp and
+    /// language violate it), not of which chunk that token happens to
+    /// belong to.
+    private func checkOriginalAgainstOpenWindow(_ token: SonioxToken) {
+        guard let startMs = token.startMs, let match = findOpenCandidate(forStartMs: startMs) else { return }
+        guard var join = pendingJoins[match.id], !join.disqualified else { return }
+        guard token.language != meLanguage else { return }
+        join.disqualified = true
         pendingJoins[match.id] = join
-        activeJoinId = match.id
+        markAbandoned(segmentId: join.segmentId)
     }
 
-    private func applyTTranslation(_ token: SonioxToken) {
-        guard let id = activeJoinId, var join = pendingJoins[id], !join.disqualified, !join.resolved else {
-            // No currently-active, still-open window to attach to. Only a
-            // final token is buffered for the no-guess replay mechanism
-            // (issue 2) - a non-final one is a live signal only, worth
-            // nothing to replay later.
-            if token.isFinal {
-                bufferUnmatched(token)
+    /// Live, incremental tracking of which single window the chunk in
+    /// progress currently looks like it belongs to - for the placeholder
+    /// only (see `currentChunkCandidate`'s own doc comment). A token that
+    /// matches nothing does not contradict the existing candidate (M may
+    /// simply not have opened that window yet); a token that matches a
+    /// DIFFERENT window than the existing candidate makes it ambiguous
+    /// (straddle) for the rest of this chunk.
+    private func noteOriginalForCandidate(_ token: SonioxToken) {
+        guard let startMs = token.startMs, let match = findOpenCandidate(forStartMs: startMs),
+              let join = pendingJoins[match.id], !join.disqualified else { return }
+        switch currentChunkCandidate {
+        case .unknown:
+            currentChunkCandidate = .window(match.id)
+        case .window(let existing) where existing != match.id:
+            currentChunkCandidate = .ambiguous
+        case .window, .ambiguous:
+            break
+        }
+    }
+
+    private enum TChunkAttachOutcome {
+        case attached(windowId: Int, translatedText: String)
+        /// The single window this chunk's originals all pointed to is
+        /// already disqualified, or its originals span more than one
+        /// window (a straddle) - attaching to either would be a guess
+        /// about which part of the chunk belongs there.
+        case discarded
+        /// None of the chunk's originals matched any currently open
+        /// window - an "early chunk", buffered for replay.
+        case noWindowYet
+    }
+
+    /// Decides attribution for one COMPLETE chunk, using every one of its
+    /// original tokens, final and non-final alike - never just the last
+    /// one seen, and never per raw token. A chunk attaches only when every
+    /// original token in it falls inside the bounds of the SAME single
+    /// still-open, not-yet-disqualified window.
+    private func attemptAttach(_ chunk: TChunk) -> TChunkAttachOutcome {
+        var matchedIds = Set<Int>()
+        for original in chunk.originals {
+            guard let startMs = original.startMs, let match = findOpenCandidate(forStartMs: startMs) else { continue }
+            matchedIds.insert(match.id)
+        }
+        guard matchedIds.count == 1, let windowId = matchedIds.first else {
+            return matchedIds.isEmpty ? .noWindowYet : .discarded
+        }
+        guard let join = pendingJoins[windowId], !join.disqualified else {
+            return .discarded
+        }
+        let translatedText = chunk.translations.filter(\.isFinal).map(\.text).joined()
+        return .attached(windowId: windowId, translatedText: translatedText)
+    }
+
+    private func finishCurrentTChunk(endedByMarker: Bool) {
+        let chunk = currentTChunk
+        currentTChunk = TChunk()
+        currentChunkCandidate = .unknown
+        attachOrBuffer(chunk, endedByMarker: endedByMarker)
+    }
+
+    /// Attaches a chunk to whichever window it qualifies for (accumulating
+    /// onto that window's collected translation - a window commonly
+    /// receives more than one chunk, since T often segments the same M
+    /// window's audio more finely than M does), resolving whichever window
+    /// was previously active the moment chunk activity moves away from it -
+    /// see docs/soniox-routing.md's "Complete" rule. Buffers a chunk that
+    /// matches no window yet. Shared by live processing and by replaying
+    /// buffered early chunks, so both go through exactly the same decision.
+    private func attachOrBuffer(_ chunk: TChunk, endedByMarker: Bool) {
+        guard !chunk.originals.isEmpty || !chunk.translations.isEmpty else {
+            if endedByMarker, let id = activeWindowId {
+                resolveJoin(id: id)
+                activeWindowId = nil
             }
             return
         }
-        // Any translation token at all - final or not - is the real
-        // "translation is under way" signal for this window's segment;
-        // only a final one is ever committed to `collectedTarget`.
-        markTranslationInProgress(segmentId: join.segmentId)
-        guard token.isFinal else { return }
-        join.collectedTarget += token.text
-        pendingJoins[id] = join
-    }
-
-    private func bufferUnmatched(_ token: SonioxToken) {
-        unmatchedTTokens.append(token)
-        if unmatchedTTokens.count > unmatchedTTokensLimit {
-            unmatchedTTokens.removeFirst(unmatchedTTokens.count - unmatchedTTokensLimit)
-        }
-    }
-
-    /// Replays every buffered T token against the pending joins now that a
-    /// new window (starting at `newWindowStart`) has just opened, in
-    /// original arrival order so `activeJoinId` reconstructs correctly for
-    /// an original-then-translation pair. Tokens that still do not match
-    /// land back in the buffer via the same `bufferUnmatched` calls above;
-    /// afterwards, any buffered original token whose timestamp is now
-    /// provably in the past (before the earliest window that could ever
-    /// exist) is dropped for good, since M only opens windows in
-    /// increasing chronological order.
-    private func replayUnmatchedTTokens(newWindowStart: Int) {
-        let snapshot = unmatchedTTokens
-        unmatchedTTokens = []
-        for token in snapshot {
-            switch token.translationStatus {
-            case .original, .none: applyTOriginal(token)
-            case .translation: applyTTranslation(token)
-            case .unrecognized: continue
+        switch attemptAttach(chunk) {
+        case .attached(let windowId, let translatedText):
+            if activeWindowId != windowId {
+                if let previous = activeWindowId { resolveJoin(id: previous) }
+                activeWindowId = windowId
+            }
+            if !translatedText.isEmpty, var join = pendingJoins[windowId] {
+                join.collectedTarget += translatedText
+                pendingJoins[windowId] = join
+            }
+            if endedByMarker {
+                resolveJoin(id: windowId)
+                activeWindowId = nil
+            }
+        case .discarded:
+            if let previous = activeWindowId { resolveJoin(id: previous) }
+            activeWindowId = nil
+        case .noWindowYet:
+            if let previous = activeWindowId { resolveJoin(id: previous) }
+            activeWindowId = nil
+            bufferedTChunks.append((chunk: chunk, endedByMarker: endedByMarker))
+            if bufferedTChunks.count > bufferedTChunksLimit {
+                bufferedTChunks.removeFirst(bufferedTChunks.count - bufferedTChunksLimit)
             }
         }
-        unmatchedTTokens.removeAll { token in
-            guard let startMs = token.startMs else { return false }
-            return startMs < newWindowStart
+    }
+
+    /// Replays every buffered early chunk - as whole units, including
+    /// whichever one carried a marker - against the pending joins now that
+    /// a new window (starting at `newWindowStart`) has just opened, in
+    /// original arrival order. A chunk that still matches nothing lands
+    /// back in the buffer via the same path; afterwards, any buffered
+    /// chunk whose last original token is now provably in the past (before
+    /// the earliest window that could ever exist) is dropped for good,
+    /// since M only opens windows in increasing chronological order.
+    private func replayBufferedTChunks(newWindowStart: Int) {
+        let snapshot = bufferedTChunks
+        bufferedTChunks = []
+        for (chunk, endedByMarker) in snapshot {
+            attachOrBuffer(chunk, endedByMarker: endedByMarker)
         }
+        bufferedTChunks.removeAll { entry in
+            guard let lastStartMs = entry.chunk.originals.last?.startMs else { return false }
+            return lastStartMs < newWindowStart
+        }
+    }
+
+    /// The chunk currently being collected may have started before any
+    /// window existed to check it against - `checkOriginalAgainstOpenWindow`
+    /// and `noteOriginalForCandidate` only ever run once, when each token
+    /// first arrives, so a token that arrived too early never gets a second
+    /// look on its own. Re-running both against every one of its original
+    /// tokens whenever a new window opens is what lets check 1 still catch
+    /// a disqualifying token that arrived before the window it violates
+    /// even existed.
+    private func recheckCurrentTChunkAgainstOpenWindows() {
+        currentChunkCandidate = .unknown
+        for original in currentTChunk.originals {
+            checkOriginalAgainstOpenWindow(original)
+            noteOriginalForCandidate(original)
+        }
+    }
+
+    /// Non-final tokens are replaced in full on every response
+    /// (docs/soniox-routing.md) - so "the latest response still carries a
+    /// translation token for the chunk currently heading toward this
+    /// window" is itself the live signal, not just its first appearance.
+    /// Mirrors `clearStaleMDirectTranslationSignal` exactly.
+    private func clearStaleTTranslationSignal(sawTranslationTokenThisResponse: Bool) {
+        guard !sawTranslationTokenThisResponse, case .window(let id) = currentChunkCandidate,
+              let index = segments.firstIndex(where: { $0.id == id }) else { return }
+        let segment = segments[index]
+        guard segment.translationInProgress, segment.target == nil else { return }
+        segments[index].translationInProgress = false
     }
 
     private func markAbandoned(segmentId: Int) {
@@ -515,17 +639,16 @@ final class SonioxJoinEngine {
         }
     }
 
-    /// Commits or abandons the join for `id`, once T has actually signalled
-    /// it is done sending chunks for that window (see `applyTOriginal`'s
-    /// three triggers: T's next original chunk for a different window, T
-    /// finding no window at all for its next chunk, or T's own `<end>`/
-    /// `<fin>`) - never on `final_audio_proc_ms` catching up, which lags
-    /// translation generation and was the source of the live-observed
-    /// truncated/missing `me`-translation bug (docs/soniox-routing.md).
-    /// `target` fills only if the join was never disqualified and actually
-    /// collected something real; otherwise it is abandoned. Either way
-    /// `resolved` stops the "Đang dịch…" placeholder and stops accepting
-    /// any further T tokens for that window.
+    /// Commits or abandons the join for `id`, once a completed T chunk has
+    /// actually signalled it is done - see `attachOrBuffer`'s callers:
+    /// chunk activity moving to a different window or to none at all, or
+    /// T's own `<end>`/`<fin>` - never on `final_audio_proc_ms` catching
+    /// up, which lags translation generation and was the source of the
+    /// live-observed truncated/missing `me`-translation bug
+    /// (docs/soniox-routing.md). `target` fills only if the join was never
+    /// disqualified and actually collected something real; otherwise it is
+    /// abandoned. Either way `resolved` stops the "Đang dịch…" placeholder
+    /// and stops accepting any further T chunks for that window.
     private func resolveJoin(id: Int) {
         guard var join = pendingJoins[id], !join.resolved else { return }
         join.resolved = true
@@ -536,10 +659,5 @@ final class SonioxJoinEngine {
         } else {
             segments[index].targetAbandoned = true
         }
-    }
-
-    private func resolveActiveJoin() {
-        guard let id = activeJoinId else { return }
-        resolveJoin(id: id)
     }
 }

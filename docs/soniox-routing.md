@@ -2,8 +2,10 @@
 
 Decided 2026-09-22 against the public Soniox docs and the soniox-js SDK source of that date, then
 amended by the project owner the same day (see the no-guess join rule below, which replaces the
-original draft's join behaviour). Model: `stt-rt-v5`. Nothing here is proven live yet; the Unknowns
-section lists what a live run must confirm before the matching app behaviour is treated as settled.
+original draft's join behaviour). Model: `stt-rt-v5`. Two live sessions have since run and found real
+bugs, fixed and recorded in place below (the Unknowns table, the no-guess join's "Complete" rule, and
+Key validation); what those two sessions have not yet exercised - most of Settings, other display
+styles, real audio hardware edge cases - is still what the Unknowns section tracks.
 
 ## Decision
 
@@ -61,10 +63,12 @@ stream start ahead of the other.
   (string number), `language`, `source_language` (translated tokens only), `translation_status` in
   `none | original | translation`.
 - Non-final tokens are replaced in full on every response. Final tokens arrive once.
-- Marker tokens `<end>` and `<fin>` are final and are stripped from text. Live-confirmed not to
-  arrive reliably tagged `.original`/`.none`: the app checks marker text before dispatching on
-  `translation_status` at all, on both streams, so a marker closes/resolves regardless of whatever
-  status it happens to carry and never becomes displayed or translated text.
+- Marker tokens `<end>` and `<fin>` are final and are stripped from text. Not documented as reliably
+  tagged `.original`/`.none`, and never logged live to confirm either way - by inspection, the app's
+  own dispatch would have appended one to translation text or silently dropped it depending on
+  whichever status it happened to carry, so the app checks marker text before dispatching on
+  `translation_status` at all, on both streams: a marker closes/resolves regardless of status and
+  never becomes displayed or translated text.
 - Tokens arrive in order: an original chunk, then its translation chunk for the same speaker (SDK
   source, not docs).
 - Keepalive at least every 20 s when no audio flows; 5-10 s recommended. The keepalive page says a
@@ -91,35 +95,58 @@ For an M-segment with `lang == me` and window `[segment.startedAt, segmentEnd]` 
 `end_ms` of the segment's last original token once the segment is final; while still open, the
 window has no upper bound yet and the join simply keeps waiting):
 
-**Certainty test** - all three must hold for the join to be accepted:
-1. Every T original token whose `start_ms` falls inside the window has `language == me`. A single
-   T original token in any other language inside the window fails the test permanently.
+### T chunks
+
+Found by the project owner's second live session, against the code, not a live log of raw wire
+values (Soniox never documents `translation_status` reliability and this app has never logged it):
+attaching T's translation per raw token - even per final token - let a non-final wrong-language
+original slip through uninspected, and let one response's `final_audio_proc_ms` cut a translation
+off mid-way. Both are fixed by modelling T's own stream explicitly, as a sequence of **chunks**,
+each the wire's own "original chunk, then its translation chunk" (SDK source, not docs):
+
+- A chunk collects every **original** token (`.original`/`.none`, final or non-final alike) it sees,
+  in arrival order, until the first **translation** token arrives - that begins the chunk's
+  translation run, which collects every translation token (final or non-final) until either of the
+  two completion triggers below fires.
+- **Completion** - a chunk ends the instant either happens: another original token arrives (any
+  finality - not just final ones) once its own translation run has begun, which also starts the next
+  chunk; or a marker (`<end>`/`<fin>`) arrives, which starts no chunk. Neither trigger waits for
+  finality.
+- `.unrecognized` tokens take no part in a chunk.
+
+**Certainty test** - both must hold for a completed chunk to attach to a window:
+1. Every one of the chunk's original tokens - final and non-final alike, checked the instant each is
+   seen, not deferred to the chunk's completion - has `start_ms` inside that window and
+   `language == me`. A single original token of any finality in any other language inside the window
+   fails the window's join permanently, the moment it is seen; a chunk whose original tokens fall
+   inside more than one window (T and M do not segment identically) attaches to neither - attaching
+   to either would be guessing which part of it belongs there.
 2. M itself saw no overlap in that window: no other M original token, from a different speaker or a
    different final language than this segment's locked `speaker`/`lang`, has a `start_ms` inside
    the window.
-3. The T translation chunks that follow the qualifying T original tokens are contiguous in time (no
-   T original chunk in a different language interrupts them inside the window); they are
-   concatenated in time order into the segment's `target`.
 
-If the test fails, the join is **abandoned** for that segment: `target` stays `nil` permanently, and
-the app stops showing "Đang dịch…" for it immediately - the segment reads as translated-only-in-its-
-own-language-if-any, same as any other segment whose translation never arrived.
+A chunk that qualifies has its final translation tokens (non-final text is never committed - no
+karaoke reveal) concatenated, in arrival order, into the window's collected translation; a window can
+receive more than one qualifying chunk this way, since T commonly segments the same M window's audio
+more finely than M does. If either check fails, the join is **abandoned** for that segment: `target`
+stays `nil` permanently, and the app stops showing "Đang dịch…" for it immediately - the segment
+reads as translated-only-in-its-own-language-if-any, same as any other segment whose translation
+never arrived.
 
-**Complete** - the signal that decides when to actually fill `target` (from whatever was collected)
-or abandon (nothing collected): T's own next original chunk, whether it belongs to a different
-window or matches no window at all, or T's own `<end>`/`<fin>` - never `final_audio_proc_ms` catching
-up to `segmentEnd`. Found by the project owner's second live session: `final_audio_proc_ms` reflects
-T's own audio-processing watermark, which runs ahead of its translation generation - translation
-chunks carry no timestamp of their own and trail their original chunk, sometimes into a later
-response - so resolving on `final_audio_proc_ms` alone closed windows before all of a segment's
-translation chunks had arrived, landing a truncated prefix as if it were the complete translation, or
-abandoning a window whose translation simply had not started yet. The window currently receiving T's
-translation chunks persists across responses on its own, so a translation split across two or more
-responses still assembles in full as long as no other T original token intervenes first. Abandonment
-is final; a later T token for an already-resolved window never retroactively fills `target`. A window
-with no resolving signal at all - T never sends anything more for it - stays pending forever, not
-abandoned and not translated: itself the no-guess outcome, shown as nothing per AGENTS.md's
-activity-indicator rule, not guessed into a false "abandoned" just because nothing has happened yet.
+**Complete** - the signal that decides when to actually fill a window's `target` (from whatever its
+chunks collected) or abandon it (nothing collected): a later chunk's own completion moving on to a
+different window or to none at all, or T's own `<end>`/`<fin>` - never `final_audio_proc_ms` catching
+up to `segmentEnd`, which reflects T's own audio-processing watermark running ahead of its
+translation generation, not translation completeness. A chunk still in progress when a window opens,
+or a chunk that completed before any window existed to attach it to (its whole token sequence,
+including whichever marker ended it) - an "early chunk" - is buffered and replayed as one unit,
+in order, the moment a new window opens; a chunk that still matches nothing is buffered again.
+Abandonment is final; a later T chunk for an already-resolved window never retroactively fills
+`target`. A window with no resolving signal at all - no chunk of T's ever completes toward it, no
+marker ever arrives - stays pending forever: shown as nothing (see "Đang dịch…" below), not guessed
+into a false "abandoned" just because nothing has happened yet. `end`/`endImmediately` and a
+reconnect all abandon every still-pending window explicitly, so this indefinite-pending state only
+persists while a session is genuinely still listening.
 
 ### Acceptance
 
@@ -165,11 +192,19 @@ actually billed).
 - `isFinal`: on `<end>` or `<fin>`.
 - `startedAt`: `start_ms` of the first original token.
 - `overlap`: always `false` (no live signal exists; see above).
-- "Đang dịch…" (`target` (lang == `me`), via the T-join): shown only while the segment is final,
-  `target` is `nil`, and the join has not been abandoned. Cleared once T signals **Complete** above
-  (its own `<end>`/`<fin>`, or its next original chunk) or once the join is abandoned by the
-  certainty test - never on `final_audio_proc_ms` timing (see No-guess join). Never shown for a
-  discarded same-language translation.
+- "Đang dịch…" (`target` (lang == `me`), via the T-join): a live signal, not a timer, mirroring
+  M-direct below - shown only while the segment is final, `target` is `nil`, the join has not been
+  abandoned, and the chunk T is currently mid-way through translating still looks like it belongs to
+  this window (checked the instant each of its original tokens is seen - see T chunks above); cleared
+  the moment a later response carries no translation token for that chunk at all. This live check is
+  necessarily a running guess about where the in-progress chunk is heading, unlike the stricter,
+  whole-chunk check that decides where `target` itself actually lands - so it can flip off if the
+  chunk turns out to straddle windows or hit a disqualifying token, exactly like M-direct's own
+  flip-flop. Also cleared once T signals **Complete** above or once the join is abandoned by the
+  certainty test - never on `final_audio_proc_ms` timing. A window with no live signal at all shows
+  nothing, per AGENTS.md's activity-indicator rule; one with a live signal shows "Đang dịch…"
+  regardless of whether that chunk ultimately lands. Never shown for a discarded same-language
+  translation.
 - "Đang dịch…" (`target` (lang != `me`), M-direct): reflects a live signal, not a timer. Non-final
   tokens are replaced in full on every M response, so "the latest response still carries a
   translation token for this segment" is itself the signal - shown while that holds, cleared
