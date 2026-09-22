@@ -158,14 +158,16 @@ final class SonioxJoinEngine {
 
     // MARK: - Stream M
 
-    func applyStreamM(_ tokens: [SonioxToken], finalAudioProcMs: Int = 0) {
+    func applyStreamM(_ tokens: [SonioxToken]) {
         var tailBySegment: [Int: String] = [:]
+        var sawTranslationTokenThisResponse = false
         for token in tokens {
             switch token.translationStatus {
             case .original:
                 applyMOriginal(token, tailBySegment: &tailBySegment)
             case .translation:
                 applyMTranslation(token)
+                sawTranslationTokenThisResponse = true
             case .none:
                 continue
             }
@@ -173,26 +175,32 @@ final class SonioxJoinEngine {
         if isCurrentMSegmentOpen, let id = currentMSegmentId, let index = segments.firstIndex(where: { $0.id == id }) {
             segments[index].source = (finalSourceById[id] ?? "") + (tailBySegment[id] ?? "")
         }
-        resolveStalledMDirectTranslations(pastMs: finalAudioProcMs)
+        clearStaleMDirectTranslationSignal(sawTranslationTokenThisResponse: sawTranslationTokenThisResponse)
     }
 
-    /// A non-`me` segment's M-direct translation can start (a non-final
-    /// translation token arrives, docs/soniox-routing.md) and then simply
-    /// never finish - `<end>` closes the segment and M moves on without
-    /// ever sending a final chunk for it. `final_audio_proc_ms` passing
-    /// well beyond that segment's own audio range is the same kind of real
-    /// signal `resolveJoins` already trusts for the T-join case: once M's
-    /// own processed-audio clock is past that segment's `end_ms`, M is
-    /// done with that time range entirely, so nothing further is coming.
-    private func resolveStalledMDirectTranslations(pastMs finalAudioProcMs: Int) {
-        for index in segments.indices {
-            let segment = segments[index]
-            guard segment.isFinal, segment.target == nil, segment.translationInProgress,
-                  !segment.targetAbandoned, segment.lang != meLanguage else { continue }
-            guard let lastEntry = mFinalOriginalLog.last(where: { $0.segmentId == segment.id }) else { continue }
-            guard finalAudioProcMs > lastEntry.endMs else { continue }
-            segments[index].targetAbandoned = true
-        }
+    /// Non-final tokens are replaced in full on every response
+    /// (docs/soniox-routing.md) - so "the latest M response still carries
+    /// a translation token for this segment" is itself the live
+    /// "translation is under way" signal, not just its first appearance.
+    /// If a later response has none at all for the segment M-direct
+    /// translation is currently tracking, that signal has genuinely
+    /// disappeared: this hides the placeholder (`translationInProgress =
+    /// false`) - it does NOT permanently abandon the segment. A later
+    /// response bringing the (possibly final) translation after all sets
+    /// `translationInProgress` true again via `applyMTranslation`, or
+    /// lands `target` directly - so a late final translation always lands
+    /// cleanly, and `targetAbandoned` is never set by this path at all,
+    /// which is what makes "abandoned and translated at once" impossible
+    /// here. `targetAbandoned` for a non-`me` segment still only ever
+    /// comes from `startNewMSegment`'s "M moved on to a new segment with
+    /// nothing landed" rule, or from a reconnect - both genuinely
+    /// permanent, unlike a single quiet response.
+    private func clearStaleMDirectTranslationSignal(sawTranslationTokenThisResponse: Bool) {
+        guard !sawTranslationTokenThisResponse, let id = currentMSegmentId,
+              let index = segments.firstIndex(where: { $0.id == id }) else { return }
+        let segment = segments[index]
+        guard segment.translationInProgress, segment.target == nil, segment.lang != meLanguage else { return }
+        segments[index].translationInProgress = false
     }
 
     private func isEndMarker(_ token: SonioxToken) -> Bool {

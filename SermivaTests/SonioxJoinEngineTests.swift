@@ -483,34 +483,66 @@ final class SonioxJoinEngineTests: XCTestCase {
         XCTAssertEqual(engine.segments[0].source, "Xin", "the pre-drop segment's text must not gain any post-drop content")
     }
 
-    // MARK: - Re-review finding 4
+    // MARK: - Re-review finding 3: the M-direct placeholder is a live signal,
+    // not a timer - it must not clear while the signal is present, must not
+    // linger after it is gone, and the state must never be contradictory
+    // (abandoned and translated at once).
 
-    /// A non-`me` M-direct translation can start (a non-final translation
-    /// token arrives) and then simply never finish: `<end>` closes the
-    /// segment and M moves on to other audio without ever sending a final
-    /// chunk for it. `final_audio_proc_ms` passing well beyond that
-    /// segment's own audio range is the same real signal `resolveJoins`
-    /// already trusts for the T-join case.
-    func test_mDirectTranslationInProgressIsAbandonedOnceMProcessesWellPastItWithNoFinalChunk() {
+    /// "No early clear": a second response that STILL carries a non-final
+    /// translation token for the same segment means the signal is still
+    /// present - must not clear.
+    func test_mDirectPlaceholderDoesNotClearWhileTheNonFinalSignalIsStillPresent() {
         let engine = SonioxJoinEngine(meLanguage: "vi")
-        engine.applyStreamM(
-            [
-                original("Hi", final: true, start: 0, end: 500, speaker: "1", lang: "en"),
-                translation("Ch", final: false),
-                endMarker(),
-            ],
-            finalAudioProcMs: 500
-        )
-        var display = SegmentDisplay.make(for: engine.segments[0], isActivityRunning: true)
-        XCTAssertTrue(display.showsTranslatingPlaceholder, "sanity: still genuinely in progress right at the drop")
+        engine.applyStreamM([
+            original("Hi", final: true, start: 0, end: 500, speaker: "1", lang: "en"),
+            translation("Ch", final: false),
+        ])
+        XCTAssertTrue(engine.segments[0].translationInProgress)
 
-        // M keeps processing audio (silence, or unrelated content) well
-        // past this segment's own end_ms, without ever sending a final
-        // chunk for it.
-        engine.applyStreamM([], finalAudioProcMs: 5000)
+        engine.applyStreamM([translation("Chào", final: false)])
 
-        XCTAssertTrue(engine.segments[0].targetAbandoned, "must stop claiming translation is in progress once M has moved well past this segment's audio with nothing landed")
-        display = SegmentDisplay.make(for: engine.segments[0], isActivityRunning: true)
+        XCTAssertTrue(engine.segments[0].translationInProgress, "must not clear while the non-final translation signal is still present")
+    }
+
+    /// "No linger": non-final tokens are replaced in full on every
+    /// response, so a later response with none at all for this segment
+    /// means the signal has genuinely disappeared - hide the placeholder
+    /// immediately, not on some later timer.
+    func test_mDirectPlaceholderClearsAsSoonAsTheNonFinalSignalDisappearsWithNoFinalChunk() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Hi", final: true, start: 0, end: 500, speaker: "1", lang: "en"),
+            translation("Ch", final: false),
+            endMarker(),
+        ])
+        XCTAssertTrue(engine.segments[0].translationInProgress, "sanity: signal present right after the first response")
+
+        // A later response with nothing for this segment's translation.
+        engine.applyStreamM([])
+
+        XCTAssertFalse(engine.segments[0].translationInProgress, "must clear as soon as the live signal disappears, not linger")
+        let display = SegmentDisplay.make(for: engine.segments[0], isActivityRunning: true)
         XCTAssertFalse(display.showsTranslatingPlaceholder)
+    }
+
+    /// "No contradictory state": once the signal disappeared and the
+    /// placeholder cleared, a late final translation chunk on the same
+    /// (M-direct, same-stream, ordered) connection must still land
+    /// cleanly - never leaving the segment both `targetAbandoned` and
+    /// translated at once.
+    func test_mDirectLateFinalTranslationLandsCleanlyNeverContradictingAnAbandonedState() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Hi", final: true, start: 0, end: 500, speaker: "1", lang: "en"),
+            translation("Ch", final: false),
+            endMarker(),
+        ])
+        engine.applyStreamM([])
+        XCTAssertFalse(engine.segments[0].translationInProgress, "sanity: placeholder already cleared")
+
+        engine.applyStreamM([translation("Chào", final: true)])
+
+        XCTAssertEqual(engine.segments[0].target, "Chào", "a late final translation must still land")
+        XCTAssertFalse(engine.segments[0].targetAbandoned, "must never be simultaneously abandoned and translated")
     }
 }
