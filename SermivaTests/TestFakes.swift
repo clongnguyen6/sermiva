@@ -137,7 +137,9 @@ final class FakeSonioxSocketConnection: SonioxSocketConnecting {
     var onEvent: ((SonioxSocketEvent) -> Void)?
     private(set) var connectCount = 0
     private(set) var sentAudioChunks: [Data] = []
-    private(set) var lastConfig: SonioxStreamConfig?
+    private(set) var lastApiKey: String?
+    private(set) var lastLanguageHints: [String]?
+    private(set) var lastTargetLanguage: String?
     // `nonisolated(unsafe)` so `close()` can update this synchronously from
     // a nonisolated context, matching the real `SonioxStreamSocket.close()`
     // this fake stands in for - tests only ever run single-threaded on the
@@ -145,9 +147,11 @@ final class FakeSonioxSocketConnection: SonioxSocketConnecting {
     nonisolated(unsafe) private(set) var closeCount = 0
     var isClosed: Bool { closeCount > 0 }
 
-    func connect(config: SonioxStreamConfig) {
+    func connect(apiKey: String, languageHints: [String], targetLanguage: String) {
         connectCount += 1
-        lastConfig = config
+        lastApiKey = apiKey
+        lastLanguageHints = languageHints
+        lastTargetLanguage = targetLanguage
     }
 
     func sendAudio(_ data: Data) {
@@ -168,6 +172,10 @@ final class FakeSonioxSocketConnection: SonioxSocketConnecting {
 
     func simulateAuthRejected() {
         onEvent?(.authRejected)
+    }
+
+    func simulateResponse(tokens: [SonioxToken] = [], finalAudioProcMs: Int = 0) {
+        onEvent?(.response(SonioxSocketResponse(tokens: tokens, finalAudioProcMs: finalAudioProcMs)))
     }
 
     func simulateClosed(_ error: Error? = nil) {

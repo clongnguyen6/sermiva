@@ -168,8 +168,11 @@ actually billed).
 ## Session lifecycle
 
 - connecting: open both sockets, send both configs, buffer audio until both accepted. listening
-  once both are sent (see Unknowns). 401/402/403 on either -> authError, which wins over everything
-  else at any point, including from a socket the app has already superseded by a reconnect.
+  once both are sent (see Unknowns). 401/402/403 on either -> authError, which wins at any point
+  during the current session, including from a socket the app has already superseded by a
+  reconnect - but not from a socket that belonged to a session that has already ended, and not
+  after "Phiên mới" starts a new session reusing the same underlying object: a stale rejection from
+  the old session must not resurrect it, or leak into the new one.
 - listening: AVAudioEngine tap -> AVAudioConverter -> Int16 16 kHz mono -> same bytes to both
   sockets. Check `channelCount`/`sampleRate` before `installTapOnBus`.
 - paused: stop audio, keepalive every 10 s on both. Streams stay open so labels survive resume -
@@ -203,6 +206,12 @@ actually billed).
   401/402/403, `end` otherwise) at any point during a reconnect stops the retry loop, including
   mid-backoff; a scheduled retry checks this again right before it actually fires. Reconnect
   completes before the 300-minute cap.
+
+  Auth rejection is tracked separately from the per-attempt generation above, by a session-level
+  counter that only changes when a genuinely new session starts (`start`) or the current one ends
+  (`prepareToEnd`) - not on every reconnect attempt. This is what lets an auth rejection win across a
+  session's own reconnect attempts while still being ignored once that session has ended, and
+  prevents it leaking into a later session that reuses the same underlying object.
 
   Captured audio keeps arriving from a mic that never stops during a reconnect; it is buffered and
   sent from byte zero to whichever pair finally connects, across the WHOLE outage - a failed

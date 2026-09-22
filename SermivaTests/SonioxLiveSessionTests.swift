@@ -27,8 +27,11 @@ final class SonioxLiveSessionTests: XCTestCase {
     private func startAndEstablish(_ session: SonioxLiveSession, factory: FakeSonioxSocketFactory) -> Bool {
         var started = false
         session.start(config: config) { ok in started = ok }
-        factory.createdSockets[0].simulateConfigSent()
-        factory.createdSockets[1].simulateConfigSent()
+        // The pair THIS call just created - not necessarily indices 0/1,
+        // since a session object can be reused for a later "Phien moi".
+        let pair = factory.createdSockets.suffix(2)
+        pair.first?.simulateConfigSent()
+        pair.last?.simulateConfigSent()
         return started
     }
 
@@ -140,6 +143,44 @@ final class SonioxLiveSessionTests: XCTestCase {
         XCTAssertEqual(factory.createdSockets.count, 2, "an auth rejection must stop the pending retry from ever opening a new pair")
     }
 
+    /// Re-review finding 1: the Reviewer's exact reproduction. A stale
+    /// auth event arriving after the session has already ended must not
+    /// resurrect it into an auth error.
+    func test_authRejectedAfterEndIsIgnored() {
+        let (session, factory, _) = makeSession()
+        startAndEstablish(session, factory: factory)
+
+        var authErrorCount = 0
+        session.onAuthError = { authErrorCount += 1 }
+
+        session.endImmediately { }
+        factory.createdSockets[0].simulateAuthRejected()
+
+        XCTAssertEqual(authErrorCount, 0, "a stale auth event after the session has ended must not resurrect it")
+    }
+
+    /// The session object is reused for "Phiên mới" (a brand-new `start`
+    /// call). A straggler auth event from the PREVIOUS, already-ended
+    /// session must not leak into the new one.
+    func test_authRejectedFromAPreviousSessionDoesNotLeakIntoANewOne() {
+        let (session, factory, scheduler) = makeSession()
+        startAndEstablish(session, factory: factory) // session 1: sockets 0, 1
+
+        var ended = false
+        session.end { ended = true }
+        scheduler.drainAll()
+        XCTAssertTrue(ended)
+
+        var authErrorCount = 0
+        session.onAuthError = { authErrorCount += 1 }
+        startAndEstablish(session, factory: factory) // session 2 (Phien moi): sockets 2, 3
+
+        // A very late straggler from session 1's original socket arrives.
+        factory.createdSockets[0].simulateAuthRejected()
+
+        XCTAssertEqual(authErrorCount, 0, "a stale auth event from a previous, already-ended session must not leak into a new one")
+    }
+
     // MARK: - Finding 2: the audio buffer across a multi-attempt outage
 
     /// Audio captured across a WHOLE outage - including during a failed
@@ -185,5 +226,37 @@ final class SonioxLiveSessionTests: XCTestCase {
         factory.createdSockets[5].simulateConfigSent()
 
         XCTAssertEqual(factory.createdSockets[4].sentAudioChunks.count, 0, "a later, separate outage must not replay the previous outage's already-flushed audio")
+    }
+
+    /// Re-review finding 3: ending mid-outage is the obvious choice for
+    /// what buffered-but-never-sent audio means - it stops meaning
+    /// anything once the session it was captured for is over. Buffers
+    /// audio BEFORE the new session's pair reports ready, so the new
+    /// session's own flush is what is actually being checked here, not
+    /// just direct passthrough.
+    func test_endingMidOutageClearsTheBufferSoALaterSessionDoesNotReplayIt() {
+        let (session, factory, scheduler) = makeSession()
+        startAndEstablish(session, factory: factory)
+
+        factory.createdSockets[0].simulateClosed()
+        session.ingestAudio(Data(repeating: 1, count: 100)) // buffered during the outage
+
+        var ended = false
+        session.end { ended = true }
+        scheduler.drainAll()
+        XCTAssertTrue(ended)
+
+        // A new session (Phien moi, reusing this object) - its own audio
+        // arrives before its pair has connected, so it goes through the
+        // buffer too.
+        var started = false
+        session.start(config: config) { ok in started = ok }
+        session.ingestAudio(Data(repeating: 2, count: 100))
+        let pair = factory.createdSockets.suffix(2)
+        pair.first?.simulateConfigSent()
+        pair.last?.simulateConfigSent()
+        XCTAssertTrue(started)
+
+        XCTAssertEqual(factory.createdSockets[2].sentAudioChunks.count, 1, "only the new session's own buffered audio may be flushed, never the previous ended session's leftover buffer")
     }
 }

@@ -97,6 +97,16 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// than being treated as an independent second drop that would
     /// schedule an overlapping retry timer.
     private var connectionGeneration = 0
+    /// Bumped only when a genuinely new session begins (`start`) or the
+    /// current one is torn down (`prepareToEnd`) - unlike
+    /// `connectionGeneration`, this does NOT change on every reconnect
+    /// attempt within one session. `.authRejected` is checked against this
+    /// instead of `connectionGeneration`, so it still wins across a
+    /// session's own reconnect attempts, but a stale auth event from an
+    /// already-ended session can never resurrect it, and can never leak
+    /// into a later session that reuses this same object (`start` is
+    /// called again for "Phiên mới").
+    private var sessionEpoch = 0
     private var reconnectAttempt = 0
     private let reconnectBaseDelay: TimeInterval = 1
     private let reconnectMaxDelay: TimeInterval = 30
@@ -136,6 +146,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         self.config = config
         isEnding = false
         isReconnecting = false
+        sessionEpoch += 1
         reconnectAttempt = 0
         mConfigSent = false
         tConfigSent = false
@@ -229,18 +240,32 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         isReconnecting = false
         reconnectAttempt = 0
         connectionGeneration += 1
+        sessionEpoch += 1
         pendingStartCompletion = nil
         endPauseKeepalive()
+        // Ending is the "obvious choice" for what a reconnect's buffered
+        // audio means once the outage it was captured for is simply not
+        // going to be sent anywhere: it stops meaning anything the moment
+        // this session is over. Observably redundant with `start`'s own
+        // reset in the one reachable "reused for Phien moi" scenario
+        // (kept as regression coverage below) - this one exists so the
+        // session's own state is honest and consistent with itself
+        // immediately after `end`/`endImmediately`, not only once
+        // something later happens to call `start` again.
+        clearBufferedAudio()
     }
 
-    private func handle(_ event: SonioxSocketEvent, isStreamM: Bool, generation: Int) {
-        // Auth wins at any point, even from a socket this class has
-        // already superseded (e.g. the pair a fresh reconnect just closed,
-        // if its rejection response was already in flight) - deliberately
+    private func handle(_ event: SonioxSocketEvent, isStreamM: Bool, generation: Int, epoch: Int) {
+        // Auth wins across a session's own reconnect attempts - deliberately
         // NOT behind the generation guard below, which exists to filter
-        // stale lifecycle noise, not a terminal "the key is rejected"
-        // signal that matters regardless of which attempt reported it.
+        // stale reconnect-attempt noise, not a terminal "the key is
+        // rejected" signal that matters regardless of which attempt
+        // reported it. It IS gated on the session epoch, though: once this
+        // session has ended (or `start` began a brand-new one reusing this
+        // same object, for "Phiên mới"), a straggler auth event from the
+        // old session must not resurrect it or leak into the new one.
         if case .authRejected = event {
+            guard epoch == sessionEpoch else { return }
             onAuthError?()
             return
         }
@@ -262,11 +287,10 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
             }
         case .response(let response):
             guard let engine = joinEngine else { return }
-            let tokens = (response.tokens ?? []).map { $0.appToken }
             if isStreamM {
-                engine.applyStreamM(tokens)
+                engine.applyStreamM(response.tokens)
             } else {
-                engine.applyStreamT(tokens, finalAudioProcMs: response.finalAudioProcMs ?? 0)
+                engine.applyStreamT(response.tokens, finalAudioProcMs: response.finalAudioProcMs)
             }
             onSegmentsChanged?(engine.segments)
         case .closed:
@@ -356,6 +380,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         guard let config else { return }
         connectionGeneration += 1
         let generation = connectionGeneration
+        let epoch = sessionEpoch
 
         var hints = [config.meLanguage, config.targetLanguage]
         if let guestHint = config.guestHint { hints.append(guestHint) }
@@ -365,10 +390,10 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         streamM = m
         streamT = t
 
-        m.onEvent = { [weak self] event in self?.handle(event, isStreamM: true, generation: generation) }
-        t.onEvent = { [weak self] event in self?.handle(event, isStreamM: false, generation: generation) }
+        m.onEvent = { [weak self] event in self?.handle(event, isStreamM: true, generation: generation, epoch: epoch) }
+        t.onEvent = { [weak self] event in self?.handle(event, isStreamM: false, generation: generation, epoch: epoch) }
 
-        m.connect(config: SonioxStreamConfig(apiKey: config.apiKey, languageHints: hints, translation: .init(targetLanguage: config.meLanguage)))
-        t.connect(config: SonioxStreamConfig(apiKey: config.apiKey, languageHints: hints, translation: .init(targetLanguage: config.targetLanguage)))
+        m.connect(apiKey: config.apiKey, languageHints: hints, targetLanguage: config.meLanguage)
+        t.connect(apiKey: config.apiKey, languageHints: hints, targetLanguage: config.targetLanguage)
     }
 }

@@ -37,7 +37,8 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
         self.urlSession = urlSession
     }
 
-    func connect(config: SonioxStreamConfig) {
+    func connect(apiKey: String, languageHints: [String], targetLanguage: String) {
+        let config = SonioxStreamConfig(apiKey: apiKey, languageHints: languageHints, translation: .init(targetLanguage: targetLanguage))
         let task = urlSession.webSocketTask(with: Self.endpoint)
         self.task = task
         task.resume()
@@ -127,6 +128,10 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
             onEvent?(.authRejected)
             return
         }
-        onEvent?(.response(response))
+        // Mapped from the wire tokens to the app's own `SonioxToken` here,
+        // in the adapter, so nothing downstream of this seam ever touches
+        // `SonioxTokenWire`/`SonioxStreamResponse` either.
+        let tokens = (response.tokens ?? []).map { $0.appToken }
+        onEvent?(.response(SonioxSocketResponse(tokens: tokens, finalAudioProcMs: response.finalAudioProcMs ?? 0)))
     }
 }
