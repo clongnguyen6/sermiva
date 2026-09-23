@@ -5,9 +5,10 @@ import XCTest
 /// source of segments, speakers, boundaries, and M-direct (non-`me`)
 /// translation - plus the small on-device translation lifecycle surface
 /// (`onMeSegmentFinalized`, `applyTranslation...`) that replaced the old
-/// two-stream no-guess join per docs/soniox-routing.md (option C). The join
-/// itself, and its `SonioxToken`-level certainty tests, no longer exist -
-/// see git history (pre-option-C) for that coverage.
+/// two-stream no-guess join per docs/soniox-routing.md (option C). The
+/// former second Soniox stream, its join, and its `SonioxToken`-level
+/// certainty tests no longer exist - see git history (pre-option-C) for
+/// that coverage.
 @MainActor
 final class SonioxJoinEngineTests: XCTestCase {
     private func original(_ text: String, final: Bool, start: Int?, end: Int?, speaker: String? = "1", lang: String?) -> SonioxToken {

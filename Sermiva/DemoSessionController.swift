@@ -85,7 +85,7 @@ final class DemoSessionController: ObservableObject, SessionControlling {
         AsyncStream { $0.finish() }
     }
 
-    func reportTranslationStarted(id: Int) {}
+    func reportTranslationStarted(id: Int) -> Bool { false }
     func reportTranslationSuccess(id: Int, target: String) {}
     func reportTranslationFailure(id: Int) {}
 

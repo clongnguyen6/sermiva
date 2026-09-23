@@ -1,4 +1,5 @@
 import Foundation
+import Translation
 @testable import Sermiva
 
 /// Answers a mic-permission request synchronously with a fixed, injected
@@ -66,13 +67,31 @@ final class FakeSonioxLiveSession: SonioxLiveSessionProtocol {
     private(set) var pauseKeepaliveCount = 0
     private(set) var resumeCount = 0
     var nextStartResult = true
+    /// When `false`, `start`'s `completion` is stored instead of called
+    /// immediately, so a test can control exactly when the connect attempt
+    /// "settles" relative to other async work (e.g. the translation
+    /// availability check) - see `completeStart`.
+    var completesImmediately = true
+    private var pendingStartCompletion: (@MainActor (Bool) -> Void)?
 
     // See SonioxLiveSession.init for why this must be nonisolated.
     nonisolated init() {}
 
     func start(config: SonioxSessionConfig, completion: @escaping @MainActor (Bool) -> Void) {
         startCount += 1
-        completion(nextStartResult)
+        if completesImmediately {
+            completion(nextStartResult)
+        } else {
+            pendingStartCompletion = completion
+        }
+    }
+
+    /// Fires a `start` completion previously withheld via
+    /// `completesImmediately = false`.
+    func completeStart(ok: Bool) {
+        let completion = pendingStartCompletion
+        pendingStartCompletion = nil
+        completion?(ok)
     }
 
     func ingestAudio(_ data: Data) {
@@ -101,14 +120,21 @@ final class FakeSonioxLiveSession: SonioxLiveSessionProtocol {
     private(set) var reportedTranslationStarted: [Int] = []
     private(set) var reportedTranslationSuccess: [(id: Int, target: String)] = []
     private(set) var reportedTranslationFailure: [Int] = []
+    private(set) var translationAvailableHistory: [Bool] = []
+    var nextReportTranslationStartedResult = true
+
+    func setTranslationAvailable(_ available: Bool) {
+        translationAvailableHistory.append(available)
+    }
 
     func makeTranslationRequests() -> AsyncStream<(id: Int, source: String)> {
         makeTranslationRequestsCallCount += 1
         return AsyncStream { $0.finish() }
     }
 
-    func reportTranslationStarted(id: Int) {
+    func reportTranslationStarted(id: Int) -> Bool {
         reportedTranslationStarted.append(id)
+        return nextReportTranslationStartedResult
     }
 
     func reportTranslationSuccess(id: Int, target: String) {
@@ -117,6 +143,26 @@ final class FakeSonioxLiveSession: SonioxLiveSessionProtocol {
 
     func reportTranslationFailure(id: Int) {
         reportedTranslationFailure.append(id)
+    }
+}
+
+/// Stands in for Apple's `LanguageAvailability`/language resolution behind
+/// `MeToTargetAvailabilityChecking`, so `LiveSessionControllerTests` can
+/// drive `LiveSessionController`'s gate/banner/config-once logic with a
+/// controlled status instead of the real (Simulator-unavailable) framework.
+final class FakeMeToTargetAvailabilityChecker: MeToTargetAvailabilityChecking {
+    var source = Locale.Language(identifier: "vi")
+    var target = Locale.Language(identifier: "en-US")
+    var nextStatus: LanguageAvailability.Status = .installed
+    private(set) var statusCallCount = 0
+
+    func resolveLanguages() async -> (source: Locale.Language, target: Locale.Language) {
+        (source, target)
+    }
+
+    func status(from source: Locale.Language, to target: Locale.Language) async -> LanguageAvailability.Status {
+        statusCallCount += 1
+        return nextStatus
     }
 }
 
@@ -206,9 +252,9 @@ final class FakeSonioxSocketConnection: SonioxSocketConnecting {
 }
 
 /// Hands out a fresh `FakeSonioxSocketConnection` on every call, in the
-/// same order `SonioxLiveSession.connectBothFresh` creates them (M then T,
-/// once per connect/reconnect attempt) - so a test can index
-/// `createdSockets` to reach any specific attempt's specific socket.
+/// same order `SonioxLiveSession.connectFresh` creates them (one per
+/// connect/reconnect attempt) - so a test can index `createdSockets` to
+/// reach any specific attempt's own socket.
 @MainActor
 final class FakeSonioxSocketFactory {
     private(set) var createdSockets: [FakeSonioxSocketConnection] = []

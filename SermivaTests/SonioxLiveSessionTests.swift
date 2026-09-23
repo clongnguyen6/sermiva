@@ -300,7 +300,9 @@ final class SonioxLiveSessionTests: XCTestCase {
     /// Drives `makeTranslationRequests()` the same way `ConversationView`'s
     /// `.translationTask` closure does: a `for await` loop, one request at
     /// a time, reporting back by id - but with a fake translated string
-    /// instead of a real `TranslationSession`.
+    /// instead of a real `TranslationSession`. Asserts `reportTranslationStarted`
+    /// answered `true` (the closure would actually call `translate`) since
+    /// every caller of this helper expects a genuine, available request.
     private func drainOneTranslationRequest(
         from session: SonioxLiveSession,
         onStarted: (Int) -> Void = { _ in },
@@ -309,13 +311,14 @@ final class SonioxLiveSessionTests: XCTestCase {
         var iterator = session.makeTranslationRequests().makeAsyncIterator()
         guard let request = await iterator.next() else { return }
         onStarted(request.id)
-        session.reportTranslationStarted(id: request.id)
+        XCTAssertTrue(session.reportTranslationStarted(id: request.id), "sanity: this request must be genuinely startable")
         respond(request.id, request.source)
     }
 
     func test_onlyFinalMeSegmentsAreSentInOrderOneAtATime() async {
         let (session, factory, _) = makeSession()
         startAndEstablish(session, factory: factory)
+        session.setTranslationAvailable(true)
         var lastSegments: [Segment] = []
         session.onSegmentsChanged = { lastSegments = $0 }
         factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens(text: "Xin chào"))
@@ -337,6 +340,7 @@ final class SonioxLiveSessionTests: XCTestCase {
     func test_indicatorIsOnOnlyWhileTranslationIsActuallyInFlight() async {
         let (session, factory, _) = makeSession()
         startAndEstablish(session, factory: factory)
+        session.setTranslationAvailable(true)
         factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens())
 
         var lastSegments: [Segment] = []
@@ -344,7 +348,7 @@ final class SonioxLiveSessionTests: XCTestCase {
 
         var iterator = session.makeTranslationRequests().makeAsyncIterator()
         let request = await iterator.next()!
-        session.reportTranslationStarted(id: request.id)
+        XCTAssertTrue(session.reportTranslationStarted(id: request.id))
         XCTAssertTrue(lastSegments[0].translationInProgress, "must be on the instant translation actually starts")
 
         session.reportTranslationSuccess(id: request.id, target: "Hello")
@@ -354,6 +358,7 @@ final class SonioxLiveSessionTests: XCTestCase {
     func test_successWritesTheWholeTargetOnce() async {
         let (session, factory, _) = makeSession()
         startAndEstablish(session, factory: factory)
+        session.setTranslationAvailable(true)
         factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens())
 
         var lastSegments: [Segment] = []
@@ -370,6 +375,7 @@ final class SonioxLiveSessionTests: XCTestCase {
     func test_failureAbandonsWithNoRetry() async {
         let (session, factory, _) = makeSession()
         startAndEstablish(session, factory: factory)
+        session.setTranslationAvailable(true)
         factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens())
 
         var lastSegments: [Segment] = []
@@ -395,6 +401,7 @@ final class SonioxLiveSessionTests: XCTestCase {
     func test_streamTerminationAbandonsQueuedAndInFlightRequestsAndClearsIndicators() async {
         let (session, factory, _) = makeSession()
         startAndEstablish(session, factory: factory)
+        session.setTranslationAvailable(true)
         factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens())
 
         var lastSegments: [Segment] = []
@@ -403,7 +410,7 @@ final class SonioxLiveSessionTests: XCTestCase {
         do {
             var iterator = session.makeTranslationRequests().makeAsyncIterator()
             let request = await iterator.next()!
-            session.reportTranslationStarted(id: request.id)
+            XCTAssertTrue(session.reportTranslationStarted(id: request.id))
             XCTAssertTrue(lastSegments[0].translationInProgress, "sanity: genuinely in flight")
         }
         // `iterator`'s stream is now unreachable; `AsyncStream`'s
@@ -425,13 +432,14 @@ final class SonioxLiveSessionTests: XCTestCase {
     func test_aStaleReportFromAnEndedSessionNeverLandsOnTheNextSessionsSameNumberedSegment() async {
         let (session, factory, scheduler) = makeSession()
         startAndEstablish(session, factory: factory)
+        session.setTranslationAvailable(true)
         factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens())
 
         var lastSegments: [Segment] = []
         session.onSegmentsChanged = { lastSegments = $0 }
         var iterator = session.makeTranslationRequests().makeAsyncIterator()
         let staleRequest = await iterator.next()!
-        session.reportTranslationStarted(id: staleRequest.id)
+        XCTAssertTrue(session.reportTranslationStarted(id: staleRequest.id))
 
         session.end { }
         scheduler.drainAll()
@@ -440,6 +448,7 @@ final class SonioxLiveSessionTests: XCTestCase {
         // restart at 1, colliding numerically with the ended session's own
         // segment 1.
         startAndEstablish(session, factory: factory)
+        session.setTranslationAvailable(true)
         factory.createdSockets.last?.simulateResponse(tokens: meSegmentResponseTokens(text: "New session"))
 
         // The stale request's own (very late) completion arrives.
@@ -447,5 +456,77 @@ final class SonioxLiveSessionTests: XCTestCase {
 
         XCTAssertNotEqual(lastSegments[0].target, "stale translation", "a stale cross-session report must never corrupt the new session's same-numbered segment")
         XCTAssertNil(lastSegments[0].target)
+    }
+
+    // MARK: - Review round 2, finding 1: the availability gate
+
+    /// Nothing is enqueued at all while translation has never been marked
+    /// available - not merely started-and-skipped, but never yielded from
+    /// the stream in the first place. Proven by enqueuing a genuinely
+    /// available segment afterward and checking it is the FIRST thing the
+    /// stream ever delivers.
+    func test_translationIsNeverEnqueuedWhileUnavailable() async {
+        let (session, factory, _) = makeSession()
+        startAndEstablish(session, factory: factory)
+        // `setTranslationAvailable` is never called - fails closed by default.
+        var lastSegments: [Segment] = []
+        session.onSegmentsChanged = { lastSegments = $0 }
+        factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens(text: "Unavailable"))
+
+        XCTAssertFalse(lastSegments[0].translationInProgress)
+        XCTAssertFalse(lastSegments[0].targetAbandoned, "never enqueued is not the same as abandoned - just untouched")
+        XCTAssertNil(lastSegments[0].target)
+
+        session.setTranslationAvailable(true)
+        factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens(text: "Available"))
+
+        var iterator = session.makeTranslationRequests().makeAsyncIterator()
+        let received = await iterator.next()!
+        XCTAssertEqual(received.source, "Available", "only the segment finalized while available may ever reach the stream")
+    }
+
+    /// A direct API-contract check on the second, defensive gate inside
+    /// `reportTranslationStarted`: even a request that WAS legitimately
+    /// enqueued must not actually start if availability has since dropped.
+    func test_reportTranslationStartedReturnsFalseOnceAvailabilityHasDropped() async {
+        let (session, factory, _) = makeSession()
+        startAndEstablish(session, factory: factory)
+        session.setTranslationAvailable(true)
+        factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens())
+
+        var iterator = session.makeTranslationRequests().makeAsyncIterator()
+        let request = await iterator.next()!
+        session.setTranslationAvailable(false)
+
+        XCTAssertFalse(session.reportTranslationStarted(id: request.id), "must not start once availability has dropped, even for an already-queued request")
+    }
+
+    // MARK: - Review round 2, finding 2: a stale post-end request must
+    // never actually be translated, even though it still surfaces from the
+    // shared, long-lived stream (the reviewer's own reproduction: "Old
+    // session" came out before "New session").
+
+    func test_endedSessionsQueuedRequestStillSurfacesButMustNeverBeStarted() async {
+        let (session, factory, scheduler) = makeSession()
+        startAndEstablish(session, factory: factory)
+        session.setTranslationAvailable(true)
+        factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens(text: "Old session"))
+
+        var iterator = session.makeTranslationRequests().makeAsyncIterator()
+
+        session.end { }
+        scheduler.drainAll()
+
+        startAndEstablish(session, factory: factory)
+        session.setTranslationAvailable(true)
+        factory.createdSockets.last?.simulateResponse(tokens: meSegmentResponseTokens(text: "New session"))
+
+        let first = await iterator.next()!
+        XCTAssertEqual(first.source, "Old session", "the stale request was already sitting in the stream's buffer before end - it still surfaces")
+        XCTAssertFalse(session.reportTranslationStarted(id: first.id), "but must never actually start - the consuming closure must skip translate for it entirely")
+
+        let second = await iterator.next()!
+        XCTAssertEqual(second.source, "New session")
+        XCTAssertTrue(session.reportTranslationStarted(id: second.id), "the new session's own request must proceed normally, right behind the skipped stale one")
     }
 }

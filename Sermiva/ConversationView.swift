@@ -59,7 +59,13 @@ struct ConversationView<Controller: SessionControlling>: View {
             // `MeTranslationQueue`.
             for await request in controller.makeTranslationRequests() {
                 // Rule 7: "Đang dịch…" starts here, not when merely queued.
-                controller.reportTranslationStarted(id: request.id)
+                // `false` means this request must never reach `translate` at
+                // all - it is stale (already abandoned - session end,
+                // availability lost) or translation is currently
+                // unavailable; a request already sitting in the stream's own
+                // buffer before an abandonment cannot be un-yielded, so this
+                // check is what actually keeps it from being translated.
+                guard controller.reportTranslationStarted(id: request.id) else { continue }
                 do {
                     let response = try await session.translate(request.source)
                     controller.reportTranslationSuccess(id: request.id, target: response.targetText)
@@ -228,23 +234,30 @@ struct ConversationView<Controller: SessionControlling>: View {
         .padding(.vertical, 6)
     }
 
-    /// The banner shown from a live session's start-of-session
-    /// availability check (`.installed` fails) through the rest of that
-    /// session, per docs/soniox-routing.md - reuses the same banner style
-    /// as the other three above (HANDOFF 2.2's "info" banner variant).
+    /// The banner shown from a live session's start-of-session availability
+    /// check (`.installed` fails) through the rest of that session, per
+    /// docs/soniox-routing.md. This is HANDOFF 2.2's "info" banner variant,
+    /// not the danger/warn style the other three above use - the prototype
+    /// (`design/claude-handoff/Sermiva.dc.html`'s `bannerStyle`, `isBannerInfo`
+    /// branch) gives it `surface` (not `surface2`) background, `text2`
+    /// (not `text3`) icon/text colour, and padding `10 10 10 14` (an extra
+    /// 4 pt on the leading edge) rather than the other banners' uniform 10.
     /// `controller.showsTranslationUnavailableBanner` is always `false` in
     /// demo, so this never shows there.
     private var translationUnavailableBanner: some View {
         HStack {
             Image(systemName: "info.circle")
-                .foregroundStyle(Tokens.text3)
+                .foregroundStyle(Tokens.text2)
             Text("Lời của Bạn sẽ không được dịch sang tiếng Anh trên máy này.")
                 .font(.system(size: bannerTextSize))
                 .foregroundStyle(Tokens.text2)
             Spacer()
         }
-        .padding(10)
-        .background(Tokens.surface2)
+        .padding(.leading, 14)
+        .padding(.top, 10)
+        .padding(.bottom, 10)
+        .padding(.trailing, 10)
+        .background(Tokens.surface)
         .clipShape(RoundedRectangle(cornerRadius: 14))
         .padding(.horizontal, 16)
         .padding(.vertical, 6)

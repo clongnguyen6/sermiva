@@ -17,8 +17,9 @@ struct LiveLanguageConfig {
 
 /// Drives the section-5 session state machine for a real Soniox session:
 /// real microphone permission and capture through the existing
-/// `MicPermissionProviding`/`AudioCapturing` seams, and the two-stream join
-/// from docs/soniox-routing.md through `SonioxLiveSessionProtocol`. Mirrors
+/// `MicPermissionProviding`/`AudioCapturing` seams, the single Soniox socket
+/// through `SonioxLiveSessionProtocol`, and the on-device `me -> target`
+/// translation gate/banner from docs/soniox-routing.md. Mirrors
 /// `DemoSessionController`'s state-machine shape exactly (both implement
 /// `SessionControlling`, and share `SessionPresentation`'s pure dock rules)
 /// but never touches playback scheduling or fixture events - there is
@@ -49,20 +50,31 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     private let micPermission: MicPermissionProviding
     private let audioCapture: AudioCapturing
     private let liveSession: SonioxLiveSessionProtocol
+    /// The seam behind the live session-start availability check - real
+    /// Apple Translation calls by default, a fake in `LiveSessionControllerTests`.
+    private let translationAvailability: MeToTargetAvailabilityChecking
     private var elapsedTimer: Timer?
+    /// Bumped every `prepareTranslationForSessionStart` call, so a belated
+    /// availability result from an attempt that is no longer the current
+    /// one (a later "Phiên mới" already started its own check) is
+    /// recognised as stale and ignored, even if `canEnd(for: state)` alone
+    /// would otherwise still pass for the new attempt.
+    private var translationCheckEpoch = 0
 
     init(
         apiKey: String,
         languageConfig: LiveLanguageConfig = .default,
         micPermission: MicPermissionProviding = RealMicPermissionProvider(),
         audioCapture: AudioCapturing = RealAudioCapture(),
-        liveSession: SonioxLiveSessionProtocol = SonioxLiveSession()
+        liveSession: SonioxLiveSessionProtocol = SonioxLiveSession(),
+        translationAvailability: MeToTargetAvailabilityChecking = RealMeToTargetAvailabilityChecker()
     ) {
         self.apiKey = apiKey
         self.languageConfig = languageConfig
         self.micPermission = micPermission
         self.audioCapture = audioCapture
         self.liveSession = liveSession
+        self.translationAvailability = translationAvailability
 
         self.audioCapture.onUnexpectedStop = { [weak self] in
             self?.handleCaptureStoppedExternally()
@@ -129,7 +141,7 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         liveSession.makeTranslationRequests()
     }
 
-    func reportTranslationStarted(id: Int) {
+    func reportTranslationStarted(id: Int) -> Bool {
         liveSession.reportTranslationStarted(id: id)
     }
 
@@ -189,9 +201,9 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         }
     }
 
-    /// Capture is attempted BEFORE the (metered) Soniox sockets are opened,
-    /// per the owner's ruling: a startup capture failure must not leave two
-    /// billed sockets open with no audio ever reaching them. A capture
+    /// Capture is attempted BEFORE the (metered) Soniox socket is opened,
+    /// per the owner's ruling: a startup capture failure must not leave a
+    /// billed socket open with no audio ever reaching it. A capture
     /// failure returns to `.idle` - which already renders "Mic tắt" via
     /// `SessionPresentation.micDockText` (idle + not capturing), the exact
     /// existing string HANDOFF's outcome asks for, with no new state and no
@@ -227,16 +239,22 @@ final class LiveSessionController: ObservableObject, SessionControlling {
                 // A `false` here is a plain connect/network failure with no
                 // matching state in HANDOFF section 5's vocabulary - the
                 // honest, no-new-copy choice is to stop (closing the
-                // sockets that never really started) and return to `.idle`
+                // socket that never really started) and return to `.idle`
                 // so the existing "Bắt đầu" flow can simply retry - left
                 // for the project owner to decide whether this deserves a
                 // real state of its own.
                 self.audioCapture.stop()
                 self.isMicCapturing = false
                 self.state = .idle
-                // A connect failure can still leave the other socket open
-                // (or reconnecting) in the background; end the session
-                // outright so nothing keeps billing behind an idle screen.
+                // Review round 2: the availability check can resolve (and
+                // set the banner) before the connect failure above ever
+                // happens - clear it explicitly rather than leave it
+                // claiming unavailability against a session that no longer
+                // exists.
+                self.showsTranslationUnavailableBanner = false
+                // A connect failure can still leave the socket open (or
+                // reconnecting) in the background; end the session outright
+                // so nothing keeps billing behind an idle screen.
                 self.liveSession.end { }
             }
         }
@@ -304,9 +322,10 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     }
 
     /// "Phiên mới": clears the transcript and restarts immediately, the
-    /// same contract `DemoSessionController` implements - a fresh
-    /// `SonioxLiveSession` (via `beginConnecting`'s `liveSession.start`)
-    /// gets a fresh `SonioxJoinEngine`, so no stale join state survives.
+    /// same contract `DemoSessionController` implements - `beginConnecting`'s
+    /// `liveSession.start` gets a fresh `SonioxJoinEngine`, and
+    /// `prepareTranslationForSessionStart` re-runs its own availability
+    /// check, so no stale per-session state survives either way.
     private func startNewSession() {
         segments = []
         elapsed = 0
@@ -331,28 +350,45 @@ final class LiveSessionController: ObservableObject, SessionControlling {
 
     /// Runs at every live session start (fatalError rule: "At every live
     /// session start, the controller calls `LanguageAvailability().status(
-    /// from:to:)`"). `translationConfiguration` itself is created only
-    /// once, ever, per controller (fatalError rule 2) - guarded below - so
-    /// a later "Phiên mới" only re-checks availability, never replaces it.
+    /// from:to:)`"). Review round 2, finding 1: this is the ONLY place
+    /// `liveSession.setTranslationAvailable` is ever set `true` - it starts
+    /// `false` at every session start (`SonioxLiveSession.start`) and only
+    /// this method flips it, and only once `.installed` is confirmed for
+    /// THIS attempt. `translationConfiguration` is created at most once,
+    /// ever, per controller (fatalError rule 2), and - review round 2,
+    /// finding 1's explicit decision - only once `.installed` is actually
+    /// confirmed: creating it for `.supported` would let the very first
+    /// `translate` call trigger the system's own download sheet mid-session
+    /// while the mic is live, which is never acceptable.
     private func prepareTranslationForSessionStart() {
         showsTranslationUnavailableBanner = false
+        // Fail closed the instant a new attempt starts - never enqueue on a
+        // guess while this attempt's own check is still in flight.
+        liveSession.setTranslationAvailable(false)
+        translationCheckEpoch += 1
+        let epoch = translationCheckEpoch
         // me != target is enforced before the configuration is created
         // (fatalError rule 8) - always true for the fixed vi/en default,
         // checked here as a real guard rather than assumed.
         guard languageConfig.me != languageConfig.target else { return }
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let (source, target) = await TranslationLanguages.resolve()
-            if self.translationConfiguration == nil {
-                self.translationConfiguration = TranslationSession.Configuration(source: source, target: target)
-            }
-            let status = await LanguageAvailability().status(from: source, to: target)
-            // Only while this session attempt is still genuinely running -
-            // not after it has already been aborted or ended (`.idle`,
+            let (source, target) = await self.translationAvailability.resolveLanguages()
+            let status = await self.translationAvailability.status(from: source, to: target)
+            // Only while this is still the CURRENT attempt (a later
+            // "Phiên mới" has not already started its own check) and it is
+            // still genuinely running - not aborted or ended (`.idle`,
             // `.micDenied`, `.authError`, `.ended`) - matching
             // `SessionPresentation.canEnd`'s own notion of "still running".
-            guard SessionPresentation.canEnd(for: self.state) else { return }
-            self.showsTranslationUnavailableBanner = status != .installed
+            guard self.translationCheckEpoch == epoch, SessionPresentation.canEnd(for: self.state) else { return }
+            let installed = status == .installed
+            if installed {
+                if self.translationConfiguration == nil {
+                    self.translationConfiguration = TranslationSession.Configuration(source: source, target: target)
+                }
+                self.liveSession.setTranslationAvailable(true)
+            }
+            self.showsTranslationUnavailableBanner = !installed
         }
     }
 }

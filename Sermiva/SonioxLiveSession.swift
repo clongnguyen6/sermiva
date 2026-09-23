@@ -35,14 +35,26 @@ protocol SonioxLiveSessionProtocol: AnyObject {
     /// guarantee that no socket survives past this call.
     func endImmediately(completion: @escaping @MainActor () -> Void)
 
+    /// Set by `LiveSessionController` once its own per-session availability
+    /// check resolves - `true` only for `.installed`. `false` by default and
+    /// reset to `false` at every `start()`, so a `me` segment finalizing
+    /// before that check has even completed fails closed (never enqueued)
+    /// rather than racing it. See docs/soniox-routing.md.
+    func setTranslationAvailable(_ available: Bool)
     /// A fresh stream every call (fatalError rule 4) of final `me`-language
     /// segments waiting to be translated on-device, one at a time, in
     /// order. `ConversationView`'s `.translationTask` closure is the only
     /// consumer - `TranslationSession` never appears on this seam.
     func makeTranslationRequests() -> AsyncStream<(id: Int, source: String)>
-    /// Called the instant the closure actually starts translating `id` -
-    /// not when it was merely queued (fatalError rule 7).
-    func reportTranslationStarted(id: Int)
+    /// Called the instant the closure is about to translate `id` - not when
+    /// it was merely queued (fatalError rule 7). Returns `false` when `id`
+    /// is no longer recognised (already abandoned - by a session end, an
+    /// availability drop, or stream termination) or translation is
+    /// currently unavailable: the closure must skip the actual `translate`
+    /// call entirely in that case, never call it just to discard the
+    /// result. Returns `true` only when the closure should actually call
+    /// `translate` and show "Đang dịch…" for `id`.
+    func reportTranslationStarted(id: Int) -> Bool
     /// Writes the whole translated text once.
     func reportTranslationSuccess(id: Int, target: String)
     /// An error means "no translation" - never retried automatically
@@ -86,6 +98,12 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     private let translationQueue = MeTranslationQueue()
     private var nextTranslationRequestId = 1
     private var translationRequestSegmentId: [Int: Int] = [:]
+    /// Set by `LiveSessionController` via `setTranslationAvailable` once its
+    /// own per-session availability check resolves. `false` by default and
+    /// reset at every `start()` - fail closed until explicitly confirmed, so
+    /// nothing is ever enqueued/translated on a guess while that check is
+    /// still in flight. See docs/soniox-routing.md.
+    private var isTranslationAvailable = false
 
     private var configSent = false
     private var bufferedAudio: [Data] = []
@@ -172,6 +190,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         bufferedAudio = []
         bufferedAudioByteCount = 0
         hasStartedStreaming = false
+        isTranslationAvailable = false
         let engine = SonioxJoinEngine(meLanguage: config.meLanguage)
         engine.onMeSegmentFinalized = { [weak self] segmentId, source in
             self?.enqueueMeTranslation(segmentId: segmentId, source: source)
@@ -411,6 +430,10 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         if let guestHint = config.guestHint { hints.append(guestHint) }
 
         let newSocket = makeSocket()
+        // Labels the one-shot translation_status wire-shape diagnostic
+        // only (see `SonioxStreamSocket`) - a no-op for a test's fake,
+        // which never conforms to the concrete adapter type.
+        (newSocket as? SonioxStreamSocket)?.streamLabel = "M"
         socket = newSocket
 
         newSocket.onEvent = { [weak self] event in self?.handle(event, generation: generation, epoch: epoch) }
@@ -420,7 +443,19 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
 
     // MARK: - On-device me -> target translation
 
+    func setTranslationAvailable(_ available: Bool) {
+        isTranslationAvailable = available
+    }
+
+    /// Only `.installed` at session start (`isTranslationAvailable`) ever
+    /// enqueues - the primary gate from docs/soniox-routing.md. This alone
+    /// does not cover every case (availability is only rechecked at session
+    /// start, and a request already enqueued before it flips can still sit
+    /// in the queue's stream buffer) - `reportTranslationStarted`'s `Bool`
+    /// return is the second, authoritative gate the consuming closure must
+    /// obey before ever calling `translate`.
     private func enqueueMeTranslation(segmentId: Int, source: String) {
+        guard isTranslationAvailable else { return }
         let requestId = nextTranslationRequestId
         nextTranslationRequestId += 1
         translationRequestSegmentId[requestId] = segmentId
@@ -431,10 +466,22 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         translationQueue.makeRequests()
     }
 
-    func reportTranslationStarted(id: Int) {
-        guard let segmentId = translationRequestSegmentId[id] else { return }
+    func reportTranslationStarted(id: Int) -> Bool {
+        guard let segmentId = translationRequestSegmentId[id] else { return false }
+        guard isTranslationAvailable else {
+            // Availability dropped (or was never confirmed) between this
+            // request being enqueued and the closure reaching it - treat
+            // exactly like any other abandonment: no translate call, no
+            // indicator, never retried.
+            translationRequestSegmentId.removeValue(forKey: id)
+            translationQueue.finished(id: id)
+            joinEngine?.applyTranslationFailure(segmentId: segmentId)
+            if let engine = joinEngine { onSegmentsChanged?(engine.segments) }
+            return false
+        }
         joinEngine?.applyTranslationStarted(segmentId: segmentId)
         if let engine = joinEngine { onSegmentsChanged?(engine.segments) }
+        return true
     }
 
     func reportTranslationSuccess(id: Int, target: String) {

@@ -1,4 +1,5 @@
 import XCTest
+import Translation
 @testable import Sermiva
 
 /// Covers the section-5 state machine for a real session, driven through
@@ -11,16 +12,27 @@ final class LiveSessionControllerTests: XCTestCase {
     private func makeController(
         micGranted: Bool = true,
         audio: FakeAudioCapture = FakeAudioCapture(),
-        session: FakeSonioxLiveSession = FakeSonioxLiveSession()
+        session: FakeSonioxLiveSession = FakeSonioxLiveSession(),
+        translationAvailability: FakeMeToTargetAvailabilityChecker = FakeMeToTargetAvailabilityChecker()
     ) -> (controller: LiveSessionController, audio: FakeAudioCapture, session: FakeSonioxLiveSession, mic: FakeMicPermissionProvider) {
         let mic = FakeMicPermissionProvider(granted: micGranted)
         let controller = LiveSessionController(
             apiKey: "sx_test_key_not_real",
             micPermission: mic,
             audioCapture: audio,
-            liveSession: session
+            liveSession: session,
+            translationAvailability: translationAvailability
         )
         return (controller, audio, session, mic)
+    }
+
+    /// Lets the async availability-check `Task` spawned by
+    /// `prepareTranslationForSessionStart` actually run and settle, since
+    /// none of these tests can `await` it directly.
+    private func settle(yields: Int = 50) async {
+        for _ in 0..<yields {
+            await Task.yield()
+        }
     }
 
     func test_idleToListeningOpensCaptureAndStartsTheLiveSession() {
@@ -216,7 +228,7 @@ final class LiveSessionControllerTests: XCTestCase {
         let (controller, _, _, _) = makeController(session: session)
 
         _ = controller.makeTranslationRequests()
-        controller.reportTranslationStarted(id: 1)
+        _ = controller.reportTranslationStarted(id: 1)
         controller.reportTranslationSuccess(id: 1, target: "Hello")
         controller.reportTranslationFailure(id: 2)
 
@@ -235,5 +247,99 @@ final class LiveSessionControllerTests: XCTestCase {
 
         XCTAssertEqual(session.ingestedAudioCount, 1)
         _ = controller
+    }
+
+    // MARK: - Review round 2, finding 1: the availability status gate
+
+    func test_installedStatusEnablesTranslationCreatesConfigurationAndShowsNoBanner() async {
+        let availability = FakeMeToTargetAvailabilityChecker()
+        availability.nextStatus = .installed
+        let session = FakeSonioxLiveSession()
+        let (controller, _, _, _) = makeController(session: session, translationAvailability: availability)
+
+        controller.primaryButtonTapped()
+        await settle()
+
+        XCTAssertEqual(session.translationAvailableHistory, [false, true], "must fail closed first, then flip true only once .installed is confirmed")
+        XCTAssertNotNil(controller.translationConfiguration)
+        XCTAssertFalse(controller.showsTranslationUnavailableBanner)
+    }
+
+    func test_supportedStatusNeverEnablesTranslationNeverCreatesConfigurationAndShowsTheBanner() async {
+        let availability = FakeMeToTargetAvailabilityChecker()
+        availability.nextStatus = .supported
+        let session = FakeSonioxLiveSession()
+        let (controller, _, _, _) = makeController(session: session, translationAvailability: availability)
+
+        controller.primaryButtonTapped()
+        await settle()
+
+        XCTAssertEqual(session.translationAvailableHistory, [false], "must never flip true for .supported - only .installed may enqueue/translate")
+        XCTAssertNil(controller.translationConfiguration, "must never create the configuration for .supported - the first translate call would trigger the system download sheet mid-session")
+        XCTAssertTrue(controller.showsTranslationUnavailableBanner)
+    }
+
+    func test_unsupportedStatusNeverEnablesTranslationNeverCreatesConfigurationAndShowsTheBanner() async {
+        let availability = FakeMeToTargetAvailabilityChecker()
+        availability.nextStatus = .unsupported
+        let session = FakeSonioxLiveSession()
+        let (controller, _, _, _) = makeController(session: session, translationAvailability: availability)
+
+        controller.primaryButtonTapped()
+        await settle()
+
+        XCTAssertEqual(session.translationAvailableHistory, [false])
+        XCTAssertNil(controller.translationConfiguration)
+        XCTAssertTrue(controller.showsTranslationUnavailableBanner)
+    }
+
+    /// Fatal-error rule 2: created at most once, ever, per controller - and
+    /// review round 2's own decision, never recreated for a later "Phiên
+    /// mới", `endSession`, or an auth error, even if a later resolution
+    /// would have produced something different.
+    func test_configurationIsNeverRecreatedAcrossPhienMoiEndOrAuthError() async {
+        let availability = FakeMeToTargetAvailabilityChecker()
+        availability.nextStatus = .installed
+        let session = FakeSonioxLiveSession()
+        let (controller, _, _, _) = makeController(session: session, translationAvailability: availability)
+
+        controller.primaryButtonTapped()
+        await settle()
+        let firstIdentifier = controller.translationConfiguration?.source?.maximalIdentifier
+        XCTAssertNotNil(firstIdentifier)
+
+        // If the configuration were ever recreated, this would show up.
+        availability.source = Locale.Language(identifier: "fr")
+
+        controller.endSession()
+        XCTAssertNotNil(controller.translationConfiguration, "end must never nil the configuration out (fatalError rule 2)")
+
+        controller.primaryButtonTapped() // "Phiên mới"
+        await settle()
+        XCTAssertEqual(controller.translationConfiguration?.source?.maximalIdentifier, firstIdentifier, "must never be recreated for a later Phien moi, even with a different later resolution")
+
+        session.onAuthError?()
+        XCTAssertEqual(controller.translationConfiguration?.source?.maximalIdentifier, firstIdentifier, "an auth error must never touch the configuration either")
+    }
+
+    // MARK: - Review round 2, finding 5: the banner must not survive a
+    // failed connect, even if the availability check resolved (and set it)
+    // before the connect failure itself happened.
+
+    func test_bannerClearsAfterAFailedConnectEvenIfTheCheckAlreadySetItTrue() async {
+        let availability = FakeMeToTargetAvailabilityChecker()
+        availability.nextStatus = .unsupported
+        let session = FakeSonioxLiveSession()
+        session.completesImmediately = false
+        let (controller, _, _, _) = makeController(session: session, translationAvailability: availability)
+
+        controller.primaryButtonTapped() // .connecting; availability check in flight, start() withheld
+        await settle()
+        XCTAssertTrue(controller.showsTranslationUnavailableBanner, "sanity: the availability check resolved first, while still connecting")
+
+        session.completeStart(ok: false) // the connect attempt now fails
+
+        XCTAssertEqual(controller.state, .idle)
+        XCTAssertFalse(controller.showsTranslationUnavailableBanner, "a failed connect must clear the banner - it must never claim unavailability for a session that no longer exists")
     }
 }

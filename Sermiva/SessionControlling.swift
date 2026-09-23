@@ -23,20 +23,25 @@ protocol SessionControlling: ObservableObject {
     var canEnd: Bool { get }
 
     /// `nil` in demo, so `ConversationView`'s `.translationTask` closure
-    /// never runs there (fatalError rule 3). For a live session, a `let`
-    /// created once per controller and never reassigned/invalidated/nilled
+    /// never runs there (fatalError rule 3). For a live session, set from
+    /// `nil` to a value at most once per controller, only once `.installed`
+    /// is confirmed, and never reassigned/invalidated/nilled afterward
     /// (fatalError rule 2) - see `LiveSessionController`.
     var translationConfiguration: TranslationSession.Configuration? { get }
     /// True only while the device cannot translate `me -> target`, from the
     /// live session-start availability check through the rest of that
-    /// session - never in demo. See docs/soniox-routing.md.
+    /// session - never in demo, and cleared again the moment that session
+    /// attempt ends (including a failed connect). See docs/soniox-routing.md.
     var showsTranslationUnavailableBanner: Bool { get }
     /// A fresh stream every call (fatalError rule 4), of final `me`-language
     /// segments waiting for on-device translation.
     func makeTranslationRequests() -> AsyncStream<(id: Int, source: String)>
-    /// The instant `.translationTask`'s closure actually starts translating
-    /// `id` - not when it was merely queued (fatalError rule 7).
-    func reportTranslationStarted(id: Int)
+    /// The instant `.translationTask`'s closure is about to translate `id` -
+    /// not when it was merely queued (fatalError rule 7). `false` means the
+    /// closure must skip `translate` entirely for `id` - it is no longer
+    /// recognised or translation is currently unavailable; `true` means the
+    /// closure should actually call `translate` and show "Đang dịch…".
+    func reportTranslationStarted(id: Int) -> Bool
     func reportTranslationSuccess(id: Int, target: String)
     func reportTranslationFailure(id: Int)
 
