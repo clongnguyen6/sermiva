@@ -52,6 +52,7 @@
 		1C88089842604499BF9AD99F /* SonioxKeychainStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE00EEB3E6C447DCAF91C143 /* SonioxKeychainStoreTests.swift */; };
 		B25D319B74384D989DF54ECE /* SonioxSocketConnecting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DC8D39039D74F4D97EA88F7 /* SonioxSocketConnecting.swift */; };
 		8C3FAD3A654447E1A99DF191 /* SonioxLiveSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC3EE366C1DF45D897EFF8F6 /* SonioxLiveSessionTests.swift */; };
+		094ACC4FDFF0E8BF38DE2690 /* SonioxJoinInvariantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B7C668D59355E4A059C181B /* SonioxJoinInvariantTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -114,6 +115,7 @@
 		B0E599D64A764F289B80EDEE /* RealAudioCapture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RealAudioCapture.swift; sourceTree = "<group>"; };
 		3FFDE534B1C740EB96AC2B4A /* LiveSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSessionController.swift; sourceTree = "<group>"; };
 		CAC10FFE0D8A45F4814819D7 /* SonioxJoinEngineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxJoinEngineTests.swift; sourceTree = "<group>"; };
+		9B7C668D59355E4A059C181B /* SonioxJoinInvariantTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxJoinInvariantTests.swift; sourceTree = "<group>"; };
 		8271E915E8DE4BB4B8A3C381 /* SonioxAPIClientTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxAPIClientTests.swift; sourceTree = "<group>"; };
 		45962B9A2D9C477CBC26D686 /* LiveSessionControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSessionControllerTests.swift; sourceTree = "<group>"; };
 		BE00EEB3E6C447DCAF91C143 /* SonioxKeychainStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxKeychainStoreTests.swift; sourceTree = "<group>"; };
@@ -194,6 +196,7 @@
 				65BB55D9DE304E2898821F68 /* ConversationViewTests.swift */,
 				A449C874F8444313B85CF398 /* SegmentDisplayTests.swift */,
 				CAC10FFE0D8A45F4814819D7 /* SonioxJoinEngineTests.swift */,
+				9B7C668D59355E4A059C181B /* SonioxJoinInvariantTests.swift */,
 				DC3EE366C1DF45D897EFF8F6 /* SonioxLiveSessionTests.swift */,
 				8271E915E8DE4BB4B8A3C381 /* SonioxAPIClientTests.swift */,
 				45962B9A2D9C477CBC26D686 /* LiveSessionControllerTests.swift */,
@@ -406,6 +409,7 @@
 				AD94258047874F11B85645D2 /* ConversationViewTests.swift in Sources */,
 				A85F489CB6884A009B7D9A56 /* SegmentDisplayTests.swift in Sources */,
 				A6FC13DA6E1E4379B7F00670 /* SonioxJoinEngineTests.swift in Sources */,
+				094ACC4FDFF0E8BF38DE2690 /* SonioxJoinInvariantTests.swift in Sources */,
 				8C3FAD3A654447E1A99DF191 /* SonioxLiveSessionTests.swift in Sources */,
 				7EE9E01A7C92494BB6084537 /* SonioxAPIClientTests.swift in Sources */,
 				CEC2915BF19846C4A3774F7E /* LiveSessionControllerTests.swift in Sources */,
