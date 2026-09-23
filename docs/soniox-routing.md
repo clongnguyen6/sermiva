@@ -1,16 +1,14 @@
-# Soniox routing and stream contract
+# Soniox routing and on-device translation contract
 
-Decided 2026-09-22 against the public Soniox docs and the soniox-js SDK source of that date, then
-amended by the project owner the same day (see the no-guess join rule below, which replaces the
-original draft's join behaviour). Model: `stt-rt-v5`. Two live sessions have since run and found real
-bugs, fixed and recorded in place below (the Unknowns table, the no-guess join's "Complete" rule, and
-Key validation); what those two sessions have not yet exercised - most of Settings, other display
-styles, real audio hardware edge cases - is still what the Unknowns section tracks.
+Decided 2026-09-22 against the public Soniox docs and the soniox-js SDK source of that date
+(option B: two Soniox streams and a time-window join). After many review rounds the join still
+showed translation fragments as complete, and the rule itself had a hole - see "Why option B was
+stopped" below. The project owner stopped option B and chose **option C**, decided 2026-09-23:
+one Soniox stream plus on-device Apple Translation for the owner's own speech. Model: `stt-rt-v5`.
 
 ## Decision
 
-Two `one_way` streams per session over the same captured audio, identical config apart from
-`translation.target_language`:
+One `one_way` Soniox stream, unchanged from option B's stream M:
 
 ```json
 {
@@ -26,320 +24,257 @@ Two `one_way` streams per session over the same captured audio, identical config
 }
 ```
 
-Stream M has `target_language = me`. Stream T has `target_language = target`.
+- This stream (still called M in the code and below) is the only source of segments: text,
+  language, speakers, `<end>` boundaries, and the translation of every segment whose language is
+  not `me`. This half is unchanged from option B and already works live on the owner's iPhone.
+- There is no second Soniox stream and no join. A `me`-language segment's translation into `target`
+  comes from Apple's on-device Translation framework instead, once that segment is final - see
+  "Device translation" below.
+- `guest` remains a recognition hint only. `target` is never sent to Soniox at all in option C - it
+  is a purely on-device concept (see "Setup: key validation" below).
 
-- M is the only source of segments: text, language, speaker labels, `<end>` boundaries, and the
-  translation of every segment whose language is not `me`.
-- T contributes exactly one thing: the translation into `target` of M-segments whose language is
-  `me`, and only when the no-guess join below accepts it. T's original text, labels and boundaries
-  are never shown.
-- HANDOFF.md section 4 rule, now real: language == `me` shows T's translation (via the join); any
-  other language shows M's translation. `guest` is a recognition hint only.
-- Translation tokens for a segment already in the direction's target language are discarded on both
-  streams (see Unknowns).
+## Device translation
 
-Why not one `two_way(me, target)`: with the defaults (vi / auto / en) any guest who does not speak
-English is transcribed and never translated. The API has no per-segment target and no
-text-translation endpoint for a second pass.
-Why not `two_way(me, guest)`: repurposes `target`, and fails when guest is `auto`.
-Fallback, reconsidered only if a live session shows the two-stream join cannot work: `one_way(me)`
-plus Apple's on-device Translation framework for me-to-target. One stream and no join, but iOS 18
-minimum, a language-pack download prompt, a second engine, and Vietnamese support unverified.
+For every M segment whose language is `me`, once it is final: send its final `source` text (never a
+partial/non-final tail) to Apple's Translation framework, vi -> en-US, and write the result to that
+segment's `target` once, whole, when it returns. The input is exactly the segment's own final text,
+so no attribution guess exists - unlike option B's join, which had to guess which of two
+independently-segmenting streams' translations belonged to which window.
 
-## Audio origin (required for the join)
+**Why Apple Translation, not a server round trip:** it is free, offline-capable, and removes the
+second metered Soniox connection entirely. Vietnamese support was unverified going in - live
+measurement is still outstanding, see "Unknowns" below.
 
-Buffer captured audio until both sockets have accepted their config, then send the identical byte
-stream from byte zero to both. Both `start_ms` timelines then share one origin. Never let one
-stream start ahead of the other.
+### The narrow interface (owner requirement)
 
-## Stream contract (from docs)
+`TranslationSession` (Apple's type) can only be obtained inside a SwiftUI `.translationTask`
+closure - there is no other public way to construct one. This means the actual `translate` call can
+only ever happen inside `ConversationView`'s `.translationTask` closure (see the fatalError rules
+below for why). Everything else - which segment is next, in-flight/queued bookkeeping, writing the
+result back - is plain, testable Swift with no dependency on Apple's framework:
 
-- `wss://stt-rt.soniox.com/transcribe-websocket`. Config as first text frame, audio as binary
-  frames at real-time pace or faster (408 otherwise), control frames `{"type":"keepalive"}` and
+- `SessionControlling` (implemented by both `DemoSessionController` and `LiveSessionController`)
+  exposes `translationConfiguration`, `makeTranslationRequests() -> AsyncStream<(id: Int, source:
+  String)>`, and `reportTranslationStarted(id:)`/`reportTranslationSuccess(id:target:)`/
+  `reportTranslationFailure(id:)`.
+- `LiveSessionController` forwards these to `SonioxLiveSession`, which owns `MeTranslationQueue` (the
+  FIFO queue itself - no `TranslationSession` anywhere in it) and `SonioxJoinEngine` (which still owns
+  `segments`, including a `me`-language segment's `target`/`translationInProgress`/`targetAbandoned`,
+  via `applyTranslationStarted`/`applyTranslationSuccess`/`applyTranslationFailure`).
+- `ConversationView`'s `.translationTask` closure is the only place a real `TranslationSession` is
+  ever touched - a `for await` loop over `makeTranslationRequests()`, sequential, one request at a
+  time, reporting back by id. This closure is the "Apple adapter" - thin and untested, exactly like
+  `SonioxStreamSocket` is for the Soniox wire format (AGENTS.md).
+- `DemoSessionController.translationConfiguration` is always `nil`, so the closure never runs in
+  demo; its `makeTranslationRequests()` returns an already-finished stream.
+
+This is what lets `SermivaTests` exercise the queue's ordering/indicator/success/failure/abandon
+rules with a fake standing in for the closure (driving the same `makeTranslationRequests`/
+`reportTranslation...` contract the real closure drives, with a fake translated string instead of a
+real `TranslationSession`), and what would let a different per-segment engine replace Apple later by
+changing only that one closure.
+
+### The eight fatalError rules (owner-confirmed against Apple's docs)
+
+Apple: "The system throws a fatalError if you use a [session] instance after the attached view
+disappears or if you use it after changing the configuration." Checked by file:line in every
+handoff:
+
+1. `TranslationSession` appears only as the `.translationTask` closure parameter - never assigned to
+   a property, captured by a stored closure, or passed out of the closure. Every `translate` call is
+   made inside that closure.
+2. `TranslationSession.Configuration` is created once per controller, then never reassigned,
+   `invalidate()`-ed, or set back to `nil`. The language pair never changes mid-session (HANDOFF
+   section 4 already forbids changing `me`/`target` mid-session).
+3. `.translationTask` is attached to the root `ZStack` of `ConversationView.body` - the one view that
+   lives for the whole conversation (`RootView`'s `.liveConversation` case; sheets only ever cover
+   it, never replace it). Never attached in `RootView`. The configuration comes from the controller
+   through `SessionControlling`, and is `nil` in demo, so the demo closure never runs.
+4. `makeTranslationRequests()` returns a fresh `AsyncStream` every call, so a re-run of the closure
+   (should SwiftUI ever re-invoke it) never double-consumes a stream still wired to a previous run.
+5. Inside the closure, `translate` calls are sequential - at most one is ever awaited at a time (a
+   plain `for await` loop, no child `Task` spawned per request).
+6. Every `catch` in the closure, and the stream's own `onTermination` (the view disappearing, or the
+   task being cancelled), marks the affected queued/in-flight ids abandoned and clears "Đang dịch…".
+7. "Đang dịch…" for a `me` segment is true only from the moment the closure actually calls
+   `translate` for that id (`reportTranslationStarted`) until it returns or throws - being merely
+   queued does not count (AGENTS.md's activity-indicator invariant).
+8. `me != target` is enforced before the configuration is created. Empty/whitespace-only source is
+   never sent. Every error means "no translation" - never retried automatically.
+
+Other iOS 18 rules: resolve `vi`/`en` against `LanguageAvailability().supportedLanguages` by
+`languageCode`, preferring `en-US` when several English entries exist (`TranslationLanguages.swift`);
+pass the resolved values to both `status(from:to:)` and the configuration; log the resolved
+identifiers once, with `os.Logger`, never any text. At every live session start, the controller calls
+`LanguageAvailability().status(from:to:)`: `.installed` runs translations; anything else shows no
+translation and no indicator for the rest of that session, plus the banner below.
+
+## Setup: key validation (target is not a Soniox concern)
+
+`GET https://api.soniox.com/v1/models` with `Authorization: Bearer <key>`, exactly as before. The
+model must support one-way translation into `me` (and list `guest` when `guest` is a specific,
+non-auto language) - `target` is never checked against Soniox at all in option C, since it is
+translated on the device, not by a second stream. `GET /v1/concurrency-limits` then checks for at
+least **1** simultaneous connection (was 2 under option B).
+
+## Setup: on-device download step (owner decision)
+
+Right after a successful "Kiểm tra và tiếp tục", before any metered session:
+1. Setup checks `status(from:to:)`.
+2. `.installed`: continue with no prompt - the expected path on the owner's phone, where Vietnamese
+   and English (US) are already downloaded.
+3. `.supported`: `SetupView` sets its own `@State` configuration (initially `nil`) to vi -> en-US.
+   That runs `SetupView`'s own, separate `.translationTask` closure, which calls
+   `try await session.prepareTranslation()` - the system shows its own permission sheet and
+   progress, which this app cannot restyle. No session is stored anywhere.
+4. `.unsupported`, a decline, or an error: continue to the conversation regardless - the live
+   session-start check then shows the banner below if it is still unavailable.
+
+## Banner when vi -> en is unavailable (owner decision)
+
+Shown with the existing banner style (HANDOFF 2.2's "info" variant), lowest priority among
+`ConversationView`'s banners (mic-denied, auth-error and network-lost all take precedence). Text,
+verbatim: **"Lời của Bạn sẽ không được dịch sang tiếng Anh trên máy này."** Visible only from the
+live session-start availability check through the rest of that session, and never in demo
+(`DemoSessionController.showsTranslationUnavailableBanner` is always `false`).
+
+## `target` mapping and "Đang dịch…" (from `Segment`)
+
+- `lang != me`: unchanged from option B - M's own translation chunk following the segment's original
+  chunk, set when final. "Đang dịch…" reflects a live M-direct signal exactly as before.
+- `lang == me`: `target` is `nil` until the on-device queue's `reportTranslationSuccess` lands it,
+  `nil` forever once `reportTranslationFailure`/an abandon lands (`targetAbandoned = true`).
+  "Đang dịch…" (`translationInProgress`) is true only between `reportTranslationStarted` and
+  whichever of success/failure/abandon follows - never while merely queued (fatalError rule 7).
+
+## Session lifecycle (single socket)
+
+Unchanged from option B for everything M itself does: connecting, listening, paused (keepalive every
+10 s), reconnecting (exponential backoff 1 s/2 s/4 s/…/30 s, one retry per outage, the open segment
+at the moment of a drop closed like a genuine `<end>`, speaker letters reset), ended (`finalize`,
+`<fin>`, empty frame, close on timeout). What changed: there is exactly one socket, so reconnect no
+longer needs a shared-audio-origin requirement between two sockets, and the audio buffer (60 s of
+16 kHz mono Int16, oldest dropped beyond that) is simpler - it just waits for the one socket's config
+to be accepted, not two.
+
+**On-device translation is independent of the Soniox socket entirely.** An M reconnect never
+abandons an in-progress `me`-language translation (`SonioxJoinEngine.abandonMDirectTranslationsInProgress`
+only ever touches non-`me` segments) - Apple's Translation framework does not care whether Soniox is
+connected. Only the whole session ending (`end`/`endImmediately`) abandons whatever the on-device
+queue still has queued or in-flight, via `MeTranslationQueue.abandonAll` - the queue's own
+`AsyncStream` and `.translationTask`'s consuming `Task` are NOT torn down then, since they live for
+the whole conversation across "Phiên mới" (fatalError rule 3); only the pending requests are
+abandoned. Translation-request ids are drawn from a counter that never resets across "Phiên mới"
+(unlike Soniox segment ids, which do reset per `SonioxJoinEngine`) - this is what stops a stale,
+still-in-flight translation from a just-ended session ever landing on a same-numbered segment in the
+next one; see `SonioxLiveSessionTests.test_aStaleReportFromAnEndedSessionNeverLandsOnTheNextSessionsSameNumberedSegment`.
+
+## Why option B was stopped
+
+In reproducible token orderings the window-based join showed a translation fragment as if it were a
+complete translation - concatenating whatever a completed T-chunk had collected so far, with no way
+to tell "this chunk is genuinely done" apart from "T just hasn't sent more yet". The chunk-boundary
+rule itself (original run, then translation run, ending on the next original or a marker) had a hole
+around chunks that straddled two M windows or matched no window at all - each fix uncovered another
+edge case (see git history for the sequence of "critical repro" fixes). Inter-stream timing (do M and
+T report `start_ms` on a truly shared clock) was never confirmed against a live session either. Two
+metered streams also cost 2x. None of this affects `me`-language segments in option C at all, since
+there is no second stream's timing to trust.
+
+## Fallback if option C misbehaves live
+
+Reconsidered only if a live session shows the on-device path is genuinely broken (translations never
+land, or land on the wrong segment): ship `guest -> me` only (stream M alone, exactly as it already
+works) and do `me -> target` later, once the cause is understood. This is a strict subset of what
+already ships - removing on-device translation only ever removes `target` for `me`-language
+segments, never anything else.
+
+## Stream contract (from docs, unchanged from option B)
+
+- `wss://stt-rt.soniox.com/transcribe-websocket`. Config as first text frame, audio as binary frames
+  at real-time pace or faster (408 otherwise), control frames `{"type":"keepalive"}` and
   `{"type":"finalize"}`, empty frame to end.
-- Response: `tokens[]`, `final_audio_proc_ms`, `total_audio_proc_ms`, `finished` on the last
-  message. Errors: message with `error_code`, `error_type`, `error_message`, `request_id`.
-- Token: `text`, `is_final`, `confidence`, `start_ms`/`end_ms` (spoken tokens only), `speaker`
-  (string number), `language`, `source_language` (translated tokens only), `translation_status` in
+- Response: `tokens[]`, `final_audio_proc_ms`, `total_audio_proc_ms`, `finished` on the last message.
+  Errors: message with `error_code`, `error_type`, `error_message`, `request_id`.
+- Token: `text`, `is_final`, `confidence`, `start_ms`/`end_ms` (spoken tokens only), `speaker` (string
+  number), `language`, `source_language` (translated tokens only), `translation_status` in
   `none | original | translation`.
 - Non-final tokens are replaced in full on every response. Final tokens arrive once.
 - Marker tokens `<end>` and `<fin>` are final and are stripped from text. Not documented as reliably
-  tagged `.original`/`.none`, and never logged live to confirm either way - by inspection, the app's
-  own dispatch would have appended one to translation text or silently dropped it depending on
-  whichever status it happened to carry, so the app checks marker text before dispatching on
-  `translation_status` at all, on both streams: a marker closes/resolves regardless of status and
-  never becomes displayed or translated text.
-- Tokens arrive in order: an original chunk, then its translation chunk for the same speaker (SDK
-  source, not docs).
+  tagged `.original`/`.none` - the app checks marker text before dispatching on `translation_status`
+  at all, so a marker always closes the segment regardless of its status and never becomes displayed
+  or translated text.
 - Keepalive at least every 20 s when no audio flows; 5-10 s recommended. The keepalive page says a
   stream is charged for its full duration.
 - 300 minutes per stream, fixed; 413 means reconnect. 401, 402, 403 are auth-class. 503 "cannot
   continue request" means restart with backoff. 429 means the project or organization concurrency
-  cap (default 10 simultaneous connections per the limits page); `GET /v1/concurrency-limits`
-  reports it.
+  cap (default 10 simultaneous connections per the limits page); `GET /v1/concurrency-limits` reports
+  it.
 - Endpoint detection reduces diarization accuracy (documented). Accepted.
 - No overlap signal exists. "Nói chồng" is never rendered from a live session; the app still treats
   overlapping speech itself as an expected case, not an error (HANDOFF section 6, demo-data.json) -
   it just never claims a badge the service never sent.
 
-## No-guess join (owner-decided, this is the contract the app implements)
-
-A window-based join between two independently segmenting streams can attach the wrong speaker's
-translation to a line: in the same time window, stream T is also translating the guest, and a
-`start_ms`-only join can hand the guest's translation to the owner's `me`-language line. That is
-worse than a missing translation, so the rule is: **whenever the app is not certain a T translation
-belongs to exactly one `me` segment, it shows no translation for that segment - never a guessed one,
-and never "Đang dịch…" once the app has given up on that window.**
-
-For an M-segment with `lang == me` and window `[segment.startedAt, segmentEnd]` (`segmentEnd` is the
-`end_ms` of the segment's last original token once the segment is final; while still open, the
-window has no upper bound yet and the join simply keeps waiting):
-
-### T chunks
-
-Found by the project owner's second live session, against the code, not a live log of raw wire
-values (Soniox never documents `translation_status` reliability and this app has never logged it):
-attaching T's translation per raw token - even per final token - let a non-final wrong-language
-original slip through uninspected, and let one response's `final_audio_proc_ms` cut a translation
-off mid-way. Both are fixed by modelling T's own stream explicitly, as a sequence of **chunks**,
-each the wire's own "original chunk, then its translation chunk" (SDK source, not docs):
-
-- A chunk collects every **original** token (`.original`/`.none`, final or non-final alike) it sees,
-  in arrival order, until the first **translation** token arrives - that begins the chunk's
-  translation run, which collects every translation token (final or non-final) until either of the
-  two completion triggers below fires.
-- **Completion** - a chunk ends the instant either happens: another original token arrives (any
-  finality - not just final ones) once its own translation run has begun, which also starts the next
-  chunk; or a marker (`<end>`/`<fin>`) arrives, which starts no chunk. Neither trigger waits for
-  finality.
-- `.unrecognized` tokens take no part in a chunk.
-
-**Certainty test** - both must hold for a completed chunk to attach to a window:
-1. Every one of the chunk's original tokens - final and non-final alike, checked the instant each is
-   seen, not deferred to the chunk's completion - has `start_ms` inside that window and
-   `language == me`. A single original token of any finality in any other language inside the window
-   fails the window's join permanently, the moment it is seen; a chunk whose original tokens fall
-   inside more than one window (T and M do not segment identically) attaches to neither - attaching
-   to either would be guessing which part of it belongs there.
-2. M itself saw no overlap in that window: no other M original token, from a different speaker or a
-   different final language than this segment's locked `speaker`/`lang`, has a `start_ms` inside
-   the window.
-
-A chunk that qualifies has its final translation tokens (non-final text is never committed - no
-karaoke reveal) concatenated, in arrival order, into the window's collected translation; a window can
-receive more than one qualifying chunk this way, since T commonly segments the same M window's audio
-more finely than M does. If either check fails, the join is **abandoned** for that segment: `target`
-stays `nil` permanently, and the app stops showing "Đang dịch…" for it immediately - the segment
-reads as translated-only-in-its-own-language-if-any, same as any other segment whose translation
-never arrived.
-
-**Complete** - the signal that decides when to actually fill a window's `target` (from whatever its
-chunks collected) or abandon it (nothing collected): a later chunk's own completion moving on to a
-different window or to none at all, or T's own `<end>`/`<fin>` - never `final_audio_proc_ms` catching
-up to `segmentEnd`, which reflects T's own audio-processing watermark running ahead of its
-translation generation, not translation completeness. A chunk still in progress when a window opens,
-or a chunk that completed before any window existed to attach it to (its whole token sequence,
-including whichever marker ended it) - an "early chunk" - is buffered and replayed as one unit,
-in order, the moment a new window opens; a chunk that still matches nothing is buffered again.
-Abandonment is final; a later T chunk for an already-resolved window never retroactively fills
-`target`. A window with no resolving signal at all - no chunk of T's ever completes toward it, no
-marker ever arrives - stays pending forever: shown as nothing (see "Đang dịch…" below), not guessed
-into a false "abandoned" just because nothing has happened yet. `end`/`endImmediately` and a
-reconnect all abandon every still-pending window explicitly, so this indefinite-pending state only
-persists while a session is genuinely still listening.
-
-### Acceptance
-
-In any session (recorded or live) with overlapping speech where the owner speaks `me` and the guest
-speaks a non-`me` language in an overlapping time window, no `me`-language segment may ever display
-a translation that actually belongs to the guest's speech. An empty `target` on such a segment is
-the correct, expected outcome, not a defect. "Đang dịch…" must never be shown for a segment whose
-join has already been abandoned by the rule above.
-
 ## Live measurements
 
-Not yet measured. Two live sessions have run (see the top of this file) but neither one paused
-long enough, with the Soniox Console open before and after, to read this off - the table below was
-never actually filled in by either session.
-
-The next live session that includes a pause should read, from the Soniox Console (whichever usage
-unit it displays - minutes or dollars, both streams, note which):
+Not yet measured (unchanged from option B: two live sessions have run, neither paused long enough
+with the Soniox Console open before and after to read this off). The next live session that includes
+a pause should read, from the Soniox Console (whichever usage unit it displays - minutes or dollars):
 
 - Usage before pause:
 - Pause duration:
 - Usage after pause:
-- Conclusion: whether the Console's usage figure moved by roughly the pause duration (both streams
-  stay open with keepalive during pause per Session lifecycle below, so a mover confirms the
-  keepalive page's billing statement; no movement would contradict it and needs its own follow-up).
+- Conclusion: whether the Console's usage figure moved by roughly the pause duration for this now
+  single stream (it stays open with keepalive during pause per Session lifecycle above, so a mover
+  confirms the keepalive page's billing statement; no movement would contradict it and needs its own
+  follow-up).
 
 ## Segment mapping (from stream M)
 
-`Segment { id; speaker; lang; source; target; isFinal; startedAt; overlap }`
+`Segment { id; speaker; lang; source; target; isFinal; startedAt; overlap; targetAbandoned;
+translationInProgress }`
 
-- `id`: app-assigned, increasing per session.
+- `id`: app-assigned, increasing per session (per `SonioxJoinEngine` instance - resets on "Phiên
+  mới", unlike the translation-request counter above, which does not).
 - Boundary: new segment on the first original token after `<end>`, or when a final original token
   changes `speaker` or `language` from the open segment's locked values.
-- `speaker`: raw Soniox speaker ids are mapped to "A", "B", "C", ... in order of first appearance
-  within the current M connection - not by the raw id's numeric value, since diarization is not
-  guaranteed to hand "1" to whoever spoke first. Missing -> `nil` -> "Chưa xác định". Never derived
-  from language. The map is per-connection: an M reconnect clears it (never resets the letter
-  counter), so a post-reconnect raw id gets a letter never shown before, rather than risk falsely
-  implying it is the same person as a pre-reconnect speaker. M reconnects on every drop, since both
-  sockets always reconnect together (see Session lifecycle below).
+- `speaker`: raw Soniox speaker ids mapped to "A", "B", "C", ... in order of first appearance within
+  the current M connection - never derived from language. Missing -> `nil` -> "Chưa xác định". The
+  map is per-connection: an M reconnect clears it (never resets the letter counter).
 - `lang`: `nil` until the first original token is final, then locked.
 - `source`: final original tokens plus the current non-final tail.
-- `target`, lang != `me`: M's translation chunk following the segment's original chunk, set when
-  final.
-- `target`, lang == `me`: from T, via the no-guess join above. `nil` while the join is still
-  waiting, and `nil` forever once the join is abandoned.
+- `target`, `lang != me`: M's own translation chunk, set when final - unchanged from option B.
+- `target`, `lang == me`: from on-device translation, once final and non-blank - see "Device
+  translation" above. `nil` while queued/in-flight, `nil` forever once abandoned.
 - `isFinal`: on `<end>` or `<fin>`.
 - `startedAt`: `start_ms` of the first original token.
 - `overlap`: always `false` (no live signal exists; see above).
-- "Đang dịch…" (`target` (lang == `me`), via the T-join): a live signal, not a timer, mirroring
-  M-direct below - shown only while the segment is final, `target` is `nil`, the join has not been
-  abandoned, and the chunk T is currently mid-way through translating still looks like it belongs to
-  this window (checked the instant each of its original tokens is seen - see T chunks above); cleared
-  the moment a later response carries no translation token for that chunk at all. This live check is
-  necessarily a running guess about where the in-progress chunk is heading, unlike the stricter,
-  whole-chunk check that decides where `target` itself actually lands - so it can flip off if the
-  chunk turns out to straddle windows or hit a disqualifying token, exactly like M-direct's own
-  flip-flop. Also cleared once T signals **Complete** above or once the join is abandoned by the
-  certainty test - never on `final_audio_proc_ms` timing. A window with no live signal at all shows
-  nothing, per AGENTS.md's activity-indicator rule; one with a live signal shows "Đang dịch…"
-  regardless of whether that chunk ultimately lands. Never shown for a discarded same-language
-  translation.
-- "Đang dịch…" (`target` (lang != `me`), M-direct): reflects a live signal, not a timer. Non-final
-  tokens are replaced in full on every M response, so "the latest response still carries a
-  translation token for this segment" is itself the signal - shown while that holds, cleared
-  (`translationInProgress = false`) the moment a later response has none at all for the segment M is
-  currently tracking, whether or not any final chunk ever landed. This is a display flip only, never
-  a permanent verdict: a still-later response bringing the (possibly final) chunk after all sets the
-  signal true again, or lands `target` directly - a late final translation always lands cleanly, and
-  the segment is never simultaneously `targetAbandoned` and translated. `targetAbandoned` for a
-  non-`me` segment only ever comes from `startNewMSegment`'s "M moved on to a new segment with
-  nothing landed" rule, or from a reconnect - both genuinely permanent, unlike a single quiet
-  response.
-
-## Session lifecycle
-
-- connecting: open both sockets, send both configs, buffer audio until both accepted. listening
-  once both are sent (see Unknowns). 401/402/403 on either -> authError, which wins at any point
-  during the current session, including from a socket the app has already superseded by a
-  reconnect - but not from a socket that belonged to a session that has already ended, and not
-  after "Phiên mới" starts a new session reusing the same underlying object: a stale rejection from
-  the old session must not resurrect it, or leak into the new one.
-- listening: AVAudioEngine tap -> AVAudioConverter -> Int16 16 kHz mono -> same bytes to both
-  sockets. Check `channelCount`/`sampleRate` before `installTapOnBus`.
-- paused: stop audio, keepalive every 10 s on both. Streams stay open so labels survive resume -
-  M's speaker numbering must not restart mid-session. Pause time may be billed (see Live
-  measurements above).
-- reconnecting: entered when either socket drops. Owner-decided (option B requires a shared origin,
-  and a one-sided reconnect never restores one): the app closes BOTH sockets and reopens both
-  together as a fresh pair, buffering captured audio and sending identical bytes from byte zero to
-  both new sockets, exactly as at session start - never just the dropped one. Before the new pair
-  even starts connecting: the M segment open at the moment of the drop is closed exactly like a
-  genuine `<end>` would close it (otherwise it would keep absorbing post-reconnect tokens under its
-  pre-drop label); every T-join window still in flight against the old origin is abandoned; and so is
-  any non-`me` segment whose M-direct translation was already under way but not yet complete - M's
-  old connection is gone too, so nothing is ever coming to finish it either. No "Đang dịch…" lingers
-  for any of these. M's diarization is always a brand-new connection too (it is part of the pair), so
-  its speaker numbering always restarts on any reconnect, not only when M itself was the one that
-  dropped; post-drop raw ids get letters never shown pre-drop (see Segment mapping above) rather than
-  being displayed as the same person, since the app has no way to know a post-drop "1" is the same
-  person as any pre-drop speaker. The mic keeps capturing throughout - only the network side is
-  affected; captured audio keeps being buffered while reconnecting (see below).
-
-  Every socket the app opens is tagged with the connection attempt ("generation") that created it.
-  The moment either socket in the current pair closes, that generation is retired immediately -
-  before anything else runs - so a second close from the SAME pair (its other socket detecting the
-  same drop moments later) is recognised as stale and does not schedule a second, overlapping retry;
-  exactly one retry is ever pending per outage. If a replacement pair itself fails before its config
-  is sent, the app closes it and schedules exactly one more retry the same way - this is what lets
-  retry actually converge across a multi-attempt outage, not just recover from a single clean drop.
-  Backoff is exponential: 1 s, 2 s, 4 s, ... capped at 30 s, reset to 1 s the moment a pair fully
-  connects again (HANDOFF section 6: "retry backoff"). Ending the session (`endImmediately` for a
-  401/402/403, `end` otherwise) at any point during a reconnect stops the retry loop, including
-  mid-backoff; a scheduled retry checks this again right before it actually fires. Reconnect
-  completes before the 300-minute cap.
-
-  Auth rejection is tracked separately from the per-attempt generation above, by a session-level
-  counter that only changes when a genuinely new session starts (`start`) or the current one ends
-  (`prepareToEnd`) - not on every reconnect attempt. This is what lets an auth rejection win across a
-  session's own reconnect attempts while still being ignored once that session has ended, and
-  prevents it leaking into a later session that reuses the same underlying object.
-
-  Captured audio keeps arriving from a mic that never stops during a reconnect; it is buffered and
-  sent from byte zero to whichever pair finally connects, across the WHOLE outage - a failed
-  attempt in the middle does not discard what was captured so far, only a successful flush (or
-  ending the session) ever clears it, so a later, separate outage starts from nothing. The buffer is
-  bounded by an exact duration of the converted 16 kHz mono Int16 stream (32,000 bytes/s) - 60 s
-  (1,920,000 bytes) - independent of whatever sample rate the device's microphone hardware happens
-  to be capturing at, since a chunk-count bound would not have that property (each hardware tap
-  callback's own duration varies with the hardware's rate). Beyond 60 s, the OLDEST buffered audio is
-  dropped to make room for new - that audio is lost for both streams, same as any other gap a
-  reconnect's timeline restart already creates. **Live session TODO:** confirm the actual buffered
-  duration achieved on a real device before relying on the 60 s figure.
-- ended: `finalize` on both, wait for `<fin>`, empty frame, wait for `finished`, close; close on
-  timeout.
-
-## Known UI deviations from HANDOFF
-
-- **Auth-error banner action.** HANDOFF section 2.2 specifies "lỗi xác thực (→ Mở Cài đặt)" - opening
-  the app's own Settings screen. Settings does not exist in this outcome, so the banner's button
-  ("Nhập lại khóa") returns to Setup instead - the only in-app place a key can be re-entered - and
-  Setup's own key field starts empty, since the rejected key is deleted from Keychain the moment the
-  button is tapped. Owner-approved temporary deviation, to be rewired to open Settings once it
-  exists.
-
-## Key validation and language list
-
-`GET https://api.soniox.com/v1/models` with `Authorization: Bearer <key>`. 401 -> key rejected.
-200 -> decode only what this app uses from the `stt-rt-v5` entry: `languages` (array of
-`{code, name}` objects - the guest picker, and the me/target/guest support check, matched by
-`code`), `one_way_translation` (a string; the docs' own wording: "When contains string
-'all_languages', any language from languages can be used"), and `translation_targets` (array of
-`{target_language, source_languages, exclude_source_languages}` objects - the docs' own wording:
-"List of supported one-way translation targets. If list is empty, check for one_way_translation
-field"). A language is a usable one-way translation target when
-`one_way_translation == "all_languages"`, or else when it appears as a `target_language` in
-`translation_targets`. The key/model is usable when the `stt-rt-v5` entry exists, its `languages`
-codes include `me` and `target`, plus `guest` when `guest` is a specific (non-auto) language, and
-both `me` and `target` pass the one-way-translation check above. Then `GET /v1/concurrency-limits`;
-a project limit below 2 is reported before any session starts. No metering is documented for either
-call. Keys stay in Keychain only.
-
-Found by the project owner's first live key check, on a real key that should have passed: this
-section previously described `languages` as an array of strings (it is actually an array of
-`{code, name}` objects, so decoding it as `[String]` silently failed) and checked
-`translation_targets` alone (ignoring the `one_way_translation == "all_languages"` shortcut the
-docs document) - together these reported a working key as unusable. Corrected against the live
-https://soniox.com/docs/api-reference/stt/get_models page's embedded JSON example and field
-descriptions, not the page's prose summary alone.
-
-Owner-approved: a live session uses the fixed `me = vi`, `guest = auto`, `target = en` default until
-Settings exists to change them (`LiveLanguageConfig.default`); not an open question.
 
 ## Limits
 
-- Cost is 2x a single stream ($0.24/h vs $0.12/h), including paused time under the keepalive page's
-  billing statement (to be confirmed - see Live measurements above).
+- Cost is a single stream ($0.12/h), including paused time under the keepalive page's billing
+  statement (to be confirmed - see Live measurements above) - half of option B's.
 - A `me`-language segment loses its translation, rather than showing a wrong one, whenever the
-  no-guess join above cannot certify it - most often under overlapping speech.
-- Two failure domains: the dock's `reconnecting` covers either socket.
+  device reports the language pair unavailable, or the `translate` call itself errors.
+- One failure domain now: the dock's `reconnecting` covers the one socket only; on-device translation
+  has none of its own beyond the per-segment abandon-on-error rule above.
 - The `guest_japanese` demo scenario is now reproducible in shape but its wording is prototype-only.
 
 ## Unknowns (live session required)
 
 | Unknown | Until confirmed |
 |---|---|
-| One-way on speech already in the target language: the app's first live session showed `me`-language speech simply never appearing at all - the app was silently dropping every token whose `translation_status` was `"none"`, treating it the same as an unrecognised value, instead of building segments from it like `.original`. Fixed. Still unconfirmed: the exact wire string was never logged during that session, so `"none"` is inferred from the docs' two-way example and the observed symptom, not read directly off the wire. | Treat `translation_status: "none"` as original (untranslated) speech on both streams, including for `<end>`/`<fin>` markers; log the raw string once a live session can confirm it. |
-| Are original tokens and `<end>` timing identical across two streams on the same audio? | Join by time window and language only; never by text. |
-| Do translation tokens carry `speaker`? Can a translation chunk arrive after the next `<end>`? | Attribute by the preceding original chunk; log shape/ordering only, never token text. |
+| Whether the `.translationTask` closure and its `for await` loop survive the app backgrounding without re-running (which would matter for fatalError rule 4's re-run guard). | Assume it can re-run; `makeTranslationRequests()` already returns a fresh stream every call, so a re-run cannot double-consume. |
+| Whether an in-flight `translate` call returns or throws cleanly when the app backgrounds or the task is cancelled mid-call. | Treated as any other error/termination - abandoned, never retried (rule 6/8). |
+| What `LanguageAvailability().status(from:to:)` actually returns on the owner's device for the resolved `vi`/`en-US` identifiers - `.installed` is assumed since both are reportedly already downloaded, but never logged live. | The one-shot resolved-identifier log (`TranslationLanguages.swift`) is what a live session should read to confirm. |
+| Per-segment translation latency for a typical utterance length - unmeasured, so how quickly "Đang dịch…" resolves in practice is unknown. | No assumption made; the indicator is purely signal-driven (rule 7), never a timer, so latency does not affect correctness, only how long it visibly shows. |
+| What the system's own download-progress sheet (Setup's `.supported` path) actually looks like - only reachable after deleting the vi/en language packs on a real device, never seen. | The app cannot restyle it either way; `SetupView` only records that the check ran and continues once it settles. |
+| One-way on speech already in the target language: `translation_status: "none"` is inferred from the docs' two-way example and an observed symptom, never read directly off the wire. | Treat `translation_status: "none"` as original (untranslated) speech, including for `<end>`/`<fin>` markers; log the raw string once a live session can confirm it (`SonioxStreamSocket`'s one-shot diagnostic, unchanged). |
 | Does the server ack the config before the first result? | listening on send; errors move state. |
 | Does a zero-length URLSession message reach the server as the "empty frame"? | finalize, `<fin>`, empty frame, close on timeout. |
 | Does a Read-only key pass `/v1/models` but fail the socket with 403? | Treat 403 like 401. |
-| Owner's project and organization concurrency limits. | Read them at key entry. |
-| Is keepalive-only time billed? | Assume yes, on both streams; confirm in Live measurements above. |
+| Owner's project and organization concurrency limit. | Read at key entry; only 1 connection is now required. |
+| Is keepalive-only time billed? | Assume yes; confirm in Live measurements above. |
 | Does `speaker` ever go missing with diarization on? | Keep `nil` reachable. |
-| The live `/v1/models` response has not been observed yet against a real key. | If `stt-rt-v5` is ever absent from it, the app reports the key as unusable; it never silently falls back to another model. |
-| What an `one_way_translation` value other than `"all_languages"` (or absent) means, when `translation_targets` might also be empty. | Treat `translation_targets` as the sole authority for a specific target in that case; never guess meaning into another `one_way_translation` value. |
+| The live `/v1/models` response has not been observed yet against a real key since the target-check was dropped. | If `stt-rt-v5` is ever absent from it, the app reports the key as unusable; it never silently falls back to another model. |
+| What an `one_way_translation` value other than `"all_languages"` (or absent) means, when `translation_targets` might also be empty. | Treat `translation_targets` as the sole authority for `me`'s own coverage in that case; never guess meaning into another `one_way_translation` value. |
