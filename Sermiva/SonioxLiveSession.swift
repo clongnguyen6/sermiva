@@ -87,22 +87,42 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     nonisolated(unsafe) private let scheduler: DemoScheduler
     nonisolated(unsafe) private let makePathMonitor: @MainActor () -> NetworkPathMonitoring
 
-    /// Review round 5, finding A: a unique id for this OBJECT (not this
-    /// session attempt - it persists across "Phiên mới", like the object
-    /// itself), logged alongside every connection-lifecycle line so the
-    /// owner's next live session can tell directly from the Console whether
-    /// more than one `SonioxLiveSession` was ever alive at once - one of
-    /// the hypotheses still open in the still-unexplained two-socket
-    /// evidence.
+    /// A unique id for this OBJECT (it persists across "Phiên mới", like the
+    /// object itself), carried by every connection-lifecycle line this
+    /// session and its sockets log - see `ConnectionLifecycleLogging.swift`.
     let sessionId = LifecycleIds.session.next()
 
+    /// What the connection is doing. Every lifecycle event is decided by
+    /// `phase` alone, in `handle` and the handful of methods it calls - the
+    /// one place that decides transitions (docs/soniox-routing.md,
+    /// "Connection lifecycle").
+    private enum ConnectionPhase {
+        /// No session, or the session's connection has fully closed.
+        case inactive
+        /// The first connection of a session is in flight; `start`'s
+        /// completion is still pending.
+        case starting
+        /// `socket` has accepted its config; audio goes to it live.
+        case streaming
+        /// No established connection: `socket` is `nil` while a backoff
+        /// timer is pending, or an attempt still in flight.
+        case reconnecting
+        /// `end()` sent finalize to the established `socket`; what it still
+        /// returns (the `<fin>` answer) is applied until it closes.
+        case ending
+    }
+
+    private var phase: ConnectionPhase = .inactive
     private var config: SonioxSessionConfig?
+    /// The session's one socket, in whatever state `phase` says. Events
+    /// from any other socket object are stale (see `handle`) - each socket
+    /// object is used for exactly one connection attempt.
     private var socket: SonioxSocketConnecting?
     private var joinEngine: SonioxJoinEngine?
     /// Review round 4, finding 4a (owner decision): reconnect the instant
     /// iOS reports the network path is available again, instead of waiting
-    /// out backoff. Created in `start(config:)`, cancelled in
-    /// `prepareToEnd` - a session-lifetime resource, like `keepaliveTimer`.
+    /// out backoff. Created in `start(config:)`, cancelled as soon as the
+    /// session stops - a session-lifetime resource, like `keepaliveTimer`.
     private var pathMonitor: NetworkPathMonitoring?
 
     /// Persists across "Phiên mới" (this object is reused, only
@@ -121,102 +141,56 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// still in flight. See docs/soniox-routing.md.
     private var isTranslationAvailable = false
 
-    private var configSent = false
+    /// Audio captured while no connection is established (the first
+    /// connect, or an outage), sent once one is. Holds exactly the most
+    /// recent 60 s of the converted 16 kHz mono Int16 stream (32,000
+    /// bytes/s) - the oldest audio beyond that is dropped, down to the byte.
     private var bufferedAudio: [Data] = []
     private var bufferedAudioByteCount = 0
-    /// 60 s of the converted 16 kHz mono Int16 stream (32,000 bytes/s) -
-    /// an exact duration, independent of whatever sample rate the device's
-    /// microphone hardware happens to be capturing at (a chunk-count bound
-    /// would not have this property: each tap callback's own duration
-    /// varies with the hardware rate). See docs/soniox-routing.md's
-    /// reconnecting section for what happens to audio beyond this bound,
-    /// and what the buffer means across a multi-attempt outage.
     private let bufferedAudioMaxBytes = 60 * 32_000
-    /// Review round 4, finding 3 (owner decision): audio already sent to
-    /// the CURRENT socket but not yet confirmed finalized by it (per
-    /// `final_audio_proc_ms`) - resent to a NEW socket FIRST on reconnect,
-    /// before the outage buffer (`bufferedAudio` above). In the first mock
-    /// session, speech Soniox had not yet finalized when the network
-    /// dropped was lost for good: the open segment kept only final text
-    /// (`SonioxJoinEngine.closeOpenSegmentForReconnect`), and that audio had
-    /// already been sent to the now-dead socket, never to be finalized.
-    /// Bounded independently of the outage buffer - 15 s of the converted
-    /// stream (480,000 bytes) - since normal finalization latency is far
-    /// shorter than that; the pathological case (Soniox never finalizing)
-    /// drops the oldest audio rather than grow unbounded, same reasoning as
-    /// `bufferedAudioMaxBytes`.
+    /// Review round 4, finding 3 (owner decision): the audio the CURRENT
+    /// connection has received but its server has not yet confirmed
+    /// finalized (`final_audio_proc_ms`) - resent to the next connection
+    /// FIRST, before `bufferedAudio`, if this one drops. Always a contiguous
+    /// tail of what this connection received, starting at stream position
+    /// `unfinalizedStartByte`: finalization and the 15 s bound both only
+    /// ever move that start forward, so it holds exactly
+    /// `[max(finalized, sent - 15 s), sent)` - see `trimFinalizedAudio`.
     private var unfinalizedSentAudio: [Data] = []
     private var unfinalizedSentAudioByteCount = 0
     private let unfinalizedSentAudioMaxBytes = 15 * 32_000
-    /// Review round 5, finding B2 (blocking): `final_audio_proc_ms` is
-    /// CUMULATIVE for the current socket's whole connection, not a delta
-    /// since the last response - this is how many of those cumulative bytes
-    /// have already been trimmed from `unfinalizedSentAudio`, so
-    /// `trimFinalizedAudio` can compute the genuinely NEW amount to trim on
-    /// each response instead of re-applying the full cumulative figure to
-    /// whatever the buffer happens to hold at that moment (which over-trims
-    /// more and more with every response, eventually trimming audio that
-    /// was never actually finalized). Reset to 0 in `connectFresh`, since a
-    /// brand-new socket's own `final_audio_proc_ms` starts back at 0 too.
-    private var finalizedByteWatermark = 0
-    /// Set once the current socket has genuinely started streaming (config
-    /// sent, first buffered flush done). `false` during the initial
-    /// connect and during a reconnect, so `ingestAudio` buffers until the
-    /// (possibly brand-new) socket has accepted its config.
-    private var hasStartedStreaming = false
-    private var isEnding = false
-    /// `true` from the moment a drop is first detected until a replacement
-    /// socket has reported its config sent. Distinguishes "this is the
-    /// first drop, run the abandon/notify dance" from "this is a retry's
-    /// own socket failing again, just retry" - see `handleDrop`.
-    private var isReconnecting = false
-    /// Every socket this session ever opens is stamped with the
-    /// generation active when it was created. `handle` discards any event
-    /// whose generation does not match the current one. Bumped the moment
-    /// a drop is first processed (before anything else runs) - not only
-    /// when a replacement socket is actually created - so a stale event
-    /// from an already-superseded socket is immediately recognised, rather
-    /// than being treated as an independent second drop that would
-    /// schedule an overlapping retry timer.
-    private var connectionGeneration = 0
-    /// Bumped only when a genuinely new session begins (`start`) or the
-    /// current one is torn down (`prepareToEnd`) - unlike
-    /// `connectionGeneration`, this does NOT change on every reconnect
-    /// attempt within one session. `.authRejected` is checked against this
-    /// instead of `connectionGeneration`, so it still wins across a
-    /// session's own reconnect attempts, but a stale auth event from an
-    /// already-ended session can never resurrect it, and can never leak
-    /// into a later session that reuses this same object (`start` is
-    /// called again for "Phiên mới").
+    /// Review, 54b3202 finding 3: the byte position, within the current
+    /// connection's own audio stream, of the first byte still in
+    /// `unfinalizedSentAudio`. The 15 s bound drops from the front of the
+    /// buffer, so the front is NOT always the confirmed position - round 5
+    /// assumed it was, and trimmed confirmed audio from wherever the front
+    /// happened to be, skipping audio that was never finalized.
+    private var unfinalizedStartByte = 0
+
+    /// Bumped at every `start()`. `.authRejected` is checked against this,
+    /// not socket identity: auth wins from any socket this session opened,
+    /// including one already superseded, until the session has fully
+    /// closed - but never leaks into a later session reusing this object.
     private var sessionEpoch = 0
     /// Review round 4, finding 1: how many connection attempts THIS session
-    /// (since the last `start()`) has made - the initial connect counts as
-    /// #1, every reconnect/retry increments it further. Reset in `start()`,
-    /// unlike `connectionGeneration` (which never resets, even across
-    /// "Phiên mới"). Purely a logging aid alongside
-    /// `SonioxStreamSocket`'s own open/close count - together they let a
-    /// live session's Console log show both "how many attempts this
-    /// session has made" and "how many are open right now".
+    /// (since the last `start()`) has made - purely a logging aid.
     private var sessionConnectionAttempt = 0
     private var reconnectAttempt = 0
     private let reconnectBaseDelay: TimeInterval = 1
     private let reconnectMaxDelay: TimeInterval = 30
-    /// Set only while `start(config:completion:)` has not yet settled, so
-    /// `handle` can tell an initial connection failure/success apart from
-    /// a later reconnect's - the two must not share one completion path.
     /// Per HANDOFF section 6, retry/backoff is a `reconnecting` (mid-
     /// session) behaviour; an initial connect failure is not retried here -
     /// `LiveSessionController` already gives the user their own retry via
     /// tapping Bắt đầu again.
     private var pendingStartCompletion: (@MainActor (Bool) -> Void)?
+    private var pendingEndCompletion: (@MainActor () -> Void)?
     private var keepaliveTimer: Timer?
-    /// Bumped every time `scheduleReconnectAttempt` schedules a backoff
-    /// timer, and again the instant `handlePathAvailable` preempts one -
-    /// the scheduled closure checks this against the value it captured, so
-    /// an old backoff timer that fires anyway after being preempted is
-    /// recognised as stale and does nothing, rather than opening a SECOND
-    /// connection alongside the one `handlePathAvailable` already opened.
+    /// Each scheduled timer captures the token current when it was
+    /// scheduled; bumping the token is how a timer is cancelled (the
+    /// scheduler seam has no cancel). A stale timer that fires anyway does
+    /// nothing.
     private var reconnectScheduleToken = 0
+    private var closeScheduleToken = 0
 
     // `nonisolated` so `LiveSessionController`'s default parameter value
     // (`= SonioxLiveSession()`) can construct one without already running
@@ -244,21 +218,40 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         lifecycleLogger.log("session #\(self.sessionId, privacy: .public) deinit")
     }
 
+    private func log(_ message: String) {
+        lifecycleLogger.log("session #\(self.sessionId, privacy: .public) \(message, privacy: .public)")
+    }
+
+    /// The real socket's own id for the lifecycle log; test fakes have none.
+    private func socketLabel(_ socket: SonioxSocketConnecting?) -> String {
+        (socket as? SonioxStreamSocket).map { "socket #\($0.socketId)" } ?? "socket #?"
+    }
+
+    // MARK: - Session start
+
     func start(config: SonioxSessionConfig, completion: @escaping @MainActor (Bool) -> Void) {
-        lifecycleLogger.log("session #\(self.sessionId, privacy: .public) start() called")
-        self.config = config
-        isEnding = false
-        isReconnecting = false
-        sessionEpoch += 1
-        reconnectAttempt = 0
-        configSent = false
-        bufferedAudio = []
-        bufferedAudioByteCount = 0
-        clearUnfinalizedSentAudio()
-        hasStartedStreaming = false
-        isTranslationAvailable = false
-        sessionConnectionAttempt = 0
+        log("start() called in phase \(phase)")
+        // "Phiên mới" can arrive while the previous session's connection is
+        // still in its close window after Kết thúc. That transcript has just
+        // been cleared, so its `<fin>` answer has nowhere to go - close it
+        // now rather than hold a second metered connection open.
+        let previousEndCompletion = pendingEndCompletion
+        pendingEndCompletion = nil
+        closeSocket()
+        closeScheduleToken += 1
+        reconnectScheduleToken += 1
+        endPauseKeepalive()
         pathMonitor?.cancel()
+        clearBufferedAudio()
+        clearUnfinalizedSentAudio()
+        previousEndCompletion?()
+
+        self.config = config
+        sessionEpoch += 1
+        phase = .starting
+        reconnectAttempt = 0
+        sessionConnectionAttempt = 0
+        isTranslationAvailable = false
         let monitor = makePathMonitor()
         monitor.onPathAvailable = { [weak self] in self?.handlePathAvailable() }
         monitor.start()
@@ -276,107 +269,64 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         translationQueue.onAbandoned = { [weak self] requestId in
             self?.handleTranslationAbandoned(requestId: requestId)
         }
-
-        var settled = false
-        pendingStartCompletion = { [weak self] ok in
-            guard !settled else { return }
-            settled = true
-            self?.pendingStartCompletion = nil
-            completion(ok)
-        }
+        pendingStartCompletion = completion
         connectFresh()
     }
 
+    // MARK: - Audio
+
     func ingestAudio(_ data: Data) {
-        guard hasStartedStreaming else {
-            // Initial connect, or mid-reconnect: buffer until the current
-            // socket has accepted its config.
-            guard configSent else {
-                appendBufferedAudio(data)
-                return
-            }
-            hasStartedStreaming = true
+        switch phase {
+        case .streaming:
             sendAndTrackAudio(data)
-            return
+        case .starting, .reconnecting:
+            appendBufferedAudio(data)
+        case .ending, .inactive:
+            // The mic is already off by then (`LiveSessionController`);
+            // nothing captured after Kết thúc is ever sent.
+            break
         }
-        sendAndTrackAudio(data)
     }
 
-    /// Review round 4, finding 3: every chunk actually sent to the current
-    /// socket is also kept in `unfinalizedSentAudio` until Soniox's own
-    /// `final_audio_proc_ms` (see `trimFinalizedAudio`) confirms it has been
-    /// finalized - this is what a reconnect resends first, per the owner's
-    /// decision, before the outage buffer.
+    /// Every chunk sent to the current connection is also kept in
+    /// `unfinalizedSentAudio` until its server confirms it finalized.
     private func sendAndTrackAudio(_ data: Data) {
         socket?.sendAudio(data)
         unfinalizedSentAudio.append(data)
         unfinalizedSentAudioByteCount += data.count
-        while unfinalizedSentAudioByteCount > unfinalizedSentAudioMaxBytes, !unfinalizedSentAudio.isEmpty {
-            unfinalizedSentAudioByteCount -= unfinalizedSentAudio.removeFirst().count
+        let excess = unfinalizedSentAudioByteCount - unfinalizedSentAudioMaxBytes
+        if excess > 0 {
+            Self.dropFront(excess, of: &unfinalizedSentAudio, count: &unfinalizedSentAudioByteCount)
+            unfinalizedStartByte += excess
         }
     }
 
-    /// Called from `.response` with Soniox's own `final_audio_proc_ms` - a
-    /// CUMULATIVE figure for the current socket's whole connection, per the
-    /// docs, converted to bytes at the fixed 32,000 bytes/s rate this app
-    /// always converts the mic stream to. Review round 5, finding B2
-    /// (blocking): computes only the NEWLY-finalized amount since
-    /// `finalizedByteWatermark`'s last value, and trims exactly that much
-    /// from the front of `unfinalizedSentAudio` - re-applying the raw
-    /// cumulative figure directly against whatever the buffer holds AT THAT
-    /// MOMENT (the previous version) over-trims on every response after the
-    /// first, since bytes already trimmed by an earlier response are no
-    /// longer there to (harmlessly) re-consume - it instead eats into audio
-    /// that was never actually finalized. Splits the one chunk that
-    /// straddles the boundary so nothing already-finalized is ever resent
-    /// (which would duplicate a segment) and nothing still-open is ever
-    /// dropped.
+    /// `final_audio_proc_ms` is CUMULATIVE for the connection (round 5,
+    /// finding B2), so it is a stream POSITION: everything before it is
+    /// finalized. Drops exactly the part of `unfinalizedSentAudio` that lies
+    /// before that position - never more, whatever the 15 s bound already
+    /// dropped - splitting the one chunk that straddles it.
     private func trimFinalizedAudio(finalAudioProcMs: Int) {
-        let cumulativeFinalizedBytes = (finalAudioProcMs * 32_000) / 1000
-        var newlyFinalizedBytes = cumulativeFinalizedBytes - finalizedByteWatermark
-        guard newlyFinalizedBytes > 0 else { return }
-        while newlyFinalizedBytes > 0, let first = unfinalizedSentAudio.first {
-            if first.count <= newlyFinalizedBytes {
-                newlyFinalizedBytes -= first.count
-                unfinalizedSentAudioByteCount -= first.count
-                unfinalizedSentAudio.removeFirst()
-            } else {
-                let remainder = first.dropFirst(newlyFinalizedBytes)
-                unfinalizedSentAudioByteCount -= newlyFinalizedBytes
-                unfinalizedSentAudio[0] = Data(remainder)
-                newlyFinalizedBytes = 0
-            }
-        }
-        // Tracks the server's reported position regardless of whether the
-        // buffer actually held enough bytes to consume (it may not, if the
-        // 15 s bound above already evicted some) - future calls must keep
-        // computing the delta against the true cumulative figure, not
-        // against how much this call happened to find.
-        finalizedByteWatermark = cumulativeFinalizedBytes
+        let sentByte = unfinalizedStartByte + unfinalizedSentAudioByteCount
+        let finalizedByte = min((finalAudioProcMs * 32_000) / 1000, sentByte)
+        let newlyFinalized = finalizedByte - unfinalizedStartByte
+        guard newlyFinalized > 0 else { return }
+        Self.dropFront(newlyFinalized, of: &unfinalizedSentAudio, count: &unfinalizedSentAudioByteCount)
+        unfinalizedStartByte = finalizedByte
     }
 
     private func clearUnfinalizedSentAudio() {
         unfinalizedSentAudio = []
         unfinalizedSentAudioByteCount = 0
-    }
-
-    /// Replays whatever `unfinalizedSentAudio` currently holds to the just-
-    /// (re)connected socket. The bytes are already present in that buffer -
-    /// this reconnect's whole point is that Soniox never confirmed them
-    /// finalized - so this only resends; it must not append them again, or
-    /// the buffer would grow every reconnect.
-    private func resendUnfinalizedAudioIfAny() {
-        guard !unfinalizedSentAudio.isEmpty else { return }
-        for chunk in unfinalizedSentAudio {
-            socket?.sendAudio(chunk)
-        }
+        unfinalizedStartByte = 0
     }
 
     private func appendBufferedAudio(_ data: Data) {
         bufferedAudio.append(data)
         bufferedAudioByteCount += data.count
-        while bufferedAudioByteCount > bufferedAudioMaxBytes, !bufferedAudio.isEmpty {
-            bufferedAudioByteCount -= bufferedAudio.removeFirst().count
+        let excess = bufferedAudioByteCount - bufferedAudioMaxBytes
+        if excess > 0 {
+            Self.dropFront(excess, of: &bufferedAudio, count: &bufferedAudioByteCount)
         }
     }
 
@@ -385,11 +335,31 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         bufferedAudioByteCount = 0
     }
 
+    /// Removes exactly `bytes` from the front of `chunks`, splitting the
+    /// chunk that straddles the cut. Every cut this class makes is a whole
+    /// number of 16-bit samples: the bounds and ms positions are all
+    /// multiples of 32 bytes, applied to a stream of whole samples.
+    private static func dropFront(_ bytes: Int, of chunks: inout [Data], count: inout Int) {
+        var remaining = min(bytes, count)
+        count -= remaining
+        while remaining > 0, let first = chunks.first {
+            if first.count <= remaining {
+                remaining -= first.count
+                chunks.removeFirst()
+            } else {
+                chunks[0] = Data(first.dropFirst(remaining))
+                remaining = 0
+            }
+        }
+    }
+
+    // MARK: - Pause
+
     func beginPauseKeepalive() {
         keepaliveTimer?.invalidate()
         keepaliveTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.socket?.sendKeepalive()
+                self?.sendKeepaliveIfStreaming()
             }
         }
     }
@@ -399,268 +369,256 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         keepaliveTimer = nil
     }
 
+    /// Keepalive only means something on an established connection; while
+    /// reconnecting there is none, and the next one is kept alive from the
+    /// moment it is established, since the timer keeps running.
+    private func sendKeepaliveIfStreaming() {
+        guard phase == .streaming else { return }
+        socket?.sendKeepalive()
+    }
+
+    // MARK: - End
+
+    /// The docs' end sequence: finalize, an empty frame, then close once the
+    /// server is done or a timeout passes. Until the connection closes, what
+    /// it returns - the `<fin>` answer - is applied like any other response
+    /// (review of 54b3202, finding 4: round 5 discarded it, leaving the last
+    /// utterance an unfinished draft). With no established connection
+    /// there is nothing to finalize: whatever is still in flight closes now.
     func end(completion: @escaping @MainActor () -> Void) {
-        prepareToEnd()
-        // Review round 5, finding B1 (blocking): captured HERE, once, not
-        // re-read as `self?.socket` when the scheduled closure below
-        // actually fires. If "Phiên mới" starts a brand-new session within
-        // the 1.5 s wait, `self.socket` will already point at the NEW
-        // session's socket by then - reading it fresh at fire time closed
-        // that new socket instead, per the reviewer's own reproduction. This
-        // closure now always closes the exact socket THIS `end()` call was
-        // for, and only clears `self.socket` if nothing newer has replaced
-        // it since (the `self.socket === socketToClose` check).
-        let socketToClose = socket
-        socketToClose?.sendFinalize()
-        socketToClose?.sendEmptyFrame()
+        if phase == .ending {
+            let earlier = pendingEndCompletion
+            pendingEndCompletion = { earlier?(); completion() }
+            return
+        }
+        guard phase != .inactive else {
+            completion()
+            return
+        }
+        log("end() called in phase \(phase)")
+        stopSessionActivities()
+        pendingEndCompletion = completion
+        guard phase == .streaming, let socketToFinalize = socket else {
+            finishClosing()
+            return
+        }
+        phase = .ending
+        socketToFinalize.sendFinalize()
+        socketToFinalize.sendEmptyFrame()
         // The docs' end sequence waits for `finished`, then closes; this
         // app is not the one that gets to hold a metered stream open
-        // indefinitely waiting for it, so a short grace window stands in
-        // for that wait, and `close()` always runs after it either way.
+        // indefinitely waiting for it, so a short window stands in for that
+        // wait, and `close()` always runs after it either way.
+        closeScheduleToken += 1
+        let token = closeScheduleToken
         scheduler.schedule(after: 1.5) { [weak self] in
-            socketToClose?.close()
-            if let self, self.socket === socketToClose {
-                self.socket = nil
-            }
-            completion()
+            guard let self, self.closeScheduleToken == token, self.phase == .ending else { return }
+            self.finishClosing()
         }
     }
 
     func endImmediately(completion: @escaping @MainActor () -> Void) {
-        prepareToEnd()
-        socket?.close()
-        socket = nil
+        guard phase != .inactive else {
+            completion()
+            return
+        }
+        log("endImmediately() called in phase \(phase)")
+        stopSessionActivities()
+        finishClosing()
         completion()
     }
 
-    private func prepareToEnd() {
-        isEnding = true
-        isReconnecting = false
-        reconnectAttempt = 0
-        connectionGeneration += 1
-        sessionEpoch += 1
-        pendingStartCompletion = nil
+    /// Everything a running session owns except its socket: no reconnect,
+    /// keepalive or path event may act after this, no buffered audio is
+    /// sent anywhere, and on-device translation still queued or in flight
+    /// is abandoned (`MeTranslationQueue.abandonAll` - the queue's own
+    /// stream lives on for the next session, per fatalError rule 3).
+    private func stopSessionActivities() {
+        reconnectScheduleToken += 1
         endPauseKeepalive()
         pathMonitor?.cancel()
         pathMonitor = nil
-        // Ending is the "obvious choice" for what a reconnect's buffered
-        // audio means once the outage it was captured for is simply not
-        // going to be sent anywhere: it stops meaning anything the moment
-        // this session is over. Observably redundant with `start`'s own
-        // reset in the one reachable "reused for Phien moi" scenario
-        // (kept as regression coverage below) - this one exists so the
-        // session's own state is honest and consistent with itself
-        // immediately after `end`/`endImmediately`, not only once
-        // something later happens to call `start` again.
+        pendingStartCompletion = nil
         clearBufferedAudio()
         clearUnfinalizedSentAudio()
-        // Abandons any still-queued or in-flight on-device translation -
-        // NOT the underlying stream itself (see `MeTranslationQueue.abandonAll`):
-        // `.translationTask`'s closure and its stream live for the whole
-        // conversation, across "Phiên mới", so they must keep working for
-        // the next session.
         translationQueue.abandonAll()
-        // Same reasoning for the M-direct (non-`me`) in-progress translations
-        // a reconnect already abandons explicitly (docs/soniox-routing.md),
-        // so the internal state stays honest rather than silently depending
-        // on the server's own `<fin>` arriving before `close()` fires -
-        // `end`/`endImmediately` must not be the one path left where a
-        // still-pending one quietly goes stale instead.
+    }
+
+    /// The session's connection is gone for good. M-direct translations
+    /// still in progress are abandoned here rather than at `end()`, since
+    /// the `<fin>` answer arriving before this may still complete them.
+    private func finishClosing() {
+        closeSocket()
+        phase = .inactive
+        closeScheduleToken += 1
         joinEngine?.abandonMDirectTranslationsInProgress()
         if let engine = joinEngine {
             onSegmentsChanged?(engine.segments)
         }
+        let completion = pendingEndCompletion
+        pendingEndCompletion = nil
+        completion?()
     }
 
-    private func handle(_ event: SonioxSocketEvent, generation: Int, epoch: Int) {
-        // Auth wins across a session's own reconnect attempts - deliberately
-        // NOT behind the generation guard below, which exists to filter
-        // stale reconnect-attempt noise, not a terminal "the key is
-        // rejected" signal that matters regardless of which attempt
-        // reported it. It IS gated on the session epoch, though: once this
-        // session has ended (or `start` began a brand-new one reusing this
-        // same object, for "Phiên mới"), a straggler auth event from the
-        // old session must not resurrect it or leak into the new one.
+    private func closeSocket() {
+        guard let closing = socket else { return }
+        log("closing \(socketLabel(closing)) in phase \(phase)")
+        closing.close()
+        socket = nil
+    }
+
+    // MARK: - Connection events
+
+    private func handle(_ event: SonioxSocketEvent, from eventSocket: SonioxSocketConnecting?, epoch: Int) {
+        // Auth wins - from any socket this session opened, including one
+        // already superseded or closed, as long as the session has not
+        // fully closed yet (the window after Kết thúc included). Never from
+        // a previous session reusing this object ("Phiên mới").
         if case .authRejected = event {
-            guard epoch == sessionEpoch else { return }
+            guard epoch == sessionEpoch, phase != .inactive else { return }
+            log("auth rejected by \(socketLabel(eventSocket)) in phase \(phase)")
             onAuthError?()
             return
         }
-        guard generation == connectionGeneration else { return }
+        // Anything else only ever counts from the session's current socket:
+        // a superseded or already-closed one is stale by identity.
+        guard let eventSocket, eventSocket === socket else { return }
         switch event {
         case .authRejected:
-            break // handled above, unreachable here
+            break // handled above
         case .configSent:
-            configSent = true
-            // Review round 4, finding 3 (owner decision): resend whatever
-            // was sent but never confirmed finalized by the OLD socket
-            // FIRST, before the outage buffer - both are just "audio the
-            // new socket has never seen", but this one is what the open
-            // segment's stale non-final tail (already dropped, per finding
-            // 6) belongs to, so it must be re-recognised before anything
-            // captured strictly later in time.
-            resendUnfinalizedAudioIfAny()
-            flushBufferedAudioIfReady()
-            reconnectAttempt = 0
-            if let completion = pendingStartCompletion {
+            switch phase {
+            case .starting:
+                beginStreaming()
+                let completion = pendingStartCompletion
                 pendingStartCompletion = nil
-                completion(true)
-            } else if isReconnecting {
-                isReconnecting = false
+                completion?(true)
+            case .reconnecting:
+                beginStreaming()
                 onReconnected?()
+            case .streaming, .ending, .inactive:
+                break
             }
         case .response(let response):
-            trimFinalizedAudio(finalAudioProcMs: response.finalAudioProcMs)
+            guard phase == .streaming || phase == .ending else { return }
+            if phase == .streaming {
+                trimFinalizedAudio(finalAudioProcMs: response.finalAudioProcMs)
+            }
             guard let engine = joinEngine else { return }
             engine.applyStreamM(response.tokens)
             onSegmentsChanged?(engine.segments)
         case .closed:
-            guard !isEnding else { return }
-            if let completion = pendingStartCompletion {
-                pendingStartCompletion = nil
-                // Review round 4, finding 1: an INITIAL connect failure
-                // (never yet reached `.configSent`) must close this socket
-                // right here too - without this, `self.socket` kept
-                // pointing at a socket nothing had told to close, and
-                // `LiveSessionController`'s own follow-up `end{}` was the
-                // only thing that eventually closed it (1.5 s later via the
-                // graceful sequence) - fine on its own, but one more
-                // reachable path where a socket could be left open longer
-                // than necessary.
-                socket?.close()
-                socket = nil
-                completion(false)
-                return
+            switch phase {
+            case .starting:
+                // A failed FIRST connection is not retried here (HANDOFF
+                // section 6): the session stops, and the controller shows
+                // "Lỗi mạng, thử lại sau" so the user can retry.
+                log("\(socketLabel(eventSocket)) failed before connecting")
+                let completion = pendingStartCompletion
+                stopSessionActivities()
+                closeSocket()
+                phase = .inactive
+                completion?(false)
+            case .streaming:
+                handleDrop()
+            case .reconnecting:
+                log("\(socketLabel(eventSocket)) failed before connecting")
+                closeSocket()
+                scheduleReconnectAttempt()
+            case .ending:
+                finishClosing()
+            case .inactive:
+                break
             }
-            // Move this socket out of "current" immediately - a second
-            // close event from the SAME socket must be recognised as
-            // stale by the guard above, not treated as an independent
-            // second drop.
-            connectionGeneration += 1
-            handleDrop()
         }
     }
 
-    private func flushBufferedAudioIfReady() {
-        guard configSent, !bufferedAudio.isEmpty else { return }
-        // Routed through the same tracking as any other send, so this
-        // audio also becomes resendable (finding 3) if THIS socket drops
-        // again before Soniox finalizes it.
-        for chunk in bufferedAudio {
+    /// A connection accepted its config: resend what the previous one never
+    /// confirmed finalized, then the outage buffer, then stream live.
+    private func beginStreaming() {
+        log("\(socketLabel(socket)) streaming")
+        phase = .streaming
+        reconnectAttempt = 0
+        // The resent audio is the start of this connection's own stream.
+        unfinalizedStartByte = 0
+        for chunk in unfinalizedSentAudio {
+            socket?.sendAudio(chunk)
+        }
+        let outage = bufferedAudio
+        clearBufferedAudio()
+        for chunk in outage {
             sendAndTrackAudio(chunk)
         }
-        clearBufferedAudio()
     }
 
-    /// The first drop runs the abandon/notify dance once; if the
-    /// replacement socket itself then fails before ever finishing that
-    /// dance, this just retries - `isReconnecting` already being `true` is
-    /// what tells the two cases apart. Captured audio is NOT cleared here:
-    /// it keeps accumulating (bounded by `bufferedAudioMaxBytes`) across
-    /// every attempt of one continuous outage, and is only ever cleared by
-    /// a successful flush (`flushBufferedAudioIfReady`) or by ending the
-    /// session - a failed attempt must not throw away what the mic
-    /// captured while the app was still trying.
+    /// An established connection dropped. The open segment is closed like a
+    /// genuine `<end>` (only if it has final text), and captured audio keeps
+    /// accumulating in `bufferedAudio` across every attempt of the outage.
     private func handleDrop() {
-        if !isReconnecting {
-            isReconnecting = true
-            reconnectAttempt = 0
-            joinEngine?.closeOpenSegmentForReconnect()
-            joinEngine?.abandonMDirectTranslationsInProgress()
-            joinEngine?.handleStreamMReconnected()
-            if let engine = joinEngine {
-                onSegmentsChanged?(engine.segments)
-            }
-            onDisconnected?()
+        log("\(socketLabel(socket)) dropped")
+        closeSocket()
+        phase = .reconnecting
+        reconnectAttempt = 0
+        joinEngine?.closeOpenSegmentForReconnect()
+        joinEngine?.abandonMDirectTranslationsInProgress()
+        joinEngine?.handleStreamMReconnected()
+        if let engine = joinEngine {
+            onSegmentsChanged?(engine.segments)
         }
-
-        socket?.close()
-        socket = nil
-        configSent = false
-        hasStartedStreaming = false
-
         scheduleReconnectAttempt()
+        onDisconnected?()
     }
 
     /// HANDOFF section 6: "retry backoff". Doubles from `reconnectBaseDelay`
-    /// up to `reconnectMaxDelay`, resetting to zero the moment the socket
-    /// fully connects again (`handle`'s `.configSent` branch). Checks
-    /// `isReconnecting`/`isEnding` again when it actually fires, since a
-    /// lot can happen during the wait: the session could have ended, or an
-    /// auth error could have already won.
+    /// up to `reconnectMaxDelay`, resetting once a connection is
+    /// established again.
     private func scheduleReconnectAttempt() {
         let delay = min(reconnectMaxDelay, reconnectBaseDelay * pow(2, Double(reconnectAttempt)))
         reconnectAttempt += 1
         reconnectScheduleToken += 1
         let token = reconnectScheduleToken
         scheduler.schedule(after: delay) { [weak self] in
-            guard let self, self.reconnectScheduleToken == token, self.isReconnecting, !self.isEnding else { return }
+            guard let self, self.reconnectScheduleToken == token, self.phase == .reconnecting, self.socket == nil else { return }
             self.connectFresh()
         }
     }
 
     /// Review round 4, finding 4a (owner decision): reconnect the instant
     /// iOS reports the network path is available again, rather than
-    /// waiting out whatever backoff delay is still pending - preserving
-    /// the single-pending-attempt and max-one-connection guarantees the
-    /// same way a normal retry does. Does NOT reset `reconnectAttempt`: a
-    /// flapping network reporting "available" repeatedly must not reset
-    /// backoff to its shortest delay every time, only genuinely skip the
-    /// CURRENT wait once.
-    ///
-    /// Review round 5, finding C6 (blocking): also requires `socket == nil`
-    /// - `isReconnecting` alone stays `true` for the WHOLE reconnect saga,
-    /// including while a socket already exists and is mid-handshake,
-    /// waiting for its own `.configSent` or failure. Without this, a path
-    /// event arriving during that window aborted the in-flight attempt and
-    /// started a new one instead of letting it run its course - the
-    /// reviewer's own reproduction: one backoff attempt plus two path
-    /// events created four sockets. `socket == nil` is true only during the
-    /// genuine "waiting for backoff, nothing in flight yet" gap - the only
-    /// moment this should ever preempt.
+    /// waiting out whatever backoff delay is still pending. Only preempts a
+    /// genuine wait - never an attempt already in flight (round 5, finding
+    /// C6) - and does NOT reset `reconnectAttempt`, so a flapping network
+    /// cannot reset backoff to its shortest delay every time.
     private func handlePathAvailable() {
-        guard isReconnecting, !isEnding, socket == nil else { return }
-        reconnectScheduleToken += 1 // invalidate whatever backoff timer is still pending
+        guard phase == .reconnecting, socket == nil else { return }
+        log("network path available while waiting to reconnect")
+        reconnectScheduleToken += 1 // invalidate the pending backoff timer
         connectFresh()
     }
 
-    /// Opens a brand-new socket against the current `config` and wires it
-    /// back into `handle`, stamped with a freshly-incremented generation so
-    /// any lingering event from a superseded socket is discarded rather
-    /// than mistaken for this socket's own status. Used both for the
-    /// initial connect and for every reconnect/retry attempt.
+    /// Opens a brand-new socket against the current `config`. Used both for
+    /// the initial connect and for every reconnect attempt; `socket` is
+    /// always `nil` by then.
     private func connectFresh() {
         guard let config else { return }
-        // Review round 4, finding 1: defensive, belt-and-suspenders
-        // invariant - NEVER let a previously-tracked socket go unreferenced
-        // without being told to close first, no matter what path led here.
-        // Every other fix in this method's surrounding code is meant to
-        // make `self.socket` already `nil` by the time this runs; this is
-        // what makes "at most one open connection" hold even if some future
-        // change reintroduces a path that forgets to.
-        socket?.close()
-        connectionGeneration += 1
-        let generation = connectionGeneration
+        closeSocket()
         let epoch = sessionEpoch
-        // A brand-new socket's own `final_audio_proc_ms` starts back at 0,
-        // so the watermark it is compared against must too (finding B2) -
-        // `unfinalizedSentAudio` itself is NOT cleared here (finding 3):
-        // it is what survives a drop to be resent to this new socket.
-        finalizedByteWatermark = 0
         sessionConnectionAttempt += 1
-        lifecycleLogger.log("session #\(self.sessionId, privacy: .public) opening connection attempt #\(self.sessionConnectionAttempt, privacy: .public) of this session")
 
         var hints = [config.meLanguage, config.targetLanguage]
         if let guestHint = config.guestHint { hints.append(guestHint) }
 
         let newSocket = makeSocket()
-        // Labels the one-shot translation_status wire-shape diagnostic
-        // only (see `SonioxStreamSocket`) - a no-op for a test's fake,
-        // which never conforms to the concrete adapter type.
-        (newSocket as? SonioxStreamSocket)?.streamLabel = "M"
+        // Labels for the lifecycle log and the one-shot translation_status
+        // wire-shape diagnostic (see `SonioxStreamSocket`) - a no-op for a
+        // test's fake, which never conforms to the concrete adapter type.
+        (newSocket as? SonioxStreamSocket)?.setLogLabels(streamLabel: "M", sessionId: sessionId)
         socket = newSocket
+        log("opening connection attempt #\(sessionConnectionAttempt) of this session on \(socketLabel(newSocket))")
 
-        newSocket.onEvent = { [weak self] event in self?.handle(event, generation: generation, epoch: epoch) }
+        newSocket.onEvent = { [weak self, weak newSocket] event in
+            self?.handle(event, from: newSocket, epoch: epoch)
+        }
 
         newSocket.connect(apiKey: config.apiKey, languageHints: hints, targetLanguage: config.meLanguage)
     }
@@ -678,8 +636,13 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// in the queue's stream buffer) - `reportTranslationStarted`'s `Bool`
     /// return is the second, authoritative gate the consuming closure must
     /// obey before ever calling `translate`.
+    ///
+    /// A segment finalized after Kết thúc (by the `<fin>` answer, while the
+    /// connection closes) is not enqueued: `end()` already abandoned the
+    /// queue, and a request enqueued after that could otherwise outlive the
+    /// session and land on a same-numbered segment after "Phiên mới".
     private func enqueueMeTranslation(segmentId: Int, source: String) {
-        guard isTranslationAvailable else { return }
+        guard isTranslationAvailable, phase != .ending else { return }
         let requestId = nextTranslationRequestId
         nextTranslationRequestId += 1
         translationRequestSegmentId[requestId] = segmentId

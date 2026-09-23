@@ -25,29 +25,34 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
     private static let endpoint = URL(string: "wss://stt-rt.soniox.com/transcribe-websocket")!
 
     /// Set by `SonioxLiveSession.connectFresh` right after creating this
-    /// socket, purely to label the one-shot wire-shape diagnostic below -
-    /// always "M" in option C's single-socket design. Left at "?" for any
-    /// socket nothing ever labels (e.g. a fake in a test, which never
-    /// reaches this class at all). `nonisolated(unsafe)` so `close()` (a
-    /// nonisolated context - see `task`) can include it in the connection
-    /// lifecycle log below; set once, right after creation, never mutated
-    /// afterward.
-    nonisolated(unsafe) var streamLabel: String = "?"
+    /// socket (`setLogLabels`), purely to label log lines - always "M" in
+    /// option C's single-socket design, and the id of the
+    /// `SonioxLiveSession` that owns this socket. `nonisolated(unsafe)` so
+    /// `close()`, the delegate callbacks and `deinit` (all nonisolated) can
+    /// include them; set once, right after creation, before `connect()`,
+    /// never mutated afterward.
+    nonisolated(unsafe) private(set) var streamLabel: String = "?"
+    nonisolated(unsafe) private(set) var ownerSessionId = 0
 
-    /// A unique id for THIS socket object (not this connection attempt -
-    /// each object is used for exactly one attempt anyway, but the id
-    /// exists to answer a different question than `streamLabel`/generation
-    /// numbers already do: whether the same object logged something twice,
-    /// or two genuinely different objects each logged once). Review round
-    /// 5, finding A: the previous round's evidence (every
-    /// `SonioxTranslationStatusShape` line duplicated, <1 ms apart, right
-    /// after a reconnect) still has no confirmed mechanism - a reviewer
-    /// showed the prior "the orphaned socket kept running" theory cannot
-    /// hold, since an abandoned object with only `[weak self]`-captured
-    /// completion handlers should simply deallocate and go silent, whether
-    /// or not its underlying task ever actually cancels. This id is what
-    /// would let the OWNER's next live session tell, directly from the
-    /// Console, whether the duplicate lines came from one object or two.
+    func setLogLabels(streamLabel: String, sessionId: Int) {
+        self.streamLabel = streamLabel
+        ownerSessionId = sessionId
+    }
+
+    /// Every lifecycle line starts with the owning session's id and this
+    /// socket's own id, so one Console filter can tell whether two lines
+    /// came from one object or two, and from one session or two.
+    nonisolated private var logPrefix: String {
+        "session #\(ownerSessionId) socket #\(socketId) [\(streamLabel)]"
+    }
+
+    /// A unique id for THIS socket object (each object is used for exactly
+    /// one connection attempt). The live evidence from 8846c89 (every
+    /// `SonioxTranslationStatusShape` line printed twice, <1 ms apart, right
+    /// after a reconnect) has no established cause: two socket objects each
+    /// logging once, and one line duplicated after it was logged, look the
+    /// same without an id. With it, the owner's next live session can tell
+    /// the two apart directly in the Console - see docs/soniox-routing.md.
     let socketId = LifecycleIds.socket.next()
 
     /// The REAL count of sockets whose underlying task has not yet reported
@@ -96,14 +101,20 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
         let label = streamLabel
         if !seenTranslationStatusValues.contains(raw) {
             seenTranslationStatusValues.insert(raw)
-            Self.diagnosticLogger.log("socket #\(self.socketId, privacy: .public) stream \(label, privacy: .public) saw a new translation_status value: \(raw, privacy: .public)")
+            Self.diagnosticLogger.log("\(self.logPrefix, privacy: .public) stream \(label, privacy: .public) saw a new translation_status value: \(raw, privacy: .public)")
         }
         if wire.text == "<end>" || wire.text == "<fin>" {
-            Self.diagnosticLogger.log("socket #\(self.socketId, privacy: .public) stream \(label, privacy: .public) marker \(wire.text, privacy: .public) carried translation_status: \(raw, privacy: .public)")
+            Self.diagnosticLogger.log("\(self.logPrefix, privacy: .public) stream \(label, privacy: .public) marker \(wire.text, privacy: .public) carried translation_status: \(raw, privacy: .public)")
         }
     }
 
-    private var urlSession: URLSession!
+    /// Created in `connect()` and invalidated in `close()`. A `URLSession`
+    /// keeps a STRONG reference to its delegate (`self`) until it is
+    /// invalidated - round 5 created one per socket with `delegate: self` and
+    /// never invalidated it, so every socket object, and its session, stayed
+    /// alive for the life of the process (review of 54b3202, finding 5).
+    /// `nonisolated(unsafe)` for the same reason as `task` below.
+    nonisolated(unsafe) private var urlSession: URLSession?
     /// `nonisolated(unsafe)` so `close()` can run from a nonisolated
     /// context - specifically `SonioxLiveSession.deinit`, which needs to
     /// guarantee this socket's underlying task is cancelled even when
@@ -113,23 +124,21 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
     /// methods.
     nonisolated(unsafe) private var task: URLSessionWebSocketTask?
 
-    /// `self` is now the `URLSession`'s own delegate (see
-    /// `URLSessionTaskDelegate` conformance below), so `urlSession` cannot
-    /// be built until after `super.init()` - nothing else in this app ever
-    /// constructs this class with an injected `URLSession` (AGENTS.md
-    /// forbids testing through this adapter at all), so there is no
-    /// injectable parameter to preserve here.
-    override init() {
-        super.init()
-        urlSession = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+    deinit {
+        lifecycleLogger.log("\(self.logPrefix, privacy: .public) object deinit")
     }
 
     func connect(apiKey: String, languageHints: [String], targetLanguage: String) {
         let config = SonioxStreamConfig(apiKey: apiKey, languageHints: languageHints, translation: .init(targetLanguage: targetLanguage))
+        // `self` is this session's delegate (see `URLSessionTaskDelegate`
+        // below), so it cannot be built before `super.init()`; one session
+        // per socket object, which is used for exactly one connection.
+        let urlSession = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        self.urlSession = urlSession
         let task = urlSession.webSocketTask(with: Self.endpoint)
         self.task = task
         let openNow = Self.adjustOpenTaskCount(by: 1)
-        lifecycleLogger.log("socket #\(self.socketId, privacy: .public) [\(self.streamLabel, privacy: .public)] task created (connect attempt) - \(openNow, privacy: .public) real tasks open now")
+        lifecycleLogger.log("\(self.logPrefix, privacy: .public) task created (connect attempt) - \(openNow, privacy: .public) real tasks open now")
         task.resume()
         guard let configData = try? JSONEncoder().encode(config), let configText = String(data: configData, encoding: .utf8) else {
             onEvent?(.closed(nil))
@@ -191,12 +200,19 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
     /// line the `URLSessionTaskDelegate` callback below logs - a gap or
     /// mismatch between the two is exactly what would confirm or rule out
     /// this cancel-reliability theory.
+    /// `finishTasksAndInvalidate()` then lets the just-cancelled task report
+    /// its completion to the delegate (that "ACTUALLY completed" line) and
+    /// only afterwards invalidates the session, which is what releases its
+    /// strong reference to `self` - see `urlSession`. It is documented safe
+    /// from any thread, like `cancel`.
     nonisolated func close() {
         guard task != nil else { return }
         task?.cancel(with: .normalClosure, reason: nil)
         task?.cancel()
         task = nil
-        lifecycleLogger.log("socket #\(self.socketId, privacy: .public) [\(self.streamLabel, privacy: .public)] close() called by the app")
+        urlSession?.finishTasksAndInvalidate()
+        urlSession = nil
+        lifecycleLogger.log("\(self.logPrefix, privacy: .public) close() called by the app")
     }
 
     private func sendControlFrame(type: String) {
@@ -259,6 +275,13 @@ extension SonioxStreamSocket: URLSessionTaskDelegate {
     /// lock-guarded static counter.
     nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
         let openNow = Self.adjustOpenTaskCount(by: -1)
-        lifecycleLogger.log("socket #\(self.socketId, privacy: .public) [\(self.streamLabel, privacy: .public)] task ACTUALLY completed - \(openNow, privacy: .public) real tasks open now")
+        lifecycleLogger.log("\(self.logPrefix, privacy: .public) task ACTUALLY completed - \(openNow, privacy: .public) real tasks open now")
+    }
+
+    /// The session let go of its delegate - after this, nothing but
+    /// `SonioxLiveSession` (which dropped it already) keeps this socket
+    /// object alive, so its "object deinit" line should follow.
+    nonisolated func urlSession(_ session: URLSession, didBecomeInvalidWithError error: Error?) {
+        lifecycleLogger.log("\(self.logPrefix, privacy: .public) URLSession invalidated")
     }
 }

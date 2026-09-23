@@ -1,18 +1,20 @@
 import Foundation
 import os
 
-/// Shared plumbing for the connection-lifecycle diagnostics behind review
-/// round 4/5's still-unexplained "two live sockets" evidence: every
-/// `SonioxStreamSocket`, `SonioxLiveSession`, and `LiveSessionController`
-/// instance gets its own small integer id from `LifecycleIds`, logged on
-/// creation/destruction and on every connection event. Round 4's per-socket
-/// `Set`-based dedup could tell "a new value" from "a repeat" only WITHIN
-/// one socket instance - it had no way to tell two genuinely different live
-/// socket objects apart from one socket being logged twice, and no way to
-/// tell whether more than one `SonioxLiveSession`/`LiveSessionController`
-/// existed at once. These ids close that gap for the next live session.
-/// One shared `Logger` (not one per type) so the owner can read all of it
-/// with a single Console filter. No key, text, or URL in any line.
+/// Shared plumbing for the connection-lifecycle diagnostics behind the
+/// still-unexplained duplicated log lines from 8846c89 (every
+/// `SonioxTranslationStatusShape` line printed twice after a reconnect):
+/// every `SonioxStreamSocket`, `SonioxLiveSession`, and
+/// `LiveSessionController` instance gets its own small integer id from
+/// `LifecycleIds`, logged on creation/destruction and on every connection
+/// event, and every socket line also carries its owning session's id. The
+/// ids only make the hypotheses distinguishable in the Console; they do not
+/// establish any of them.
+/// Two categories share one subsystem: `SonioxConnectionLifecycle` (this
+/// logger) and `SonioxTranslationStatusShape` (`SonioxStreamSocket`'s wire
+/// diagnostic). A category filter shows only one of them - filter on
+/// `subsystem:com.clongnguyen6.sermiva` to see both, interleaved. No key,
+/// text, or URL in any line.
 let lifecycleLogger = Logger(subsystem: "com.clongnguyen6.sermiva", category: "SonioxConnectionLifecycle")
 
 /// A tiny thread-safe monotonic counter. Ids are handed out from a

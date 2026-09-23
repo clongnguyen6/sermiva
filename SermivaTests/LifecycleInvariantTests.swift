@@ -55,6 +55,7 @@ final class LifecycleInvariantTests: XCTestCase {
         }
         let seconds = Date().timeIntervalSince(started)
         print("LifecycleInvariantFuzz: \(count) seeds from base \(base), \(totalEvents) events, \(failingSeeds) failing seeds, \(String(format: "%.1f", seconds)) s")
+        print("LifecycleInvariantFuzz coverage (scenarios reaching each interaction): " + LifecycleCoverage.summary())
         for key in firstFailureByKey.keys.sorted() {
             guard let first = firstFailureByKey[key] else { continue }
             let minimal = LifecycleScenario.minimize(first.events, key: key)
@@ -222,6 +223,8 @@ enum LifecycleScenario {
     static func generateAndRun(seed: UInt64) -> ([LifecycleEvent], LifecycleViolation?) {
         var rng = LifecycleRandom(seed: seed)
         let world = LifecycleWorld()
+        world.recordsCoverage = true
+        defer { LifecycleCoverage.add(world.coverage) }
         var events: [LifecycleEvent] = []
         let length = rng.int(20...160)
         var teardown: [LifecycleEvent] = [.confirmEnd, .fireNextTimer, .finAnswer, .advance(ms: 10_000)]
@@ -499,6 +502,21 @@ enum LifecycleAudio {
     }
 }
 
+/// How many generated scenarios reached each interaction at least once -
+/// printed with the fuzz summary so a green run also shows what it covered.
+@MainActor
+enum LifecycleCoverage {
+    private static var counts: [String: Int] = [:]
+
+    static func add(_ reached: Set<String>) {
+        for name in reached { counts[name, default: 0] += 1 }
+    }
+
+    static func summary() -> String {
+        counts.keys.sorted().map { "\($0)=\(counts[$0] ?? 0)" }.joined(separator: ", ")
+    }
+}
+
 private final class LifecycleDirtyFlag {
     var isDirty = true
 }
@@ -546,6 +564,12 @@ final class LifecycleWorld {
     private var appliedFinal: [ClosedRange<Int>] = []
     private var finAnswerApplied = false
     private var pendingViolation: LifecycleViolation?
+    var recordsCoverage = false
+    private(set) var coverage: Set<String> = []
+
+    private func reached(_ name: String) {
+        if recordsCoverage { coverage.insert(name) }
+    }
 
     init() {
         let scheduler = LifecycleClockScheduler(clock: clock)
@@ -615,6 +639,9 @@ final class LifecycleWorld {
         for socket in sockets { socket.clearChangeFlag() }
         switch event {
         case .tapPrimary:
+            if phase == .ended, sockets.contains(where: \.isOpen) { reached("phienMoiInCloseWindow") }
+            if phase == .active, !isConnected { reached(paused ? "resumeWhileDisconnected" : "pauseWhileDisconnected") }
+            if phase == .active, paused, isConnected { reached("resumeWhileConnected") }
             return tapPrimary()
         case .confirmEnd:
             return confirmEnd()
@@ -644,7 +671,10 @@ final class LifecycleWorld {
             let open = sockets.filter(\.isOpen)
             guard !open.isEmpty else { return false }
             let socket = open[pick % open.count]
-            if socket.userSession == userSession, isSessionLive { enterAuthError() }
+            if socket.userSession == userSession, isSessionLive {
+                reached("authWhile_\(phase.rawValue)\(endPending ? "_endPending" : "")")
+                enterAuthError()
+            }
             socket.onEvent?(.authRejected)
             if !socket.dead, !socket.closedByApp {
                 // The server closes the connection after an auth error.
@@ -653,6 +683,7 @@ final class LifecycleWorld {
             }
             return true
         case .pathAvailable:
+            if phase == .active, !isConnected, handshakingSocket == nil { reached("pathPreemptsBackoff") }
             pathUp = true
             for monitor in monitors where monitor.isLive {
                 monitor.onPathAvailable?()
@@ -676,6 +707,7 @@ final class LifecycleWorld {
         case let .staleSocketEvent(kind, pick):
             let closed = sockets.filter(\.closedByApp)
             guard !closed.isEmpty else { return false }
+            reached("staleSocketEvent")
             deliverStale(kind: kind, to: closed[pick % closed.count])
             return true
         case .stalePathEvent:
@@ -719,6 +751,7 @@ final class LifecycleWorld {
         guard phase == .connecting || phase == .active, !endPending else { return false }
         let established = sockets.first { $0.userSession == userSession && $0.isEstablished }
         if phase == .active, established == nil {
+            reached(paused ? "endWhilePausedAndDisconnected" : "endWhileReconnecting")
             // Ending mid-reconnect (paused or not): the mic stops now, the
             // session ends once the grace wait elapses.
             endPending = true
@@ -763,6 +796,7 @@ final class LifecycleWorld {
         } else if phase == .connecting || phase == .active {
             owedOutage += Array(units)
             if owedOutage.count > Self.outageBufferMs {
+                reached("outageOver60s")
                 owedOutage.removeFirst(owedOutage.count - Self.outageBufferMs)
             }
         }
@@ -776,6 +810,8 @@ final class LifecycleWorld {
         let expectsDelivery = belongs && (phase == .connecting || phase == .active)
         var expected: [Int] = []
         if expectsDelivery {
+            if phase == .active { reached(paused ? "reconnectedWhilePaused" : endPending ? "reconnectedDuringEndGrace" : "reconnected") }
+            if !owedResend.isEmpty { reached("resendNonEmpty") }
             expected = owedResend + owedOutage
             expectedReceived[socket.id] = expected
             owedResend = []
@@ -807,6 +843,9 @@ final class LifecycleWorld {
         if socket.userSession == userSession, phase == .active {
             let end = socket.received.count
             let from = max(socket.serverFinalizedMs, end - Self.resendCapMs)
+            if end - Self.resendCapMs > socket.serverFinalizedMs { reached("resendCappedAt15s") }
+            if socket.serverFinalizedMs > 0, from < end { reached("resendAfterPartialFinalize") }
+            if paused { reached("dropWhilePaused") }
             owedResend = from < end ? Array(socket.received[from..<end]) : []
         }
         socket.onEvent?(.closed(LifecycleNetworkError()))
@@ -843,6 +882,7 @@ final class LifecycleWorld {
         var tokens = finalTokens(socket.received[oldFinal..<count], speaker: 1, english: false)
         tokens.append(SonioxToken(text: "<fin>", isFinal: true, startMs: nil, endMs: nil, speaker: nil, language: nil, translationStatus: .original))
         if recordApplied(socket.received[oldFinal..<count], from: socket) {
+            reached("finAnswerApplied")
             finAnswerApplied = true
         }
         socket.serverFinalizedMs = count
@@ -892,6 +932,7 @@ final class LifecycleWorld {
         let establishedBefore = sockets.first { $0.userSession == userSession && $0.isEstablished }
         clock.advance(to: target)
         if endPending, let deadline = graceDeadline, clock.now >= deadline {
+            reached(establishedBefore == nil ? "graceExpiredDisconnected" : "graceExpiredConnected")
             enterEnded(at: deadline)
             if let establishedBefore, !establishedBefore.finalizeRequested {
                 violate("(f) end", "the end grace wait elapsed with connection #\(establishedBefore.id) established, but it never received finalize")
@@ -1073,10 +1114,14 @@ final class LifecycleWorld {
         case .authError:
             add(1) { _ in .advance(ms: 5000) }
         }
+        // Long captures while no connection is established are what reach
+        // the 60 s outage bound and the 15 s resend bound.
+        let disconnected = phase == .connecting || (phase == .active && !isConnected)
         add(capture.isRunning ? 8 : 0) { rng in
-            let bucket = rng.int(0...9)
-            if bucket < 6 { return .audio(ms: rng.int(20...400)) }
-            if bucket < 9 { return .audio(ms: rng.int(500...2500)) }
+            let bucket = rng.int(0...99)
+            if disconnected, bucket < 20 { return .audio(ms: rng.int(15_000...30_000)) }
+            if bucket < 50 { return .audio(ms: rng.int(20...400)) }
+            if bucket < 80 { return .audio(ms: rng.int(500...2500)) }
             return .audio(ms: rng.int(3000...10_000))
         }
         add(established ? 6 : 0) { rng in

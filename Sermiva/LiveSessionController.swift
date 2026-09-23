@@ -26,7 +26,12 @@ struct LiveLanguageConfig {
 /// nothing simulated here.
 @MainActor
 final class LiveSessionController: ObservableObject, SessionControlling {
-    @Published private(set) var state: SessionState = .idle
+    @Published private(set) var state: SessionState = .idle {
+        didSet {
+            guard state != oldValue else { return }
+            lifecycleLogger.log("controller #\(self.controllerId, privacy: .public) state .\(String(describing: self.state), privacy: .public)")
+        }
+    }
     @Published private(set) var isMicCapturing = false
     @Published private(set) var segments: [Segment] = []
     @Published private(set) var elapsed: TimeInterval = 0
@@ -78,13 +83,16 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     /// the end - `handleAuthError` clears it early so a rejected key arriving
     /// mid-wait is never overwritten by the pending `.ended` (finding B3).
     @Published private(set) var isEndPending = false
-    /// Review round 5, finding B4: whether the session was `.reconnecting`
-    /// (as opposed to genuinely `.listening`) at the moment `pause()` was
-    /// last called, so `resume()` can return to the TRUE underlying state
-    /// instead of always claiming `.listening` - pausing during a reconnect
-    /// and resuming before it completes must not silently claim the
-    /// connection came back when it did not.
-    private var wasReconnectingWhenPaused = false
+    /// The two independent facts a running session's displayed state is
+    /// derived from - see `runningState`. Kept as levels, not inferred from
+    /// the last transition: round 5 dropped `onReconnected`/`onDisconnected`
+    /// whenever they arrived while paused, so the screen could stay
+    /// `.reconnecting` on a live connection, or claim `.listening` with no
+    /// connection at all, after resuming (review of 54b3202, findings 1-2).
+    private var isPaused = false
+    private var isConnected = false
+    /// Bumped whenever a pending end grace wait must no longer act.
+    private var endGraceToken = 0
     /// Bumped at the start of every new attempt (`beginRequestingMic`) and
     /// again when its own check actually begins (`prepareTranslationForSessionStart`),
     /// so a belated availability result from an attempt that is no longer
@@ -248,25 +256,30 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     /// `canEnd`/`primaryButtonTapped` both also gate on `isEndPending` now
     /// (findings 4 and 7), so neither Kết thúc nor Tạm dừng/Tiếp tục is
     /// reachable for the wait's duration.
+    ///
+    /// "Mid-reconnect" means the connection is down, whether or not the
+    /// user had paused: a paused session with no connection still has
+    /// unsent audio from before the pause waiting for one.
     func endSession() {
         guard canEnd else { return }
-        guard state == .reconnecting else {
+        guard isSessionRunning, !isConnected else {
             finishEnding()
             return
         }
         audioCapture.stop()
         isMicCapturing = false
         isEndPending = true
+        endGraceToken += 1
+        let token = endGraceToken
         scheduler.schedule(after: 3) { [weak self] in
             // Review round 5, finding B3 (blocking): if a rejected key
-            // arrived during the wait, `handleAuthError` already cleared
-            // `isEndPending` and ended the session its own way
-            // (`endImmediately`, `.authError`) - this must then be a
-            // complete no-op, or it would overwrite `.authError` with
-            // `.ended`, lose the auth banner, and leave the rejected key in
-            // Keychain with no "Nhập lại khóa" ever shown for it.
-            guard let self, self.isEndPending else { return }
-            self.isEndPending = false
+            // arrived during the wait, `handleAuthError` already ended the
+            // session its own way (`endImmediately`, `.authError`) and
+            // invalidated this wait - it must then be a complete no-op, or
+            // it would overwrite `.authError` with `.ended`, lose the auth
+            // banner, and leave the rejected key in Keychain with no
+            // "Nhập lại khóa" ever shown for it.
+            guard let self, self.endGraceToken == token, self.isEndPending else { return }
             self.finishEnding()
         }
     }
@@ -275,9 +288,24 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         stopElapsedTimer()
         audioCapture.stop()
         isMicCapturing = false
+        isEndPending = false
+        isPaused = false
         state = .ended
         showsTranslationUnavailableBanner = false
         liveSession.end { }
+    }
+
+    /// A session that has connected at least once and has not ended.
+    private var isSessionRunning: Bool {
+        state == .listening || state == .reconnecting || state == .paused
+    }
+
+    /// The one place a running session's displayed state is decided, from
+    /// the user's pause and the connection's own reported status: paused
+    /// wins, otherwise the screen says exactly whether the connection is up.
+    private func runningState() -> SessionState {
+        if isPaused { return .paused }
+        return isConnected ? .listening : .reconnecting
     }
 
     private func beginRequestingMic() {
@@ -294,6 +322,8 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         // window entirely, before mic permission is even requested.
         translationCheckEpoch += 1
         showsTranslationUnavailableBanner = false
+        isPaused = false
+        isConnected = false
         state = .requestingMic
         micPermission.requestPermission { [weak self] granted in
             guard let self else { return }
@@ -341,7 +371,8 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         liveSession.start(config: config) { [weak self] ok in
             guard let self, self.state == .connecting else { return }
             if ok {
-                self.state = .listening
+                self.isConnected = true
+                self.state = self.runningState()
                 // Review round 4, finding 5: only a LATER attempt actually
                 // succeeding clears the network-error banner - never merely
                 // being retried.
@@ -383,12 +414,9 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     /// session simply stays `.paused`, keepalive keeps running exactly as
     /// `pause()` left it, and the elapsed timer stays frozen - so the user
     /// can just try Tiếp tục again.
-    /// Review round 5, finding B4 (blocking): returns to the state pausing
-    /// actually interrupted, not always `.listening` - pausing while
-    /// `.reconnecting` and resuming before the connection actually comes
-    /// back must not silently claim it did (previously this always set
-    /// `.listening`, showing "Đã kết nối" while the socket could still be
-    /// mid-reconnect underneath).
+    /// The state after resuming is whatever is true NOW (`runningState`),
+    /// not whatever pausing interrupted: the connection may have dropped or
+    /// come back while paused.
     private func resume() {
         do {
             try audioCapture.start()
@@ -398,7 +426,8 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         }
         isMicCapturing = true
         liveSession.endPauseKeepalive()
-        state = wasReconnectingWhenPaused ? .reconnecting : .listening
+        isPaused = false
+        state = runningState()
         startElapsedTimer()
     }
 
@@ -407,8 +436,8 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         isMicCapturing = false
         stopElapsedTimer()
         liveSession.beginPauseKeepalive()
-        wasReconnectingWhenPaused = (state == .reconnecting)
-        state = .paused
+        isPaused = true
+        state = runningState()
     }
 
     private func handleCaptureStoppedExternally() {
@@ -416,22 +445,29 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         guard state == .listening else { return }
         stopElapsedTimer()
         liveSession.beginPauseKeepalive()
-        state = .paused
+        isPaused = true
+        state = runningState()
     }
 
+    /// `SonioxLiveSession` reports a rejected key until the session's
+    /// connection has fully closed - including the short window after
+    /// Kết thúc - so this can also move `.ended` to `.authError`: the key is
+    /// rejected either way, and "Nhập lại khóa" is the only way to fix it.
     private func handleAuthError() {
         stopElapsedTimer()
         audioCapture.stop()
         isMicCapturing = false
+        isPaused = false
         state = .authError
         showsTranslationUnavailableBanner = false
         // Review round 5, finding B3 (blocking): auth wins over a pending
-        // end-grace-wait - clearing this is what tells that wait's own
-        // scheduled closure to do nothing once it fires, rather than
+        // end-grace-wait - invalidating it is what makes that wait's own
+        // scheduled closure do nothing once it fires, rather than
         // overwrite `.authError` with `.ended` a few seconds later and lose
         // the auth banner (and the user's only chance to remove the
         // rejected key via "Nhập lại khóa").
         isEndPending = false
+        endGraceToken += 1
         // A rejected key is not going to start working mid-stream, and a
         // graceful finalize sequence has nothing left to accomplish after
         // a 401/402/403 - close the socket immediately rather than wait
@@ -441,13 +477,15 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     }
 
     private func handleDisconnected() {
-        guard state == .listening else { return }
-        state = .reconnecting
+        guard isSessionRunning else { return }
+        isConnected = false
+        state = runningState()
     }
 
     private func handleReconnected() {
-        guard state == .reconnecting else { return }
-        state = .listening
+        guard isSessionRunning else { return }
+        isConnected = true
+        state = runningState()
     }
 
     /// "Phiên mới": clears the transcript and restarts immediately, the
