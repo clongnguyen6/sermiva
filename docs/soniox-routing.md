@@ -280,41 +280,109 @@ just waits for the one socket's config to be accepted, not two.
   The outage buffer's own bound and clearing rules are unchanged, but its flushed audio now also
   feeds into the same finalized-tracking, so it too becomes resendable if the new socket drops again
   before Soniox finalizes it.
-- **Connection accounting (finding 1, live evidence: two open sockets after a reconnect):** the
-  Console log showed every `SonioxTranslationStatusShape` diagnostic line duplicated, less than 1 ms
-  apart, right after a reconnect - proof that two real sockets were briefly both connected and
-  receiving the same audio, with the orphan never closed, so the session was probably billed twice.
-  The screen itself stayed correct throughout (stale events from the orphan were already discarded).
-  The real cause is believed to live partly in the adapter: `SonioxStreamSocket.close()` now also
-  calls the plain `URLSessionTask.cancel()` alongside the WebSocket-specific `cancel(with:reason:)`,
-  since the latter alone is not documented to reliably abort a task still mid-handshake - exactly the
-  moment a reconnect is most likely to call `close()` on the socket it is abandoning. A genuine
-  session-level gap was also found and fixed: an INITIAL connect failure's `.closed` handler never
-  closed its own socket at all. Both `SonioxStreamSocket` and `SonioxLiveSession` now log every socket
-  open/close via `os.Logger` (subsystem `com.clongnguyen6.sermiva`, category
-  `SonioxConnectionLifecycle`) with a running open-connection count and a per-session attempt count -
-  no key, text, or URL - so a live session's Console log can be scanned for the count ever exceeding
-  1. `SonioxStreamSocket` itself stays untested (AGENTS.md); what `SonioxLiveSessionTests` proves
-  instead is the SESSION side: no more than one tracked socket ever exists across several consecutive
-  reconnects, and Kết thúc closes every connection the session has ever opened, not just the current
-  one.
-- **Ending mid-reconnect waits, rather than discarding buffered audio (finding 4b):** pressing Kết
-  thúc while `.reconnecting` now waits a fixed, short (3 s) grace period before actually ending,
-  instead of closing the socket immediately - live evidence: the first mock session lost its last two
-  sentences exactly this way. This is a simple timeout, not a "wait until confirmed flushed"
-  mechanism, which would have no bound if the network never came back at all. The screen during the
-  wait is exactly what `.reconnecting` already renders - the "Mất mạng. Nội dung được giữ." banner,
-  the dock's "Mic giữ, chờ mạng", "Đang kết nối lại…" - no new state, no new copy. A second Kết thúc
-  tap during the wait is a no-op (`LiveSessionController.isEndPending`). Known edge case, named as
-  follow-up rather than fixed this round: "Tạm dừng" stays tappable during the wait and would call
-  `pause()`, which does not know about the pending end.
+  **Round 5, finding B2 (blocking):** `final_audio_proc_ms` is CUMULATIVE for the whole connection, not
+  a delta since the last response. The first version re-applied the raw cumulative figure directly
+  against whatever the buffer held at that moment on every response, which over-trims more and more
+  after the first response - bytes already trimmed earlier are no longer there to (harmlessly)
+  re-consume, so it starts eating into audio that was never actually finalized. Fixed by tracking
+  `finalizedByteWatermark` (reset to 0 per connection, alongside the socket itself) and trimming only
+  the newly-finalized amount since that watermark's last value on each response
+  (`SonioxLiveSessionTests.test_trimFinalizedAudioUsesCumulativeFinalAudioProcMsAcrossMultipleResponses`,
+  red against the pre-fix code with two responses that both report progress before a drop).
+- **Connection accounting - still unexplained (finding 1/A):** the Console log from a MID-SESSION
+  reconnect showed every `SonioxTranslationStatusShape` diagnostic line duplicated, less than 1 ms
+  apart, right after that reconnect. Since that dedup happens per socket OBJECT, this fact alone is
+  solid: two socket objects each independently received a server response and logged it - the screen
+  itself stayed correct throughout (stale events from whichever one was superseded were discarded by
+  `SonioxLiveSession`'s own generation guard). Everything past that fact is still a hypothesis, not a
+  confirmed cause - round 4's own "an abandoned socket keeps its task alive past `close()`" theory was
+  reviewed and does not hold up: `SonioxStreamSocket`'s completion handlers all capture `[weak self]`
+  with no reference cycle found back to the adapter object, so an abandoned instance should simply
+  deallocate and go silent regardless of whether its underlying task ever actually cancels - it has no
+  `self` left to log through. Checked and ruled out by code reading: `connectFresh` always closes
+  `self.socket` before creating a replacement (so at most one socket is ever tracked at a time), a
+  second `.closed` event from one socket is discarded by the generation guard even under concurrent
+  delivery (bumped synchronously within the first event's own turn), and `RootView`'s `@StateObject`
+  usage is the correct SwiftUI pattern (an `@autoclosure`, evaluated at most once per view identity),
+  so a `LiveSessionController` should not be reconstructed by an ordinary `body` re-evaluation. NOT
+  ruled out, for lack of a live device to test against: a genuinely duplicated `SonioxLiveSession`/
+  `LiveSessionController` pair from an iOS scene-lifecycle event (background/foreground, multiple
+  windows), or `URLSession` retaining more of the object graph than `SonioxStreamSocket`'s own code
+  suggests. A genuine, independent, already-fixed bug was found along the way (not the cause of the
+  duplicate-log evidence, but worth fixing regardless): an INITIAL connect failure's `.closed` handler
+  never closed its own socket at all.
+  Round 5 instruments the app so the OWNER's next live session can answer this directly rather than
+  guess further: every `SonioxStreamSocket`, `SonioxLiveSession`, and `LiveSessionController` now gets
+  its own small id (`LifecycleIds`/`ConnectionLifecycleLogging.swift`), logged at creation/destruction
+  and on every connection event - so the Console can show directly whether more than one session/
+  controller object was ever alive, and whether a duplicated diagnostic line came from one socket
+  object or two. `SonioxStreamSocket` also now counts open connections from `URLSessionTaskDelegate`'s
+  `urlSession(_:task:didCompleteWithError:)` - the delegate's own authoritative "this task is actually
+  done" signal - instead of from `close()`, which only proves the app ASKED a task to stop, never that
+  it did; a `close()` line with no matching "task ACTUALLY completed" line for the same socket id would
+  be exactly the evidence needed to confirm the original cancel-reliability theory, if that is in fact
+  what is happening. All of this: `os.Logger`, subsystem `com.clongnguyen6.sermiva`, category
+  `SonioxConnectionLifecycle` - no key, text, or URL in any line. `SonioxStreamSocket` itself stays
+  untested (AGENTS.md); what `SonioxLiveSessionTests` proves is the SESSION side: no more than one
+  tracked socket ever exists across several consecutive reconnects, `handlePathAvailable` never aborts
+  an attempt already in flight (review round 5, finding C6 - the reviewer's own reproduction: one
+  backoff attempt plus two path events created four sockets), and Kết thúc closes every connection the
+  session has ever opened, not just the current one.
+  **Console filter for the next live session:** `subsystem:com.clongnguyen6.sermiva
+  category:SonioxConnectionLifecycle` (Console.app's search field, or
+  `log stream --predicate 'subsystem == "com.clongnguyen6.sermiva" && category ==
+  "SonioxConnectionLifecycle"'`). Lines to read, each carrying its own object's small integer id:
+  `controller #N created`/`deinit`, `session #N created`/`start() called`/`opening connection attempt
+  #M`/`deinit`, `socket #N [M] task created (connect attempt) - K real tasks open now`, `socket #N [M]
+  close() called by the app`, `socket #N [M] task ACTUALLY completed - K real tasks open now` (`[M]` is
+  the M/T-style stream label, always "M" in this app). More than one `controller`/`session` id alive at
+  once, or a `close()` line with no matching "task ACTUALLY completed" line for the same socket id
+  afterward, is exactly the evidence this round could not gather from a Simulator or from code reading
+  alone.
+- **A delayed close must only ever close the socket it was scheduled for (round 5, finding B1,
+  blocking):** `end()`'s 1.5 s graceful-close closure used to read `self.socket` fresh when it finally
+  fired, rather than the socket it was scheduled for. If "Phiên mới" starts a brand-new session within
+  that 1.5 s window, `self.socket` already points at the NEW session's socket by the time the OLD
+  session's closure fires, closing the wrong one and leaving the new session's own audio going nowhere.
+  Fixed by capturing the exact socket once, at `end()`'s own call time, and only clearing `self.socket`
+  if nothing newer has replaced it since
+  (`SonioxLiveSessionTests.test_endsDelayedCloseNeverClosesANewerSessionsSocketStartedDuringTheWait`).
+- **Ending mid-reconnect waits, rather than discarding buffered audio (finding 4b, refined in round 5):**
+  pressing Kết thúc while `.reconnecting` now waits a fixed, short (3 s) grace period before actually
+  ending, instead of closing the socket immediately - live evidence: the first mock session lost its
+  last two sentences exactly this way. This is a simple timeout, not a "wait until confirmed flushed"
+  mechanism, which would have no bound if the network never came back at all.
+  **Lead ruling, round 5, finding 5:** the mic stops the INSTANT Kết thúc is confirmed - only audio
+  already captured before that point is ever flushed during the wait, never anything captured during
+  it. `state` itself stays `.reconnecting` throughout (no new state); the dock's truth then comes from
+  `isMicCapturing` alone - `SessionPresentation.micDockText`'s "Mic giữ, chờ mạng" line now also
+  requires `isMicCapturing`, so it correctly falls back to the existing "Mic tắt" line (already present
+  in the same function, previously unreachable for this combination) once the mic has genuinely
+  stopped - no new copy.
+  **Round 5, finding 4/7 (blocking, now fixed - not merely named):** both "Tạm dừng"/"Tiếp tục" and Kết
+  thúc itself are inert for the whole wait - `LiveSessionController.isEndPending` (`@Published`, exposed
+  on `SessionControlling`) gates `canEnd` (so Kết thúc cannot reopen `EndSessionSheet` mid-wait) and is
+  checked at the top of `primaryButtonTapped` (so pause/resume cannot run at all, not just visually
+  disabled).
+  **Round 5, finding B3 (blocking):** auth wins - a rejected key arriving during the wait clears
+  `isEndPending`, which is what the wait's own scheduled closure checks before acting; without this, an
+  auth rejection during the wait would have been silently overwritten by the pending `.ended` a few
+  seconds later, losing the auth banner and leaving the rejected key in Keychain with no "Nhập lại khóa"
+  ever shown for it.
+  **Round 5, finding B4 (blocking):** pausing during ANY reconnect (not only during the end wait) and
+  resuming before the connection actually comes back no longer claims `.listening` - `resume()` now
+  returns to whichever state pausing actually interrupted (`.reconnecting` or `.listening`), tracked by
+  `wasReconnectingWhenPaused`.
 - **Initial connect failure shows a banner (finding 5):** previously, a failed FIRST connection
   (never a mid-session reconnect - that already has "Mất mạng") returned silently to `.idle`. It now
   shows the approved prototype's own string, in the existing (non-info) banner style: **"Lỗi mạng,
   thử lại sau"** (`design/claude-handoff/Sermiva.dc.html` ~810, Settings' key-status object, key
-  `network`). Cleared only once a LATER "Bắt đầu" attempt actually succeeds - never merely by
-  retrying. Never shown for a genuine auth rejection (that already goes to its own banner), and never
-  in demo (`DemoSessionController.showsNetworkErrorBanner` is always `false`).
+  `network`). Cleared once a LATER "Bắt đầu" attempt actually succeeds - never merely by retrying.
+  Never shown for a genuine auth rejection (that already goes to its own banner), and never in demo
+  (`DemoSessionController.showsNetworkErrorBanner` is always `false`). **Round 5, finding C9:** also
+  cleared on a LATER attempt failing for a non-network reason (a mic capture failure) - the banner
+  shows only while it is actually true, and a mic failure is a different failure entirely, not a
+  network one.
 
 **On-device translation is independent of the Soniox socket entirely.** An M reconnect never
 abandons an in-progress `me`-language translation (`SonioxJoinEngine.abandonMDirectTranslationsInProgress`
@@ -440,7 +508,16 @@ translationInProgress }`
   subword tokens of one word, "Bạn", with Soniox's diarization flipping the reported speaker between
   them. The old rule cut on ANY final-token speaker/language change, with no word-boundary check at
   all; see `SonioxJoinEngineTests`'s `test_finalTokenWithNoLeadingWhitespace...` tests, red against the
-  pre-fix code with these exact tokens.
+  pre-fix code with these exact tokens. The check is `Character.isWhitespace` on the token's first
+  character - true for a leading space or newline (own test:
+  `test_finalTokenStartingWithANewlineIsTreatedAsAWordBoundary`), false for leading punctuation with
+  no space before it, which is therefore a continuation like any other (own test:
+  `test_finalTokenStartingWithPunctuationButNoLeadingWhitespaceNeverCutsANewSegment`) - review round 5,
+  finding 10. **Limit:** this only detects a boundary via whitespace, so a language written without
+  spaces between words (e.g. Chinese, Japanese, Thai) can never be cut mid-utterance by this rule at
+  all - every token in such a language lacks leading whitespace, so a speaker/language change can only
+  ever end up on screen at the next marker (`<end>`/`<fin>`), never before it. Not exercised live: the
+  app's only configured languages (`vi`/`en`) both use spaces.
 - `speaker`: raw Soniox speaker ids mapped to "A", "B", "C", ... in order of first appearance within
   the current M connection - never derived from language. Missing -> `nil` -> "Chưa xác định". The
   map is per-connection: an M reconnect clears it (never resets the letter counter).
