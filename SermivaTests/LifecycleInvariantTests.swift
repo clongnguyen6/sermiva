@@ -1,4 +1,5 @@
 import Combine
+import Translation
 import XCTest
 @testable import Sermiva
 
@@ -9,31 +10,44 @@ import XCTest
 /// fakes only: fake sockets at the `SonioxSocketConnecting` seam (app-owned
 /// `SonioxSocketEvent`/`SonioxToken` values - no Soniox JSON, nothing
 /// through `SonioxStreamSocket`, per AGENTS.md), a virtual clock behind
-/// both `DemoScheduler`s, fake path monitors and fake audio capture.
+/// both `DemoScheduler`s, fake path monitors, fake audio capture (with
+/// interruptions and start failures), a fake availability check the test
+/// resolves when it chooses, and a fake translator driven exactly the way
+/// `ConversationView`'s `.translationTask` closure drives the real one.
 ///
 /// A seeded generator produces event sequences; an oracle that tracks
 /// ground truth on its own - which sockets are really open, which audio
-/// was captured when, what each server has finalized - checks invariants
-/// (a)-(g) below after every event. On a failure it shrinks the sequence
-/// and prints the seed, the minimal sequence and a per-step trace.
+/// was captured when, what each server has finalized, when the next
+/// reconnect attempt is due - checks the invariants after every event. On
+/// a failure it shrinks the sequence and prints the seed, the minimal
+/// sequence and a per-step trace.
 ///
 /// Audio is encoded so every 1 ms unit (32 bytes of 16 kHz mono Int16)
 /// carries its own capture index, which is how the oracle knows exactly
 /// which captured audio each fake socket received. Server text is derived
 /// from the same indices ("u<first>_<last>" for final text, "n..." for a
 /// non-final tail), which is how it knows exactly which finalized text the
-/// transcript must show.
+/// transcript must show; the fake translator answers "EN(<source>)", which
+/// is how it knows a translation landed on the segment it was made for.
 ///
-/// Scale: `SERMIVA_FUZZ_SEEDS` / `SERMIVA_FUZZ_SEED_BASE` override the
-/// committed count and base (pass them to xcodebuild prefixed with
-/// `TEST_RUNNER_`). The committed values keep `./scripts/verify.sh` fast and
+/// Availability checks and translation calls run in main-actor `Task`s, as
+/// in the app, so every event is followed by a few `Task.yield()`s that let
+/// them reach their next suspension point - all on the main actor, in FIFO
+/// order, so a seed replays identically.
+///
+/// Scale: the environment variables `SERMIVA_FUZZ_SEEDS` and
+/// `SERMIVA_FUZZ_SEED_BASE` override the committed count and base. xcodebuild
+/// only forwards them to the test process from ITS OWN environment, with a
+/// `TEST_RUNNER_` prefix - e.g. `TEST_RUNNER_SERMIVA_FUZZ_SEEDS=30000
+/// xcodebuild ... test` - not as `NAME=value` arguments, which it treats as
+/// build settings. The committed values keep `./scripts/verify.sh` fast and
 /// deterministic.
 @MainActor
 final class LifecycleInvariantTests: XCTestCase {
     private static let committedSeedCount = 400
     private static let committedSeedBase: UInt64 = 20_260_924
 
-    func test_randomEventSequencesKeepEveryLifecycleInvariant() {
+    func test_randomEventSequencesKeepEveryLifecycleInvariant() async {
         let environment = ProcessInfo.processInfo.environment
         let count = environment["SERMIVA_FUZZ_SEEDS"].flatMap(Int.init) ?? Self.committedSeedCount
         let base = environment["SERMIVA_FUZZ_SEED_BASE"].flatMap(UInt64.init) ?? Self.committedSeedBase
@@ -44,7 +58,7 @@ final class LifecycleInvariantTests: XCTestCase {
         var totalEvents = 0
         for offset in 0..<count {
             let seed = base &+ UInt64(offset)
-            let (events, violation) = LifecycleScenario.generateAndRun(seed: seed)
+            let (events, violation) = await LifecycleScenario.generateAndRun(seed: seed)
             totalEvents += events.count
             guard let violation else { continue }
             failingSeeds += 1
@@ -54,12 +68,12 @@ final class LifecycleInvariantTests: XCTestCase {
             }
         }
         let seconds = Date().timeIntervalSince(started)
-        print("LifecycleInvariantFuzz: \(count) seeds from base \(base), \(totalEvents) events, \(failingSeeds) failing seeds, \(String(format: "%.1f", seconds)) s")
         print("LifecycleInvariantFuzz coverage (scenarios reaching each interaction): " + LifecycleCoverage.summary())
+        print("LifecycleInvariantFuzz: \(count) seeds from base \(base), \(totalEvents) events, \(failingSeeds) failing seeds, \(String(format: "%.1f", seconds)) s")
         for key in firstFailureByKey.keys.sorted() {
             guard let first = firstFailureByKey[key] else { continue }
-            let minimal = LifecycleScenario.minimize(first.events, key: key)
-            let report = LifecycleScenario.report(minimal)
+            let minimal = await LifecycleScenario.minimize(first.events, key: key)
+            let report = await LifecycleScenario.report(minimal)
             XCTFail("\(key) - \(failingSeedsByKey[key] ?? 0) failing seed(s); first: seed \(first.seed)\n\(report)")
         }
     }
@@ -68,8 +82,8 @@ final class LifecycleInvariantTests: XCTestCase {
 
     /// Finding 1: pause during reconnect; the connection comes back while
     /// paused; resume - must reach `.listening`, never stay `.reconnecting`.
-    func test_named1_pauseDuringReconnectThenConnectionReturnsWhilePausedThenResume() {
-        assertScenarioHolds([
+    func test_named1_pauseDuringReconnectThenConnectionReturnsWhilePausedThenResume() async {
+        await assertScenarioHolds([
             .tapPrimary, .connectSucceeds, .audio(ms: 500),
             .drop, .tapPrimary, .fireNextTimer, .connectSucceeds, .tapPrimary,
         ])
@@ -77,8 +91,8 @@ final class LifecycleInvariantTests: XCTestCase {
 
     /// Finding 2: pause while listening; the connection drops while paused;
     /// resume - must show `.reconnecting`, never claim `.listening`.
-    func test_named2_pauseWhileListeningThenDropWhilePausedThenResume() {
-        assertScenarioHolds([
+    func test_named2_pauseWhileListeningThenDropWhilePausedThenResume() async {
+        await assertScenarioHolds([
             .tapPrimary, .connectSucceeds, .audio(ms: 500),
             .tapPrimary, .drop, .tapPrimary,
         ])
@@ -87,23 +101,63 @@ final class LifecycleInvariantTests: XCTestCase {
     /// Finding 3 (2 s confirmed): a 20 s outage, reconnect, Soniox confirms
     /// 2 s of it, the connection drops again - the resend must be exactly the
     /// last 15 s (seconds 6-20), not 8-20.
-    func test_named3a_secondDropWhileCatchingUpResendsTheLast15SecondsNotFinalized_2sConfirmed() {
-        assertScenarioHolds(twentySecondOutageThenSecondDrop(confirmedPermille: 100))
+    func test_named3a_secondDropWhileCatchingUpResendsTheLast15SecondsNotFinalized_2sConfirmed() async {
+        await assertScenarioHolds(twentySecondOutageThenSecondDrop(confirmedPermille: 100))
     }
 
     /// Finding 3 (15 s confirmed): same, with 15 s confirmed - the resend must
     /// be exactly seconds 16-20, not nothing.
-    func test_named3b_secondDropWhileCatchingUpResendsTheLast15SecondsNotFinalized_15sConfirmed() {
-        assertScenarioHolds(twentySecondOutageThenSecondDrop(confirmedPermille: 750))
+    func test_named3b_secondDropWhileCatchingUpResendsTheLast15SecondsNotFinalized_15sConfirmed() async {
+        await assertScenarioHolds(twentySecondOutageThenSecondDrop(confirmedPermille: 750))
     }
 
     /// Finding 4: what Soniox returns after Kết thúc (the `<fin>` answer to
     /// `finalize`) must be applied, not discarded as stale.
-    func test_named4_finAnswerAfterEndIsApplied() {
-        assertScenarioHolds([
+    func test_named4_finAnswerAfterEndIsApplied() async {
+        await assertScenarioHolds([
             .tapPrimary, .connectSucceeds, .audio(ms: 1000),
             .response(finalPermille: 0, tailPermille: 1000, speaker: 1, english: false, endMarker: false),
             .confirmEnd, .finAnswer, .advance(ms: 2000),
+        ])
+    }
+
+    // MARK: - The review of 2046102
+
+    /// Item 5: backoff may only reset once the server has actually answered
+    /// on a connection. Connections that accept the config and then close
+    /// before any response (e.g. a non-auth error, then a close) must keep
+    /// backing off - 1 s, 2 s, 4 s - not reconnect every second forever.
+    func test_named5_backoffKeepsGrowingWhenConnectionsCloseBeforeAnyResponse() async {
+        await assertScenarioHolds([
+            .tapPrimary, .connectSucceeds,
+            .drop, .fireNextTimer, .connectSucceeds,
+            .drop, .fireNextTimer, .connectSucceeds,
+            .drop, .fireNextTimer, .connectSucceeds,
+        ])
+    }
+
+    /// Item 4: a mic interruption while reconnecting stops the mic, so the
+    /// session is paused - once the connection is back it must not claim
+    /// `.listening` with the mic off.
+    func test_named6_interruptionWhileReconnectingPausesTheSession() async {
+        await assertScenarioHolds([
+            .tapPrimary, .connectSucceeds, .audio(ms: 500), .drop,
+            .interruptionBegan, .fireNextTimer, .connectSucceeds, .interruptionEnded,
+        ])
+    }
+
+    /// Item 4: the same during the first connect.
+    func test_named7_interruptionWhileConnectingPausesTheSession() async {
+        await assertScenarioHolds([
+            .tapPrimary, .audio(ms: 300), .interruptionBegan, .connectSucceeds, .interruptionEnded,
+        ])
+    }
+
+    /// Item 6: while paused on an established connection, a keepalive goes
+    /// out at least every 10 s.
+    func test_named8_keepaliveWhilePausedOnAnEstablishedConnection() async {
+        await assertScenarioHolds([
+            .tapPrimary, .connectSucceeds, .tapPrimary, .advance(ms: 25_000),
         ])
     }
 
@@ -117,13 +171,17 @@ final class LifecycleInvariantTests: XCTestCase {
             ]
     }
 
-    private func assertScenarioHolds(_ events: [LifecycleEvent], file: StaticString = #filePath, line: UInt = #line) {
-        let outcome = LifecycleScenario.run(events)
+    private func assertScenarioHolds(_ events: [LifecycleEvent], file: StaticString = #filePath, line: UInt = #line) async {
+        let outcome = await LifecycleScenario.run(events)
         if let violation = outcome.violation {
-            XCTFail("\(violation.key)\n\(LifecycleScenario.report(events))", file: file, line: line)
+            let report = await LifecycleScenario.report(events)
+            XCTFail("\(violation.key)\n\(report)", file: file, line: line)
             return
         }
-        XCTAssertEqual(outcome.applied.count, events.count, "sanity: every scripted event must have been applicable\n\(LifecycleScenario.report(events))", file: file, line: line)
+        if outcome.applied.count != events.count {
+            let report = await LifecycleScenario.report(events)
+            XCTFail("sanity: every scripted event must have been applicable\n\(report)", file: file, line: line)
+        }
     }
 }
 
@@ -140,7 +198,8 @@ enum LifecycleEvent: CustomStringConvertible {
     case connectSucceeds
     /// The in-flight connection attempt fails before its config is accepted.
     case connectFails
-    /// The server drops an established connection.
+    /// The server closes an established connection - in any phase,
+    /// including after Kết thúc and after it answered finalize.
     case drop
     /// A server response on the established connection: finalizes
     /// `finalPermille`/1000 of the audio it has not finalized yet, shows
@@ -162,6 +221,18 @@ enum LifecycleEvent: CustomStringConvertible {
     case staleSocketEvent(kind: Int, pick: Int)
     /// A late "path satisfied" from an already-cancelled path monitor.
     case stalePathEvent
+    /// An audio interruption (a call, Siri, a lost input route) stops
+    /// capture from outside the app.
+    case interruptionBegan
+    /// The interruption ends. `RealAudioCapture` does not restart capture on
+    /// its own, so nothing reaches the app.
+    case interruptionEnded
+    /// The next attempt to start capture throws.
+    case captureFailsNextStart
+    /// The oldest pending on-device availability check returns.
+    case availabilityResolves(installed: Bool)
+    /// The on-device `translate` call in flight returns (or throws).
+    case translationCompletes(success: Bool)
 
     var description: String {
         switch self {
@@ -170,7 +241,7 @@ enum LifecycleEvent: CustomStringConvertible {
         case .audio(let ms): return "mic delivers \(ms) ms"
         case .connectSucceeds: return "connection attempt succeeds (config accepted)"
         case .connectFails: return "connection attempt fails"
-        case .drop: return "server drops the connection"
+        case .drop: return "server closes the connection"
         case let .response(finalPermille, tailPermille, speaker, english, endMarker):
             return "server response: finalize \(finalPermille)‰ of unconfirmed, tail \(tailPermille)‰, speaker \(speaker), \(english ? "en" : "vi")\(endMarker ? ", <end>" : "")"
         case .finAnswer: return "server answers finalize (all final + <fin>)"
@@ -183,6 +254,11 @@ enum LifecycleEvent: CustomStringConvertible {
             let names = ["closed", "configSent", "response", "authRejected"]
             return "late \(names[kind % names.count]) from already-closed socket pick \(pick)"
         case .stalePathEvent: return "late path event from a cancelled monitor"
+        case .interruptionBegan: return "audio interruption begins (capture stops)"
+        case .interruptionEnded: return "audio interruption ends"
+        case .captureFailsNextStart: return "next capture start will fail"
+        case .availabilityResolves(let installed): return "availability check returns \(installed ? ".installed" : ".supported")"
+        case .translationCompletes(let success): return "translate call \(success ? "returns" : "throws")"
         }
     }
 }
@@ -202,12 +278,13 @@ enum LifecycleScenario {
         let trace: [String]
     }
 
-    static func run(_ events: [LifecycleEvent], traced: Bool = false) -> Outcome {
+    static func run(_ events: [LifecycleEvent], traced: Bool = false) async -> Outcome {
         let world = LifecycleWorld()
+        defer { world.tearDown() }
         var applied: [LifecycleEvent] = []
         var trace: [String] = []
         for event in events {
-            guard world.apply(event) else { continue }
+            guard await world.apply(event) else { continue }
             applied.append(event)
             let violation = world.check()
             if traced {
@@ -220,18 +297,21 @@ enum LifecycleScenario {
         return Outcome(violation: nil, applied: applied, trace: trace)
     }
 
-    static func generateAndRun(seed: UInt64) -> ([LifecycleEvent], LifecycleViolation?) {
+    static func generateAndRun(seed: UInt64) async -> ([LifecycleEvent], LifecycleViolation?) {
         var rng = LifecycleRandom(seed: seed)
         let world = LifecycleWorld()
         world.recordsCoverage = true
-        defer { LifecycleCoverage.add(world.coverage) }
+        defer {
+            LifecycleCoverage.add(world.coverage)
+            world.tearDown()
+        }
         var events: [LifecycleEvent] = []
         let length = rng.int(20...160)
         var teardown: [LifecycleEvent] = [.confirmEnd, .fireNextTimer, .finAnswer, .advance(ms: 10_000)]
         for index in 0..<(length + teardown.count) {
             let event = index < length ? world.propose(&rng) : teardown.removeFirst()
             events.append(event)
-            guard world.apply(event) else { continue }
+            guard await world.apply(event) else { continue }
             if let violation = world.check() {
                 return (events, violation)
             }
@@ -242,12 +322,12 @@ enum LifecycleScenario {
     /// Shrinks `events` while it still fails with the same invariant key:
     /// removes ever-smaller chunks, then single events, until nothing more
     /// can go.
-    static func minimize(_ events: [LifecycleEvent], key: String) -> [LifecycleEvent] {
-        func fails(_ candidate: [LifecycleEvent]) -> Bool {
-            run(candidate).violation?.key == key
+    static func minimize(_ events: [LifecycleEvent], key: String) async -> [LifecycleEvent] {
+        func fails(_ candidate: [LifecycleEvent]) async -> Bool {
+            await run(candidate).violation?.key == key
         }
-        var current = run(events).applied
-        guard fails(current) else { return events }
+        var current = await run(events).applied
+        guard await fails(current) else { return events }
         var chunk = max(1, current.count / 2)
         while chunk >= 1 {
             var start = 0
@@ -255,8 +335,8 @@ enum LifecycleScenario {
             while start < current.count {
                 var candidate = current
                 candidate.removeSubrange(start..<min(current.count, start + chunk))
-                if fails(candidate) {
-                    current = run(candidate).applied
+                if await fails(candidate) {
+                    current = await run(candidate).applied
                     removedAny = true
                 } else {
                     start += chunk
@@ -270,8 +350,8 @@ enum LifecycleScenario {
         return current
     }
 
-    static func report(_ events: [LifecycleEvent]) -> String {
-        let outcome = run(events, traced: true)
+    static func report(_ events: [LifecycleEvent]) async -> String {
+        let outcome = await run(events, traced: true)
         var lines = ["minimal sequence (\(outcome.applied.count) events), state after each:"]
         lines += outcome.trace.map { "  " + $0 }
         if let violation = outcome.violation {
@@ -359,18 +439,20 @@ struct LifecycleClockScheduler: DemoScheduler {
 
 /// One Soniox connection at the `SonioxSocketConnecting` seam, plus the
 /// server-side ground truth for it: whether it is really open, what audio
-/// it received (decoded back to capture indices), and how much of that its
-/// server has finalized.
+/// it received (decoded back to capture indices), how much of that its
+/// server has finalized, and when it got keepalives.
 @MainActor
 final class LifecycleFakeSocket: SonioxSocketConnecting {
     let id: Int
     /// Which user session (Bắt đầu / Phiên mới) was current when the app
     /// created this socket.
     let userSession: Int
+    private let clock: LifecycleVirtualClock
     var onEvent: ((SonioxSocketEvent) -> Void)?
 
     private(set) var connectCalled = false
     var configAccepted = false
+    var establishedAt: Double?
     var dead = false
     nonisolated(unsafe) private(set) var closedByApp = false
     private(set) var received: [Int] = []
@@ -381,10 +463,13 @@ final class LifecycleFakeSocket: SonioxSocketConnecting {
     var serverFinalizedMs = 0
     private(set) var finalizeRequested = false
     var answeredFinalize = false
+    private(set) var keepaliveTimes: [Double] = []
+    var checkedKeepaliveCount = 0
 
-    init(id: Int, userSession: Int) {
+    init(id: Int, userSession: Int, clock: LifecycleVirtualClock) {
         self.id = id
         self.userSession = userSession
+        self.clock = clock
     }
 
     var isOpen: Bool { connectCalled && !dead && !closedByApp }
@@ -398,7 +483,7 @@ final class LifecycleFakeSocket: SonioxSocketConnecting {
 
     func sendAudio(_ data: Data) {
         guard isEstablished else {
-            misuse = misuse ?? "audio sent to socket #\(id) while it was \(closedByApp ? "closed by the app" : dead ? "already dropped" : "not yet established")"
+            misuse = misuse ?? "audio sent to socket #\(id) while it was \(closedByApp ? "closed by the app" : dead ? "already closed by the server" : "not yet established")"
             return
         }
         guard data.count % LifecycleAudio.bytesPerUnit == 0 else {
@@ -409,7 +494,13 @@ final class LifecycleFakeSocket: SonioxSocketConnecting {
         receivedChanged = true
     }
 
-    func sendKeepalive() {}
+    func sendKeepalive() {
+        guard isEstablished else {
+            misuse = misuse ?? "keepalive sent to socket #\(id) while it was not an established connection"
+            return
+        }
+        keepaliveTimes.append(clock.now)
+    }
 
     func sendFinalize() {
         finalizeRequested = true
@@ -444,16 +535,81 @@ final class LifecycleFakePathMonitor: NetworkPathMonitoring {
 }
 
 final class LifecycleFakeCapture: AudioCapturing {
+    enum Failure: Error { case simulated }
+
     var onUnexpectedStop: (@MainActor () -> Void)?
     var onAudioBuffer: (@MainActor (Data) -> Void)?
     private(set) var isRunning = false
+    var failsNextStart = false
 
     func start() throws {
+        if failsNextStart {
+            failsNextStart = false
+            throw Failure.simulated
+        }
         isRunning = true
     }
 
     func stop() {
         isRunning = false
+    }
+
+    /// What `RealAudioCapture` does on an interruption, a media-services
+    /// reset or a lost input route: stop, then report it.
+    @MainActor func interrupt() {
+        isRunning = false
+        onUnexpectedStop?()
+    }
+}
+
+/// Stands in for Apple's availability check. Main-actor isolated, so the
+/// controller's check `Task` never leaves the main actor: `status` suspends
+/// until the test resolves it, in FIFO order.
+@MainActor
+final class LifecycleFakeAvailability: MeToTargetAvailabilityChecking {
+    private var held: [CheckedContinuation<LanguageAvailability.Status, Never>] = []
+
+    var heldCount: Int { held.count }
+
+    func resolveLanguages() async -> (source: Locale.Language, target: Locale.Language) {
+        (Locale.Language(identifier: "vi"), Locale.Language(identifier: "en-US"))
+    }
+
+    func status(from source: Locale.Language, to target: Locale.Language) async -> LanguageAvailability.Status {
+        await withCheckedContinuation { held.append($0) }
+    }
+
+    func resolveOldest(installed: Bool) {
+        guard !held.isEmpty else { return }
+        held.removeFirst().resume(returning: installed ? .installed : .supported)
+    }
+
+    func resolveAll() {
+        while !held.isEmpty { resolveOldest(installed: false) }
+    }
+}
+
+/// Stands in for `TranslationSession.translate` inside the consuming loop.
+/// One call at a time (fatalError rule 5); it stays in flight until the
+/// test completes it. A success answers "EN(<source>)".
+@MainActor
+final class LifecycleFakeTranslator {
+    private(set) var inFlight: (source: String, continuation: CheckedContinuation<String?, Never>)?
+    var onCallStarted: ((String) -> Void)?
+
+    func translate(_ source: String) async -> String? {
+        onCallStarted?(source)
+        return await withCheckedContinuation { inFlight = (source, $0) }
+    }
+
+    func complete(success: Bool) {
+        guard let call = inFlight else { return }
+        inFlight = nil
+        call.continuation.resume(returning: success ? Self.translation(of: call.source) : nil)
+    }
+
+    static func translation(of source: String) -> String {
+        "EN(\(source))"
     }
 }
 
@@ -530,6 +686,13 @@ final class LifecycleWorld {
     static let resendCapMs = 15_000
     static let endGraceSeconds = 3.0
     static let endCloseSeconds = 1.5
+    static let keepaliveIntervalSeconds = 10.0
+    static let backoffBaseSeconds = 1.0
+    static let backoffMaxSeconds = 30.0
+    /// Documented choice (c), awaiting the owner: a `me` segment finalized
+    /// only by the `<fin>` answer after Kết thúc is not translated.
+    static let translatesSegmentsFinalizedAfterEnd = false
+    static let meLanguage = "vi"
 
     enum Phase: String {
         case idle, connecting, active, ended, authError
@@ -539,13 +702,17 @@ final class LifecycleWorld {
     private(set) var sockets: [LifecycleFakeSocket] = []
     private(set) var monitors: [LifecycleFakePathMonitor] = []
     let capture = LifecycleFakeCapture()
+    let availability = LifecycleFakeAvailability()
+    let translator = LifecycleFakeTranslator()
     private(set) var controller: LiveSessionController!
+    private var consumer: Task<Void, Never>?
     private var segmentsSubscription: AnyCancellable?
     private let segmentsDirty = LifecycleDirtyFlag()
 
     // Ground truth, maintained from the events alone.
     private(set) var phase: Phase = .idle
     private var paused = false
+    private var pausedSince: Double = 0
     private var endPending = false
     private var graceDeadline: Double?
     private var closeDeadline: Double?
@@ -563,6 +730,19 @@ final class LifecycleWorld {
     /// in delivery order - what the transcript's final text must show.
     private var appliedFinal: [ClosedRange<Int>] = []
     private var finAnswerApplied = false
+    /// Reconnect model: when the next attempt is due (nil while an attempt
+    /// is in flight or a connection is established), and how many attempts
+    /// have been scheduled since a server last answered on a connection.
+    private var reconnectDue: Double?
+    private var backoffExponent = 0
+    private var isDeliveringPathEvent = false
+    /// On-device translation model: which session each pending check
+    /// belongs to, and what the current session's check reported.
+    private var checkOwners: [Int] = []
+    private var translationAvailable = false
+    private var unavailableBanner = false
+    private var configurationExpected = false
+    private var finalSegmentIdsAtEnd: Set<Int> = []
     private var pendingViolation: LifecycleViolation?
     var recordsCoverage = false
     private(set) var coverage: Set<String> = []
@@ -578,20 +758,62 @@ final class LifecycleWorld {
             scheduler: scheduler,
             makePathMonitor: { [unowned self] in self.makeMonitor() }
         )
-        controller = LiveSessionController(
+        let controller = LiveSessionController(
             apiKey: "placeholder-not-a-key",
             micPermission: FakeMicPermissionProvider(granted: true),
             audioCapture: capture,
             liveSession: session,
-            translationAvailability: FakeMeToTargetAvailabilityChecker(),
+            translationAvailability: availability,
             scheduler: scheduler
         )
+        self.controller = controller
         let flag = segmentsDirty
         segmentsSubscription = controller.$segments.sink { _ in flag.isDirty = true }
+        translator.onCallStarted = { [unowned self] source in self.translationCallStarted(source: source) }
+        // Exactly what `ConversationView`'s `.translationTask` closure does.
+        let requests = controller.makeTranslationRequests()
+        let translator = translator
+        consumer = Task { @MainActor [weak controller] in
+            for await request in requests {
+                guard let controller, controller.reportTranslationStarted(id: request.id) else { continue }
+                if let target = await translator.translate(request.source) {
+                    controller.reportTranslationSuccess(id: request.id, target: target)
+                } else {
+                    controller.reportTranslationFailure(id: request.id)
+                }
+            }
+        }
+    }
+
+    /// Releases everything still suspended, so no continuation leaks.
+    func tearDown() {
+        availability.resolveAll()
+        translator.complete(success: false)
+        consumer?.cancel()
+        consumer = nil
     }
 
     private func makeSocket() -> SonioxSocketConnecting {
-        let socket = LifecycleFakeSocket(id: sockets.count + 1, userSession: userSession)
+        let socket = LifecycleFakeSocket(id: sockets.count + 1, userSession: userSession, clock: clock)
+        switch phase {
+        case .connecting:
+            if sockets.contains(where: { $0.userSession == userSession }) {
+                violate("(a) connections", "a second connection #\(socket.id) was opened during the first connect")
+            }
+        case .active:
+            if let due = reconnectDue {
+                if isDeliveringPathEvent {
+                    reached("pathEventStartedAttempt")
+                } else if abs(clock.now - due) > 1e-6 {
+                    violate("(h) reconnect timing", "reconnect attempt #\(socket.id) opened at t=\(fmt(clock.now))s; the backoff says t=\(fmt(due))s (\(backoffExponent) attempts scheduled since a server last answered)")
+                }
+                reconnectDue = nil
+            } else {
+                violate("(h) reconnect timing", "connection #\(socket.id) opened at t=\(fmt(clock.now))s while \(isConnected ? "already connected" : "an attempt was already in flight")")
+            }
+        case .idle, .ended, .authError:
+            violate("(a) connections", "connection #\(socket.id) was opened while \(phase.rawValue)")
+        }
         sockets.append(socket)
         expectedReceived[socket.id] = []
         return socket
@@ -630,13 +852,31 @@ final class LifecycleWorld {
         }
     }
 
+    private func fmt(_ seconds: Double) -> String {
+        String(format: "%.3f", seconds)
+    }
+
+    /// Lets the main-actor `Task`s the app started (availability checks,
+    /// the translation loop) run to their next suspension point.
+    private func settle() async {
+        for _ in 0..<6 {
+            await Task.yield()
+        }
+    }
+
     // MARK: Applying events
 
     /// Returns `false` when `event` is not possible right now (a disabled
     /// button, no socket in the right shape, ...) - it is then skipped,
     /// which is what makes any subsequence of a sequence replayable.
-    func apply(_ event: LifecycleEvent) -> Bool {
+    func apply(_ event: LifecycleEvent) async -> Bool {
         for socket in sockets { socket.clearChangeFlag() }
+        let applied = applySynchronously(event)
+        if applied { await settle() }
+        return applied
+    }
+
+    private func applySynchronously(_ event: LifecycleEvent) -> Bool {
         switch event {
         case .tapPrimary:
             if phase == .ended, sockets.contains(where: \.isOpen) { reached("phienMoiInCloseWindow") }
@@ -653,10 +893,12 @@ final class LifecycleWorld {
             return true
         case .connectFails:
             guard let socket = handshakingSocket else { return false }
+            if phase != .connecting, phase != .active { reached("connectFailsWhile_\(phase.rawValue)") }
             fail(socket)
             return true
         case .drop:
             guard let socket = establishedSocket else { return false }
+            if phase == .ended { reached(socket.answeredFinalize ? "serverClosesAfterFin" : "serverClosesInCloseWindow") }
             drop(socket)
             return true
         case let .response(finalPermille, tailPermille, speaker, english, endMarker):
@@ -683,10 +925,16 @@ final class LifecycleWorld {
             }
             return true
         case .pathAvailable:
-            if phase == .active, !isConnected, handshakingSocket == nil { reached("pathPreemptsBackoff") }
+            let expectsAttempt = phase == .active && reconnectDue != nil
+            if expectsAttempt { reached("pathAvailableWhileWaiting") }
             pathUp = true
+            isDeliveringPathEvent = true
             for monitor in monitors where monitor.isLive {
                 monitor.onPathAvailable?()
+            }
+            isDeliveringPathEvent = false
+            if expectsAttempt, reconnectDue != nil {
+                violate("(h) reconnect liveness", "the network path became available while waiting to reconnect, but no attempt started")
             }
             return true
         case .pathLost(let dropsConnections):
@@ -712,9 +960,45 @@ final class LifecycleWorld {
             return true
         case .stalePathEvent:
             guard let monitor = monitors.last(where: { $0.started && $0.cancelled }) else { return false }
+            if phase == .active, reconnectDue != nil { reached("stalePathWhileWaiting") }
             monitor.onPathAvailable?()
             return true
+        case .interruptionBegan:
+            guard capture.isRunning else { return false }
+            if phase == .connecting || phase == .active {
+                reached("interruptionWhile_\(phase.rawValue)\(isConnected ? "_connected" : "")")
+                beginPause()
+            }
+            capture.interrupt()
+            return true
+        case .interruptionEnded:
+            return true
+        case .captureFailsNextStart:
+            guard !capture.failsNextStart else { return false }
+            capture.failsNextStart = true
+            return true
+        case .availabilityResolves(let installed):
+            guard availability.heldCount > 0, !checkOwners.isEmpty else { return false }
+            let owner = checkOwners.removeFirst()
+            if owner == userSession, phase == .connecting || phase == .active {
+                reached(installed ? "availabilityInstalled" : "availabilityNotInstalled")
+                translationAvailable = installed
+                unavailableBanner = !installed
+                if installed { configurationExpected = true }
+            }
+            availability.resolveOldest(installed: installed)
+            return true
+        case .translationCompletes(let success):
+            guard translator.inFlight != nil else { return false }
+            reached("translationCompletes")
+            translator.complete(success: success)
+            return true
         }
+    }
+
+    private func beginPause() {
+        paused = true
+        pausedSince = clock.now
     }
 
     private func tapPrimary() -> Bool {
@@ -726,8 +1010,8 @@ final class LifecycleWorld {
             return false
         case .idle, .ended:
             let isNewSession = phase == .ended
+            let captureFails = capture.failsNextStart
             userSession += 1
-            phase = .connecting
             paused = false
             graceDeadline = nil
             closeDeadline = nil
@@ -735,13 +1019,35 @@ final class LifecycleWorld {
             owedOutage = []
             appliedFinal = []
             finAnswerApplied = false
+            reconnectDue = nil
+            backoffExponent = 0
+            translationAvailable = false
+            unavailableBanner = false
             segmentsDirty.isDirty = true
+            if captureFails {
+                // Capture is attempted before the socket; a failure returns
+                // to idle with no connection and no network banner.
+                reached("captureFailsAtStart")
+                phase = .idle
+                networkBanner = false
+            } else {
+                phase = .connecting
+                checkOwners.append(userSession)
+            }
             controller.primaryButtonTapped()
             if isNewSession, !controller.segments.isEmpty {
                 violate("(g) new session", "Phiên mới kept \(controller.segments.count) segment(s) from the previous session")
             }
         case .active:
-            paused.toggle()
+            if paused {
+                if capture.failsNextStart {
+                    reached("captureFailsAtResume")
+                } else {
+                    paused = false
+                }
+            } else {
+                beginPause()
+            }
             controller.primaryButtonTapped()
         }
         return true
@@ -772,6 +1078,8 @@ final class LifecycleWorld {
         endPending = false
         graceDeadline = nil
         closeDeadline = time + Self.endCloseSeconds
+        reconnectDue = nil
+        finalSegmentIdsAtEnd = Set(controller.segments.filter(\.isFinal).map(\.id))
         // Documented: once ended, audio still waiting for a connection is dropped.
         owedResend = []
         owedOutage = []
@@ -783,8 +1091,17 @@ final class LifecycleWorld {
         paused = false
         graceDeadline = nil
         closeDeadline = nil
+        reconnectDue = nil
         owedResend = []
         owedOutage = []
+    }
+
+    /// A connection of the current, running session is gone: the next
+    /// attempt is due after the documented backoff.
+    private func startWaitingToReconnect() {
+        guard phase == .active else { return }
+        reconnectDue = clock.now + min(Self.backoffMaxSeconds, Self.backoffBaseSeconds * pow(2, Double(backoffExponent)))
+        backoffExponent += 1
     }
 
     private func deliverAudio(ms: Int) -> Bool {
@@ -806,6 +1123,7 @@ final class LifecycleWorld {
 
     private func establish(_ socket: LifecycleFakeSocket) {
         socket.configAccepted = true
+        socket.establishedAt = clock.now
         let belongs = socket.userSession == userSession
         let expectsDelivery = belongs && (phase == .connecting || phase == .active)
         var expected: [Int] = []
@@ -829,11 +1147,15 @@ final class LifecycleWorld {
 
     private func fail(_ socket: LifecycleFakeSocket) {
         socket.dead = true
-        if socket.userSession == userSession, phase == .connecting {
-            phase = .idle
-            networkBanner = true
-            owedResend = []
-            owedOutage = []
+        if socket.userSession == userSession {
+            if phase == .connecting {
+                phase = .idle
+                networkBanner = true
+                owedResend = []
+                owedOutage = []
+            } else {
+                startWaitingToReconnect()
+            }
         }
         socket.onEvent?(.closed(LifecycleNetworkError()))
     }
@@ -847,6 +1169,7 @@ final class LifecycleWorld {
             if socket.serverFinalizedMs > 0, from < end { reached("resendAfterPartialFinalize") }
             if paused { reached("dropWhilePaused") }
             owedResend = from < end ? Array(socket.received[from..<end]) : []
+            startWaitingToReconnect()
         }
         socket.onEvent?(.closed(LifecycleNetworkError()))
     }
@@ -854,7 +1177,7 @@ final class LifecycleWorld {
     private func finalTokens(_ units: ArraySlice<Int>, speaker: Int, english: Bool) -> [SonioxToken] {
         LifecycleAudio.runs(units).map {
             SonioxToken(text: " u\($0.lowerBound)_\($0.upperBound)", isFinal: true, startMs: nil, endMs: nil,
-                        speaker: speaker == 0 ? nil : "\(speaker)", language: english ? "en" : "vi", translationStatus: .original)
+                        speaker: speaker == 0 ? nil : "\(speaker)", language: english ? "en" : Self.meLanguage, translationStatus: .original)
         }
     }
 
@@ -870,6 +1193,10 @@ final class LifecycleWorld {
         tokens += LifecycleAudio.runs(socket.received[newFinal..<tailEnd]).map {
             SonioxToken(text: " n\($0.lowerBound)_\($0.upperBound)", isFinal: false, startMs: nil, endMs: nil,
                         speaker: speaker == 0 ? nil : "\(speaker)", language: nil, translationStatus: .original)
+        }
+        if socket.userSession == userSession, phase == .active {
+            // The server answered on this connection: backoff starts over.
+            backoffExponent = 0
         }
         recordApplied(socket.received[oldFinal..<newFinal], from: socket)
         socket.serverFinalizedMs = newFinal
@@ -929,13 +1256,36 @@ final class LifecycleWorld {
     }
 
     private func advanceClock(to target: Double) {
-        let establishedBefore = sockets.first { $0.userSession == userSession && $0.isEstablished }
-        clock.advance(to: target)
-        if endPending, let deadline = graceDeadline, clock.now >= deadline {
+        // The grace wait's end is a ground-truth phase change of its own:
+        // everything the app's timers do after it happens in `.ended`.
+        if endPending, let deadline = graceDeadline, deadline <= target {
+            let establishedBefore = sockets.first { $0.userSession == userSession && $0.isEstablished }
+            clock.advance(to: deadline)
             reached(establishedBefore == nil ? "graceExpiredDisconnected" : "graceExpiredConnected")
-            enterEnded(at: deadline)
-            if let establishedBefore, !establishedBefore.finalizeRequested {
-                violate("(f) end", "the end grace wait elapsed with connection #\(establishedBefore.id) established, but it never received finalize")
+            if endPending {
+                enterEnded(at: deadline)
+                if let establishedBefore, !establishedBefore.dead, !establishedBefore.finalizeRequested {
+                    violate("(f) end", "the end grace wait elapsed with connection #\(establishedBefore.id) established, but it never received finalize")
+                }
+            }
+        }
+        clock.advance(to: target)
+    }
+
+    private func translationCallStarted(source: String) {
+        let segment = controller.segments.first { $0.source == source && $0.isFinal && $0.lang == Self.meLanguage }
+        guard let segment else {
+            violate("(i) translation", "a translate call started for text that is no final \(Self.meLanguage) segment of the current session: \(source)")
+            return
+        }
+        reached("translationCallStarted")
+        if !translationAvailable {
+            violate("(i) translation", "a translate call started for segment \(segment.id) although this session's availability check has not reported .installed")
+        }
+        if phase != .active {
+            let finalizedAfterEnd = phase == .ended && !finalSegmentIdsAtEnd.contains(segment.id)
+            if !(Self.translatesSegmentsFinalizedAfterEnd && finalizedAfterEnd) {
+                violate("(i) translation", "a translate call started for segment \(segment.id) while \(phase.rawValue)")
             }
         }
     }
@@ -954,7 +1304,7 @@ final class LifecycleWorld {
 
     private var expectedMicOn: Bool {
         switch phase {
-        case .connecting: return true
+        case .connecting: return !paused
         case .active: return !paused && !endPending
         case .idle, .ended, .authError: return false
         }
@@ -994,12 +1344,16 @@ final class LifecycleWorld {
                 break
             }
         }
+
+        // (h) the path monitor runs exactly while a session runs, and a
+        // reconnect attempt is never overdue.
         let liveMonitors = monitors.filter(\.isLive)
-        if liveMonitors.count > 1 {
-            return LifecycleViolation(key: "(g) new session", message: "\(liveMonitors.count) path monitors running at once")
+        let sessionRuns = phase == .connecting || phase == .active
+        if liveMonitors.count != (sessionRuns ? 1 : 0) {
+            return LifecycleViolation(key: "(h) path monitor", message: "\(liveMonitors.count) path monitor(s) running while \(phase.rawValue); expected \(sessionRuns ? 1 : 0)")
         }
-        if !liveMonitors.isEmpty, phase != .connecting, phase != .active {
-            return LifecycleViolation(key: "(g) new session", message: "a path monitor is still running while \(phase.rawValue)")
+        if phase == .active, let due = reconnectDue, clock.now >= due {
+            return LifecycleViolation(key: "(h) reconnect liveness", message: "no reconnect attempt by t=\(fmt(due))s (the backoff after \(backoffExponent - 1) earlier attempts); now t=\(fmt(clock.now))s")
         }
 
         // (c) every socket received exactly what the oracle expects.
@@ -1012,6 +1366,10 @@ final class LifecycleWorld {
                 return LifecycleViolation(key: "(c) audio delivery", message: "connection #\(socket.id) received \(LifecycleAudio.describe(socket.received)); expected exactly \(LifecycleAudio.describe(expected))")
             }
         }
+
+        // (k) keepalive: only while paused, at least every 10 s while paused
+        // on an established connection.
+        if let violation = checkKeepalive() { return violation }
 
         // (b) what the screen says is true.
         let state = expectedState
@@ -1027,21 +1385,44 @@ final class LifecycleWorld {
         if controller.isEndPending != endPending {
             return LifecycleViolation(key: "(b) displayed state", message: "isEndPending \(controller.isEndPending), truth \(endPending)")
         }
-        let canEnd = (phase == .connecting || phase == .active) && !endPending
+        let canEnd = sessionRuns && !endPending
         if controller.canEnd != canEnd {
             return LifecycleViolation(key: "(b) displayed state", message: "canEnd \(controller.canEnd), truth \(canEnd)")
         }
         if controller.showsNetworkErrorBanner != networkBanner {
             return LifecycleViolation(key: "(b) displayed state", message: "\"Lỗi mạng, thử lại sau\" shown \(controller.showsNetworkErrorBanner), truth \(networkBanner)")
         }
-        if controller.showsTranslationUnavailableBanner {
-            return LifecycleViolation(key: "(b) displayed state", message: "translation-unavailable banner shown with no availability result")
+        let expectedUnavailableBanner = sessionRuns && unavailableBanner
+        if controller.showsTranslationUnavailableBanner != expectedUnavailableBanner {
+            return LifecycleViolation(key: "(b) displayed state", message: "translation-unavailable banner shown \(controller.showsTranslationUnavailableBanner), truth \(expectedUnavailableBanner)")
+        }
+        if (controller.translationConfiguration != nil) != configurationExpected {
+            return LifecycleViolation(key: "(i) translation", message: "translation configuration exists: \(controller.translationConfiguration != nil), expected \(configurationExpected)")
         }
 
         // (d) and (f): the transcript keeps every finalized unit once.
         if segmentsDirty.isDirty {
             segmentsDirty.isDirty = false
             if let violation = checkTranscript() { return violation }
+        }
+        return checkTranslationDisplay()
+    }
+
+    private func checkKeepalive() -> LifecycleViolation? {
+        for socket in sockets {
+            for time in socket.keepaliveTimes.dropFirst(socket.checkedKeepaliveCount) {
+                let pausedAtThatTime = phase == .active && paused && time >= pausedSince - 1e-9
+                if !pausedAtThatTime {
+                    return LifecycleViolation(key: "(k) keepalive", message: "keepalive sent to connection #\(socket.id) at t=\(fmt(time))s while \(phase.rawValue)\(paused ? "" : ", not paused")")
+                }
+            }
+            socket.checkedKeepaliveCount = socket.keepaliveTimes.count
+        }
+        guard phase == .active, paused, let socket = sockets.first(where: { $0.userSession == userSession && $0.isEstablished }),
+              let establishedAt = socket.establishedAt else { return nil }
+        let since = max(pausedSince, establishedAt, socket.keepaliveTimes.last ?? -.infinity)
+        if clock.now - since > Self.keepaliveIntervalSeconds + 1e-6 {
+            return LifecycleViolation(key: "(k) keepalive", message: "paused on connection #\(socket.id) with no keepalive since t=\(fmt(since))s; now t=\(fmt(clock.now))s")
         }
         return nil
     }
@@ -1073,6 +1454,27 @@ final class LifecycleWorld {
         return nil
     }
 
+    /// (i) a translation only ever lands on the segment it was made for, and
+    /// "Đang dịch…" shows exactly while a real call for that segment runs.
+    private func checkTranslationDisplay() -> LifecycleViolation? {
+        let running = controller.isActivityRunning
+        let inFlightSource = translator.inFlight?.source
+        for display in controller.displaySegments {
+            let segment = display.segment
+            if let target = segment.target, target != LifecycleFakeTranslator.translation(of: segment.source) {
+                return LifecycleViolation(key: "(i) translation", message: "segment \(segment.id) (\(segment.source)) shows a translation made for other text: \(target)")
+            }
+            let callRunsForIt = inFlightSource == segment.source && segment.isFinal
+            if display.showsTranslatingPlaceholder, !callRunsForIt {
+                return LifecycleViolation(key: "(i) translation", message: "segment \(segment.id) shows \"Đang dịch…\" with no translate call running for it")
+            }
+            if callRunsForIt, running, segment.target == nil, !segment.targetAbandoned, !display.showsTranslatingPlaceholder {
+                return LifecycleViolation(key: "(i) translation", message: "a translate call runs for segment \(segment.id) but \"Đang dịch…\" is not shown")
+            }
+        }
+        return nil
+    }
+
     private func describeRuns(_ runs: [ClosedRange<Int>]) -> String {
         if runs.isEmpty { return "nothing" }
         let parts = runs.map { "\($0.lowerBound)-\($0.upperBound)" }
@@ -1081,7 +1483,8 @@ final class LifecycleWorld {
 
     func snapshot() -> String {
         let open = sockets.filter(\.isOpen).map { "#\($0.id)\($0.configAccepted ? "" : "?")" }
-        return "t=\(String(format: "%.1f", clock.now))s state=.\(controller.state) mic=\(capture.isRunning ? "on" : "off") endPending=\(controller.isEndPending) open=[\(open.joined(separator: ","))] truth=\(phase.rawValue)\(paused ? "+paused" : "")\(isConnected ? "+connected" : "")"
+        let due = reconnectDue.map { " reconnectDue=\(String(format: "%.1f", $0))s" } ?? ""
+        return "t=\(String(format: "%.1f", clock.now))s state=.\(controller.state) mic=\(capture.isRunning ? "on" : "off") endPending=\(controller.isEndPending) open=[\(open.joined(separator: ","))] truth=\(phase.rawValue)\(paused ? "+paused" : "")\(isConnected ? "+connected" : "")\(due)"
     }
 
     // MARK: Generation
@@ -1099,21 +1502,22 @@ final class LifecycleWorld {
         case .ended:
             add(3) { _ in .tapPrimary }
         case .connecting:
-            add(pathUp ? 6 : 0) { _ in .connectSucceeds }
-            add(2) { _ in .connectFails }
             add(1) { _ in .confirmEnd }
         case .active:
             add(endPending ? 0 : 3) { _ in .tapPrimary }
             add(endPending ? 0 : 1) { _ in .confirmEnd }
-            add(established ? 3 : 0) { _ in .drop }
-            add(handshaking && pathUp ? 6 : 0) { _ in .connectSucceeds }
-            add(handshaking ? 2 : 0) { _ in .connectFails }
-            add(pathUp ? 1 : 0) { rng in .pathLost(dropsConnections: rng.chance(70)) }
-            add(pathUp ? 1 : 4) { _ in .pathAvailable }
             add(clock.nextDue != nil ? 4 : 0) { _ in .fireNextTimer }
         case .authError:
             add(1) { _ in .advance(ms: 5000) }
         }
+        // Server- and network-side events happen in every phase they can:
+        // during the first connect, the grace wait, the close window after
+        // Kết thúc, and after the server answered finalize.
+        add(established ? 3 : 0) { _ in .drop }
+        add(handshaking && pathUp ? 6 : 0) { _ in .connectSucceeds }
+        add(handshaking ? 2 : 0) { _ in .connectFails }
+        add(pathUp ? 1 : 0) { rng in .pathLost(dropsConnections: rng.chance(70)) }
+        add(pathUp ? 1 : 4) { _ in .pathAvailable }
         // Long captures while no connection is established are what reach
         // the 60 s outage bound and the 15 s resend bound.
         let disconnected = phase == .connecting || (phase == .active && !isConnected)
@@ -1124,6 +1528,11 @@ final class LifecycleWorld {
             if bucket < 80 { return .audio(ms: rng.int(500...2500)) }
             return .audio(ms: rng.int(3000...10_000))
         }
+        add(capture.isRunning ? 1 : 0) { _ in .interruptionBegan }
+        add(1) { _ in .interruptionEnded }
+        add(capture.failsNextStart ? 0 : 1) { _ in .captureFailsNextStart }
+        add(availability.heldCount > 0 ? 4 : 0) { rng in .availabilityResolves(installed: rng.chance(75)) }
+        add(translator.inFlight != nil ? 5 : 0) { rng in .translationCompletes(success: rng.chance(80)) }
         add(established ? 6 : 0) { rng in
             let anyPermille = rng.int(0...1000)
             let finalPermille = rng.pick([0, 100, 250, 500, 750, 1000, anyPermille])
