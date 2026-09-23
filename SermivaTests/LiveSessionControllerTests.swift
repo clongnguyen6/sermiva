@@ -69,7 +69,7 @@ final class LiveSessionControllerTests: XCTestCase {
         XCTAssertEqual(controller.state, .idle, "a plain connect failure must not be reported as an auth error")
         XCTAssertFalse(controller.isMicCapturing)
         XCTAssertFalse(controller.canEnd)
-        XCTAssertEqual(session.endCount, 1, "a connect failure must not leave the other socket billing in the background")
+        XCTAssertEqual(session.endCount, 1, "a connect failure must not leave the socket billing in the background")
         _ = audio
     }
 
@@ -85,7 +85,7 @@ final class LiveSessionControllerTests: XCTestCase {
 
         XCTAssertEqual(controller.state, .idle, "must not claim listening when capture never opened")
         XCTAssertFalse(controller.isMicCapturing)
-        XCTAssertEqual(session.startCount, 0, "a startup capture failure must not open the metered Soniox sockets at all")
+        XCTAssertEqual(session.startCount, 0, "a startup capture failure must not open the metered Soniox socket at all")
         XCTAssertEqual(controller.micDockText, "Mic tắt", "the existing Mic tat state, no new copy")
     }
 
@@ -341,5 +341,94 @@ final class LiveSessionControllerTests: XCTestCase {
 
         XCTAssertEqual(controller.state, .idle)
         XCTAssertFalse(controller.showsTranslationUnavailableBanner, "a failed connect must clear the banner - it must never claim unavailability for a session that no longer exists")
+    }
+
+    // MARK: - Review round 3, finding 2/3: the epoch guard, the canEnd
+    // guard, and the two banner-clear call sites, each covered on its own -
+    // the reviewer removed each individually and the suite stayed green.
+
+    /// Isolates the epoch guard: a check from an attempt that has already
+    /// been superseded by a NEW attempt (bumped epoch) must never apply,
+    /// even while that new attempt is still in its own `.requestingMic`/
+    /// `.connecting` window, where `canEnd` alone is true and would not
+    /// have caught it.
+    func test_epochGuardPreventsAStaleCheckFromASupersededAttemptApplyingDuringTheNextOne() async {
+        let availability = FakeMeToTargetAvailabilityChecker()
+        availability.nextStatus = .unsupported
+        availability.holdStatus = true
+        let session = FakeSonioxLiveSession()
+        let (controller, _, _, _) = makeController(session: session, translationAvailability: availability)
+
+        controller.primaryButtonTapped() // attempt 1: its own check (Task A) blocks at status()
+        await settle()
+        XCTAssertEqual(availability.statusCallCount, 1, "sanity: attempt 1's own check is the one in flight")
+
+        controller.endSession() // attempt 1 ends; Task A is still pending
+
+        // "Phiên mới": attempt 2 bumps the epoch the moment it begins, then
+        // reaches its OWN check (Task B, also held) and sits in `.connecting`
+        // - a canEnd()-true state - with its own `start()` withheld.
+        session.completesImmediately = false
+        controller.primaryButtonTapped()
+        await settle()
+        XCTAssertEqual(availability.statusCallCount, 2, "sanity: attempt 2 reached its own check too")
+        XCTAssertEqual(controller.state, .connecting, "sanity: attempt 2 is sitting in a canEnd()-true state when Task A resolves next")
+
+        // Task A (attempt 1's STALE check) finally resolves - canEnd(.connecting)
+        // is true, so only the epoch mismatch can reject it here.
+        availability.resumeOldestHeldStatus()
+        await settle()
+
+        XCTAssertFalse(controller.showsTranslationUnavailableBanner, "a stale check from an already-superseded attempt must never apply during a later attempt's own canEnd()-true window")
+    }
+
+    /// Isolates the `canEnd` guard: the SAME attempt's own check resolving
+    /// after that attempt has already ended - with no new attempt ever
+    /// having started, so the epoch is unchanged - must still be rejected.
+    func test_canEndGuardPreventsACheckFromApplyingAfterItsOwnAttemptHasEnded() async {
+        let availability = FakeMeToTargetAvailabilityChecker()
+        availability.nextStatus = .unsupported
+        availability.holdStatus = true
+        let (controller, _, _, _) = makeController(translationAvailability: availability)
+
+        controller.primaryButtonTapped() // -> listening; its own check blocks at status()
+        await settle()
+
+        controller.endSession() // -> .ended; no new attempt started, epoch unchanged
+
+        availability.resumeOldestHeldStatus()
+        await settle()
+
+        XCTAssertEqual(controller.state, .ended)
+        XCTAssertFalse(controller.showsTranslationUnavailableBanner, "a check must never apply once its own attempt has already ended, even with the epoch unchanged")
+    }
+
+    func test_endSessionClearsAnAlreadyShowingBanner() async {
+        let availability = FakeMeToTargetAvailabilityChecker()
+        availability.nextStatus = .unsupported
+        let (controller, _, _, _) = makeController(translationAvailability: availability)
+
+        controller.primaryButtonTapped()
+        await settle()
+        XCTAssertTrue(controller.showsTranslationUnavailableBanner, "sanity: the banner is genuinely showing")
+
+        controller.endSession()
+
+        XCTAssertFalse(controller.showsTranslationUnavailableBanner, "ending a session must clear a still-showing banner")
+    }
+
+    func test_authErrorClearsAnAlreadyShowingBanner() async {
+        let availability = FakeMeToTargetAvailabilityChecker()
+        availability.nextStatus = .unsupported
+        let session = FakeSonioxLiveSession()
+        let (controller, _, _, _) = makeController(session: session, translationAvailability: availability)
+
+        controller.primaryButtonTapped()
+        await settle()
+        XCTAssertTrue(controller.showsTranslationUnavailableBanner, "sanity: the banner is genuinely showing")
+
+        session.onAuthError?()
+
+        XCTAssertFalse(controller.showsTranslationUnavailableBanner, "an auth error must clear a still-showing banner")
     }
 }

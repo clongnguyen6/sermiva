@@ -54,11 +54,13 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     /// Apple Translation calls by default, a fake in `LiveSessionControllerTests`.
     private let translationAvailability: MeToTargetAvailabilityChecking
     private var elapsedTimer: Timer?
-    /// Bumped every `prepareTranslationForSessionStart` call, so a belated
-    /// availability result from an attempt that is no longer the current
-    /// one (a later "Phiên mới" already started its own check) is
-    /// recognised as stale and ignored, even if `canEnd(for: state)` alone
-    /// would otherwise still pass for the new attempt.
+    /// Bumped at the start of every new attempt (`beginRequestingMic`) and
+    /// again when its own check actually begins (`prepareTranslationForSessionStart`),
+    /// so a belated availability result from an attempt that is no longer
+    /// the current one is recognised as stale and ignored, even during a
+    /// later attempt's own `.requestingMic`/`.connecting` window, where
+    /// `canEnd(for: state)` alone would still pass (review round 3,
+    /// finding 2).
     private var translationCheckEpoch = 0
 
     init(
@@ -190,6 +192,19 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     }
 
     private func beginRequestingMic() {
+        // Review round 3, finding 2: bumped here, at the start of every new
+        // attempt (fresh or "Phiên mới") - not only once `prepareTranslation
+        // ForSessionStart` itself runs. A previous attempt's own check can
+        // still be in flight when this one begins; without invalidating it
+        // right away, it could resolve during THIS attempt's own
+        // `.requestingMic`/`.connecting` window - both `canEnd`-true, so
+        // that guard alone would not have caught it - and, if this attempt's
+        // capture then fails before ever reaching `prepareTranslationForSessionStart`
+        // itself, the stale result's banner would be left showing on the
+        // idle screen behind it. Bumping immediately here closes that
+        // window entirely, before mic permission is even requested.
+        translationCheckEpoch += 1
+        showsTranslationUnavailableBanner = false
         state = .requestingMic
         micPermission.requestPermission { [weak self] granted in
             guard let self else { return }
@@ -263,8 +278,8 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     /// Capture is attempted before anything else changes, the same
     /// ordering `beginConnecting` uses for the startup case: a resume
     /// capture failure must end in a true state, not one that claims
-    /// listening while silently having left the keepalive stopped on
-    /// sockets that are still open. On failure, nothing here changes - the
+    /// listening while silently having left the keepalive stopped on a
+    /// socket that is still open. On failure, nothing here changes - the
     /// session simply stays `.paused`, keepalive keeps running exactly as
     /// `pause()` left it, and the elapsed timer stays frozen - so the user
     /// can just try Tiếp tục again.

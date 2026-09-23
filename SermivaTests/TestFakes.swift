@@ -155,6 +155,11 @@ final class FakeMeToTargetAvailabilityChecker: MeToTargetAvailabilityChecking {
     var target = Locale.Language(identifier: "en-US")
     var nextStatus: LanguageAvailability.Status = .installed
     private(set) var statusCallCount = 0
+    /// When `true`, `status(from:to:)` suspends until `resumeOldestHeldStatus()`
+    /// is called - lets a test control exactly when one specific call
+    /// resolves, in FIFO order, to reproduce cross-attempt ordering races.
+    var holdStatus = false
+    private var pendingContinuations: [CheckedContinuation<Void, Never>] = []
 
     func resolveLanguages() async -> (source: Locale.Language, target: Locale.Language) {
         (source, target)
@@ -162,7 +167,19 @@ final class FakeMeToTargetAvailabilityChecker: MeToTargetAvailabilityChecking {
 
     func status(from source: Locale.Language, to target: Locale.Language) async -> LanguageAvailability.Status {
         statusCallCount += 1
+        if holdStatus {
+            await withCheckedContinuation { continuation in
+                pendingContinuations.append(continuation)
+            }
+        }
         return nextStatus
+    }
+
+    /// Resumes the OLDEST still-held `status` call - the first one to have
+    /// started waiting.
+    func resumeOldestHeldStatus() {
+        guard !pendingContinuations.isEmpty else { return }
+        pendingContinuations.removeFirst().resume()
     }
 }
 
