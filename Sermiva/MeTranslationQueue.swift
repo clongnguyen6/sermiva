@@ -103,6 +103,15 @@ final class MeTranslationQueue {
 
     private func handleTermination(generation: Int) {
         guard generation == self.generation else { return }
+        // Review round 3, finding 1: without this, `continuation` still
+        // points at the now-dead stream - a later `enqueue` would see it as
+        // non-nil and `yield` into it, which is a silent no-op on a
+        // terminated continuation, neither delivering the request nor
+        // abandoning it. Clearing it here is what makes a post-termination
+        // `enqueue` fall back to `bufferedBeforeStream` instead - delivered
+        // on a genuine re-run (`makeRequests` replays the buffer), or
+        // abandoned along with everything else if `abandonAll` runs instead.
+        continuation = nil
         abandonPending()
     }
 

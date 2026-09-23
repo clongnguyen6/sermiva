@@ -16,6 +16,29 @@ final class MeTranslationQueueTests: XCTestCase {
         }
     }
 
+    /// `iterator.next()`, bounded: a request the bug under test loses
+    /// silently (neither delivered nor abandoned) would otherwise hang this
+    /// test forever rather than fail it - this turns that into a clean,
+    /// fast, red assertion instead.
+    private func firstElement(
+        _ makeIterator: @escaping () -> AsyncStream<(id: Int, source: String)>.AsyncIterator,
+        timeout: Duration = .seconds(2)
+    ) async -> (id: Int, source: String)? {
+        await withTaskGroup(of: (id: Int, source: String)?.self) { group in
+            group.addTask {
+                var iterator = makeIterator()
+                return await iterator.next()
+            }
+            group.addTask {
+                try? await Task.sleep(for: timeout)
+                return nil
+            }
+            let result = await group.next() ?? nil
+            group.cancelAll()
+            return result
+        }
+    }
+
     func test_enqueueBeforeAnyStreamExistsIsReplayedOnceOneIsCreated() async {
         let queue = MeTranslationQueue()
         queue.enqueue(id: 1, source: "early")
@@ -89,5 +112,49 @@ final class MeTranslationQueueTests: XCTestCase {
         XCTAssertEqual(first?.id, 1)
         let second = await iterator.next()
         XCTAssertEqual(second?.id, 2, "abandonAll must not finish the stream - a later enqueue must still be delivered")
+    }
+
+    // MARK: - Review round 3, finding 1: a request enqueued strictly AFTER
+    // its stream genuinely terminated (not merely superseded) must be
+    // delivered on a later re-run, or abandoned - never silently lost by
+    // yielding into a continuation that already died.
+
+    func test_enqueueAfterGenuineTerminationIsDeliveredOnALaterReRun() async {
+        let queue = MeTranslationQueue()
+        var abandoned: [Int] = []
+        queue.onAbandoned = { abandoned.append($0) }
+
+        do {
+            _ = queue.makeRequests()
+        }
+        // Let this stream's own `onTermination` actually run (it is the
+        // only stream that ever existed, so this is a genuine termination,
+        // not a supersession).
+        await settle()
+
+        queue.enqueue(id: 1, source: "after termination")
+
+        let reRunStream = queue.makeRequests()
+        let received = await firstElement(reRunStream.makeAsyncIterator)
+
+        XCTAssertEqual(received?.id, 1, "a request enqueued after genuine termination and before a re-run must be delivered on that re-run, never silently lost")
+        XCTAssertEqual(received?.source, "after termination")
+        XCTAssertTrue(abandoned.isEmpty, "it was delivered, not abandoned")
+    }
+
+    func test_enqueueAfterGenuineTerminationIsAbandonedIfNoReRunEverComes() async {
+        let queue = MeTranslationQueue()
+        var abandoned: [Int] = []
+        queue.onAbandoned = { abandoned.append($0) }
+
+        do {
+            _ = queue.makeRequests()
+        }
+        await settle()
+
+        queue.enqueue(id: 1, source: "after termination")
+        queue.abandonAll() // e.g. the session ends, with no re-run ever coming
+
+        XCTAssertEqual(abandoned, [1], "a request enqueued after termination, with no re-run, must still be abandonable rather than left pending forever")
     }
 }
