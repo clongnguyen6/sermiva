@@ -20,7 +20,17 @@ enum SessionPresentation {
         // never stopped for a network-only event), so the generic
         // "Đang nghe" rule would otherwise always win here and make this
         // string unreachable in the one situation it exists for.
-        if state == .reconnecting {
+        //
+        // Review round 5, lead ruling (finding 5): also requires
+        // `isMicCapturing`. Confirming Kết thúc while `.reconnecting` now
+        // stops the mic immediately, before the grace wait, while `state`
+        // itself stays `.reconnecting` throughout - without this,
+        // "Mic giữ, chờ mạng" would keep claiming the mic is held even
+        // though it has genuinely stopped. The switch below already listed
+        // `.reconnecting` among the "Mic tắt" cases; this is what makes
+        // that existing, previously-unreachable line reachable exactly
+        // when it becomes true - no new copy.
+        if state == .reconnecting, isMicCapturing {
             return "Mic giữ, chờ mạng"
         }
         if isMicCapturing {

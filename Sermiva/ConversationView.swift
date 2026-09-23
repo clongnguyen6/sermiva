@@ -369,6 +369,11 @@ struct ConversationView<Controller: SessionControlling>: View {
     }
 
     private var primaryDisabled: Bool {
+        // Review round 5, findings 4/7: also disabled during the short end
+        // grace wait - `primaryButtonTapped` already refuses to act then
+        // too (defence in depth), but the button must not visually invite a
+        // tap it will silently ignore.
+        if controller.isEndPending { return true }
         switch controller.state {
         case .connecting, .requestingMic, .authError: return true
         default: return false

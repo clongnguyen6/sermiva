@@ -39,6 +39,12 @@ protocol SessionControlling: ObservableObject {
     /// never in demo. Cleared only once a LATER "Bắt đầu" actually succeeds
     /// (review round 4, finding 5).
     var showsNetworkErrorBanner: Bool { get }
+    /// True only during the short, fixed grace wait after Kết thúc is
+    /// confirmed while reconnecting (review round 5, findings 4 and 7) -
+    /// the primary button and Kết thúc itself must both be inert for its
+    /// duration, using only this existing flag - no new state, no new copy.
+    /// Demo never has such a wait, so this is always `false` there.
+    var isEndPending: Bool { get }
     /// A fresh stream every call (fatalError rule 4), of final `me`-language
     /// segments waiting for on-device translation.
     func makeTranslationRequests() -> AsyncStream<(id: Int, source: String)>

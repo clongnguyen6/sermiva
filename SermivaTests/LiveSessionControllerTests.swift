@@ -209,13 +209,19 @@ final class LiveSessionControllerTests: XCTestCase {
 
         XCTAssertEqual(controller.state, .reconnecting, "must not end immediately - the screen stays exactly as .reconnecting already renders it")
         XCTAssertEqual(session.endCount, 0, "must not close the socket yet - that is exactly what would discard audio still only buffered, waiting to be sent")
-        XCTAssertEqual(audio.stopCount, 0)
+        // Review round 5, lead ruling (finding 5): the mic stops the INSTANT
+        // Kết thúc is confirmed - only audio captured before this point is
+        // ever flushed during the wait.
+        XCTAssertEqual(audio.stopCount, 1, "the mic must stop immediately on confirming Kết thúc, not only once the grace wait elapses")
+        XCTAssertFalse(controller.isMicCapturing)
 
         scheduler.drainAll()
 
         XCTAssertEqual(controller.state, .ended, "once the grace wait elapses, the session ends completely")
         XCTAssertEqual(session.endCount, 1)
-        XCTAssertEqual(audio.stopCount, 1)
+        // `RealAudioCapture.stop()` is documented idempotent - `finishEnding`
+        // calling it again once the wait elapses is harmless, just redundant.
+        XCTAssertEqual(audio.stopCount, 2)
     }
 
     func test_endingWhileListeningEndsImmediatelyWithNoWait() {
@@ -525,5 +531,104 @@ final class LiveSessionControllerTests: XCTestCase {
 
         XCTAssertEqual(controller.state, .authError)
         XCTAssertFalse(controller.showsNetworkErrorBanner, "an auth error must go to its own banner, never this one")
+    }
+
+    /// Review round 5, finding C9 (blocking): the banner shows only while
+    /// it is TRUE - a later, DIFFERENT kind of failure (mic capture, not
+    /// network) must not leave a stale "Lỗi mạng, thử lại sau" up.
+    func test_networkErrorBannerClearsOnASubsequentMicCaptureFailureToo() {
+        let session = FakeSonioxLiveSession()
+        session.nextStartResult = false
+        let audio = FakeAudioCapture()
+        let (controller, _, _, _) = makeController(audio: audio, session: session)
+        controller.primaryButtonTapped()
+        XCTAssertTrue(controller.showsNetworkErrorBanner, "sanity: showing after the first, network-class failure")
+
+        audio.failNextStart = true
+        controller.primaryButtonTapped()
+
+        XCTAssertEqual(controller.state, .idle)
+        XCTAssertFalse(controller.showsNetworkErrorBanner, "a mic capture failure is not a network failure - the stale banner must not survive it")
+    }
+
+    // MARK: - Review round 5, finding B3 (blocking): auth wins over a
+    // pending end-grace-wait.
+
+    func test_authErrorDuringTheGraceWaitWinsAndIsNeverOverwrittenByThePendingEnd() {
+        let scheduler = ManualScheduler()
+        let (controller, _, session, _) = makeController(scheduler: scheduler)
+        controller.primaryButtonTapped() // -> listening
+        session.onDisconnected?()
+        controller.endSession() // begins the 3s grace wait
+
+        session.onAuthError?() // a rejected key arrives DURING the wait
+
+        XCTAssertEqual(controller.state, .authError)
+        XCTAssertEqual(session.endImmediatelyCount, 1)
+
+        scheduler.drainAll() // the grace wait's own scheduled closure fires
+
+        XCTAssertEqual(controller.state, .authError, "the pending end must never overwrite auth - it would lose the banner and leave the rejected key in Keychain with no way to remove it")
+        XCTAssertEqual(session.endCount, 0, "the pending end must become a complete no-op once auth has already handled ending the session")
+    }
+
+    // MARK: - Review round 5, finding B4 (blocking): pause/resume during a
+    // reconnect must return to the TRUE underlying state, and must not be
+    // possible at all during the end grace wait.
+
+    func test_resumeAfterPauseDuringReconnectingReturnsToReconnectingNotListening() {
+        let (controller, _, session, _) = makeController()
+        controller.primaryButtonTapped() // -> listening
+        session.onDisconnected?()
+        XCTAssertEqual(controller.state, .reconnecting)
+
+        controller.primaryButtonTapped() // Tạm dừng
+        XCTAssertEqual(controller.state, .paused)
+        controller.primaryButtonTapped() // Tiếp tục
+
+        XCTAssertEqual(controller.state, .reconnecting, "resuming before the connection actually comes back must not silently claim it did")
+    }
+
+    func test_resumeAfterPauseDuringGenuineListeningStillReturnsToListening() {
+        let (controller, _, _, _) = makeController()
+        controller.primaryButtonTapped() // -> listening
+
+        controller.primaryButtonTapped() // Tạm dừng
+        XCTAssertEqual(controller.state, .paused)
+        controller.primaryButtonTapped() // Tiếp tục
+
+        XCTAssertEqual(controller.state, .listening, "resuming a pause that happened while genuinely connected must still return to listening")
+    }
+
+    func test_primaryButtonIsInertDuringTheEndGraceWait() {
+        let scheduler = ManualScheduler()
+        let (controller, audio, session, _) = makeController(scheduler: scheduler)
+        controller.primaryButtonTapped() // -> listening
+        session.onDisconnected?()
+        controller.endSession() // begins the 3s grace wait
+        XCTAssertTrue(controller.isEndPending)
+
+        controller.primaryButtonTapped() // Tạm dừng must be inert during the wait
+
+        XCTAssertEqual(controller.state, .reconnecting, "pause must not be possible during the end grace wait")
+        XCTAssertEqual(audio.startCount, 1, "no mic restart must happen either")
+    }
+
+    /// Review round 5, finding 7 (blocking): `canEnd` must also be `false`
+    /// during the wait, or "Kết thúc" stays tappable and can reopen
+    /// `EndSessionSheet` mid-wait.
+    func test_canEndIsFalseDuringTheEndGraceWaitSoKetThucCannotReopenTheSheet() {
+        let scheduler = ManualScheduler()
+        let (controller, _, session, _) = makeController(scheduler: scheduler)
+        controller.primaryButtonTapped() // -> listening
+        session.onDisconnected?()
+        XCTAssertTrue(controller.canEnd, "sanity: Kết thúc is reachable before it is ever tapped")
+
+        controller.endSession()
+
+        XCTAssertFalse(controller.canEnd, "Kết thúc must become unreachable for the duration of the grace wait")
+
+        scheduler.drainAll()
+        XCTAssertFalse(controller.canEnd, "and stay unreachable once genuinely ended")
     }
 }

@@ -301,7 +301,12 @@ final class SessionStateMachineTests: XCTestCase {
         XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .requestingMic, isDemo: false), "Đang mở mic…")
         XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .connecting, isDemo: false), "Đang mở mic…")
         XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .micDenied, isDemo: false), "Chưa có quyền mic")
-        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .reconnecting, isDemo: false), "Mic giữ, chờ mạng")
+        // Review round 5, lead ruling (finding 5): "Mic giữ, chờ mạng"
+        // requires `isMicCapturing` too now - confirming Kết thúc while
+        // reconnecting stops the mic immediately but leaves `state` at
+        // `.reconnecting` throughout the grace wait, and the dock must not
+        // keep claiming the mic is held once it genuinely is not.
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .reconnecting, isDemo: false), "Mic tắt")
     }
 
     /// The real live scenario finding 5 flagged: the mic is never stopped

@@ -33,6 +33,13 @@ final class LiveSessionController: ObservableObject, SessionControlling {
 
     let isDemo = false
 
+    /// Review round 5, finding A: a unique id for this controller OBJECT,
+    /// logged at creation/destruction so the owner's next live session can
+    /// tell directly from the Console whether more than one
+    /// `LiveSessionController` was ever alive at once - one of the
+    /// hypotheses still open in the still-unexplained two-socket evidence.
+    let controllerId = LifecycleIds.controller.next()
+
     /// Created once, ever, on this controller's first session start, then
     /// never reassigned/invalidated/nilled again (fatalError rule 2) - see
     /// `prepareTranslationForSessionStart`. `nil` until that first async
@@ -61,10 +68,23 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     private let translationAvailability: MeToTargetAvailabilityChecking
     private let scheduler: DemoScheduler
     private var elapsedTimer: Timer?
-    /// Review round 4, finding 4b (owner decision): set while `endSession`'s
-    /// short grace wait (see `endSession`) is pending, so a second Kết thúc
-    /// tap during that wait cannot schedule a second, overlapping one.
-    private var isEndPending = false
+    /// Review round 4, finding 4b (owner decision): true while `endSession`'s
+    /// short grace wait (see `endSession`) is pending. `@Published` (review
+    /// round 5, findings 4/7): `canEnd` and `primaryButtonTapped` both react
+    /// to it, and neither is itself a `@Published` property that would
+    /// otherwise tell SwiftUI to re-render when this flips while `state`
+    /// stays unchanged at `.reconnecting` throughout the wait. Also doubles
+    /// as the signal the scheduled closure itself checks before finishing
+    /// the end - `handleAuthError` clears it early so a rejected key arriving
+    /// mid-wait is never overwritten by the pending `.ended` (finding B3).
+    @Published private(set) var isEndPending = false
+    /// Review round 5, finding B4: whether the session was `.reconnecting`
+    /// (as opposed to genuinely `.listening`) at the moment `pause()` was
+    /// last called, so `resume()` can return to the TRUE underlying state
+    /// instead of always claiming `.listening` - pausing during a reconnect
+    /// and resuming before it completes must not silently claim the
+    /// connection came back when it did not.
+    private var wasReconnectingWhenPaused = false
     /// Bumped at the start of every new attempt (`beginRequestingMic`) and
     /// again when its own check actually begins (`prepareTranslationForSessionStart`),
     /// so a belated availability result from an attempt that is no longer
@@ -109,10 +129,12 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         self.liveSession.onReconnected = { [weak self] in
             self?.handleReconnected()
         }
+        lifecycleLogger.log("controller #\(self.controllerId, privacy: .public) created")
     }
 
     deinit {
         audioCapture.stop()
+        lifecycleLogger.log("controller #\(self.controllerId, privacy: .public) deinit")
     }
 
     // MARK: - SessionControlling presentation
@@ -146,8 +168,15 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         return segments.map { SegmentDisplay.make(for: $0, isActivityRunning: running) }
     }
 
+    /// Review round 5, finding 7 (blocking): also `false` while
+    /// `isEndPending` - `state` alone stays `.reconnecting` for the whole
+    /// grace wait, so without this the "Kết thúc" button stayed tappable
+    /// and could reopen `EndSessionSheet` mid-wait, alongside `endSession`'s
+    /// own `isEndPending` guard (which stops a second tap from scheduling a
+    /// second end, but does nothing to stop the sheet itself popping back
+    /// up).
     var canEnd: Bool {
-        SessionPresentation.canEnd(for: state)
+        SessionPresentation.canEnd(for: state) && !isEndPending
     }
 
     // MARK: - On-device me -> target translation (pass-through to `liveSession`)
@@ -185,6 +214,12 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     }
 
     func primaryButtonTapped() {
+        // Review round 5, finding B4/4 (blocking): pause and resume must
+        // not be possible during the end grace wait, functionally, not
+        // merely by disabling the button - defence in depth, since the
+        // button being tappable at all during the wait is exactly what
+        // finding 4 reported.
+        guard !isEndPending else { return }
         switch Self.primaryAction(for: state) {
         case .beginRequestingMic: beginRequestingMic()
         case .resume: resume()
@@ -201,22 +236,38 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     /// and finalized. Pressing Kết thúc while `.reconnecting` now waits a
     /// short, fixed, bounded time first - a simple timeout, not a "wait
     /// until confirmed flushed" mechanism, since the latter has no bound if
-    /// the network never comes back at all. The screen during this wait is
-    /// exactly what `.reconnecting` already renders - "Mất mạng. Nội dung
-    /// được giữ.", the dock's "Mic giữ, chờ mạng", "Đang kết nối lại…" - no
-    /// new state, no new copy; only `canEnd` (via `isEndPending`) changes,
-    /// so a second Kết thúc tap during the wait is a no-op rather than
-    /// scheduling an overlapping end.
+    /// the network never comes back at all.
+    ///
+    /// Review round 5, lead ruling (finding 5, blocking): the mic stops the
+    /// INSTANT this is confirmed - only audio already captured before this
+    /// point is ever flushed during the wait, never anything captured
+    /// during it. `state` itself stays `.reconnecting` throughout (no new
+    /// state), so the dock's mic-off truth comes from `isMicCapturing`
+    /// alone - see `SessionPresentation.micDockText`'s own fix for the
+    /// "Mic giữ, chờ mạng" line this would otherwise still claim.
+    /// `canEnd`/`primaryButtonTapped` both also gate on `isEndPending` now
+    /// (findings 4 and 7), so neither Kết thúc nor Tạm dừng/Tiếp tục is
+    /// reachable for the wait's duration.
     func endSession() {
-        guard canEnd, !isEndPending else { return }
+        guard canEnd else { return }
         guard state == .reconnecting else {
             finishEnding()
             return
         }
+        audioCapture.stop()
+        isMicCapturing = false
         isEndPending = true
         scheduler.schedule(after: 3) { [weak self] in
-            self?.isEndPending = false
-            self?.finishEnding()
+            // Review round 5, finding B3 (blocking): if a rejected key
+            // arrived during the wait, `handleAuthError` already cleared
+            // `isEndPending` and ended the session its own way
+            // (`endImmediately`, `.authError`) - this must then be a
+            // complete no-op, or it would overwrite `.authError` with
+            // `.ended`, lose the auth banner, and leave the rejected key in
+            // Keychain with no "Nhập lại khóa" ever shown for it.
+            guard let self, self.isEndPending else { return }
+            self.isEndPending = false
+            self.finishEnding()
         }
     }
 
@@ -270,6 +321,12 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         } catch {
             isMicCapturing = false
             state = .idle
+            // Review round 5, finding C9: the network-error banner shows
+            // only while it is TRUE - a mic capture failure is a different
+            // failure entirely, not a network one, so a stale "Lỗi mạng,
+            // thử lại sau" from an earlier attempt must not keep claiming a
+            // network problem here.
+            showsNetworkErrorBanner = false
             return
         }
 
@@ -326,6 +383,12 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     /// session simply stays `.paused`, keepalive keeps running exactly as
     /// `pause()` left it, and the elapsed timer stays frozen - so the user
     /// can just try Tiếp tục again.
+    /// Review round 5, finding B4 (blocking): returns to the state pausing
+    /// actually interrupted, not always `.listening` - pausing while
+    /// `.reconnecting` and resuming before the connection actually comes
+    /// back must not silently claim it did (previously this always set
+    /// `.listening`, showing "Đã kết nối" while the socket could still be
+    /// mid-reconnect underneath).
     private func resume() {
         do {
             try audioCapture.start()
@@ -335,7 +398,7 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         }
         isMicCapturing = true
         liveSession.endPauseKeepalive()
-        state = .listening
+        state = wasReconnectingWhenPaused ? .reconnecting : .listening
         startElapsedTimer()
     }
 
@@ -344,6 +407,7 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         isMicCapturing = false
         stopElapsedTimer()
         liveSession.beginPauseKeepalive()
+        wasReconnectingWhenPaused = (state == .reconnecting)
         state = .paused
     }
 
@@ -361,6 +425,13 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         isMicCapturing = false
         state = .authError
         showsTranslationUnavailableBanner = false
+        // Review round 5, finding B3 (blocking): auth wins over a pending
+        // end-grace-wait - clearing this is what tells that wait's own
+        // scheduled closure to do nothing once it fires, rather than
+        // overwrite `.authError` with `.ended` a few seconds later and lose
+        // the auth banner (and the user's only chance to remove the
+        // rejected key via "Nhập lại khóa").
+        isEndPending = false
         // A rejected key is not going to start working mid-stream, and a
         // graceful finalize sequence has nothing left to accomplish after
         // a 401/402/403 - close the socket immediately rather than wait

@@ -79,6 +79,8 @@ final class DemoSessionController: ObservableObject, SessionControlling {
     let showsTranslationUnavailableBanner = false
     /// Demo never opens a real connection, so it can never fail one either.
     let showsNetworkErrorBanner = false
+    /// Demo never reconnects, so it never has a grace wait to be pending.
+    let isEndPending = false
 
     /// Never actually invoked - `translationConfiguration` is always `nil`
     /// here, so `.translationTask`'s closure never calls this - but demo
