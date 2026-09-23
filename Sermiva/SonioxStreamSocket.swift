@@ -24,10 +24,11 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
 
     private static let endpoint = URL(string: "wss://stt-rt.soniox.com/transcribe-websocket")!
 
-    /// Set by `SonioxLiveSession.connectBothFresh` right after creating
-    /// this socket, purely to label the one-shot wire-shape diagnostic
-    /// below - "M" or "T". Left at "?" for any socket nothing ever labels
-    /// (e.g. a fake in a test, which never reaches this class at all).
+    /// Set by `SonioxLiveSession.connectFresh` right after creating this
+    /// socket, purely to label the one-shot wire-shape diagnostic below -
+    /// always "M" in option C's single-socket design. Left at "?" for any
+    /// socket nothing ever labels (e.g. a fake in a test, which never
+    /// reaches this class at all).
     var streamLabel: String = "?"
 
     /// docs/soniox-routing.md's Unknowns table: `translation_status` has

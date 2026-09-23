@@ -4,10 +4,10 @@ import Foundation
 /// The production audio backend for a live session: `AVAudioEngine` tap ->
 /// `AVAudioConverter` -> Int16 16 kHz mono, per docs/soniox-routing.md's
 /// session-lifecycle section. Delivers identical bytes to whatever
-/// `onAudioBuffer` is wired to; it has no idea there are two sockets on the
-/// other end - that buffering-until-both-ready decision belongs to
-/// `SonioxLiveSession`, not here, so this stays the thin capture seam
-/// `AudioCapturing` already defines.
+/// `onAudioBuffer` is wired to; it has no idea what is on the other end -
+/// the buffering-until-ready decision belongs to `SonioxLiveSession`, not
+/// here, so this stays the thin capture seam `AudioCapturing` already
+/// defines.
 final class RealAudioCapture: AudioCapturing {
     enum CaptureError: Error {
         case converterUnavailable
