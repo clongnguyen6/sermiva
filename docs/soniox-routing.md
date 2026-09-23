@@ -238,12 +238,83 @@ never in demo (`DemoSessionController.showsTranslationUnavailableBanner` is alwa
 ## Session lifecycle (single socket)
 
 Unchanged from option B for everything M itself does: connecting, listening, paused (keepalive every
-10 s), reconnecting (exponential backoff 1 s/2 s/4 s/…/30 s, one retry per outage, the open segment
-at the moment of a drop closed like a genuine `<end>`, speaker letters reset), ended (`finalize`,
-`<fin>`, empty frame, close on timeout). What changed: there is exactly one socket, so reconnect no
-longer needs a shared-audio-origin requirement between two sockets, and the audio buffer (60 s of
-16 kHz mono Int16, oldest dropped beyond that) is simpler - it just waits for the one socket's config
-to be accepted, not two.
+10 s), reconnecting (exponential backoff 1 s/2 s/4 s/…/30 s, one retry per outage - now also
+preempted the instant the network path becomes available again, see below - the open segment at the
+moment of a drop closed like a genuine `<end>` only if it had accumulated any final text, speaker
+letters reset), ended (`finalize`, `<fin>`, empty frame, close on timeout). What changed: there is
+exactly one socket, so reconnect no longer needs a shared-audio-origin requirement between two
+sockets, and the audio buffer (60 s of 16 kHz mono Int16, oldest dropped beyond that) is simpler - it
+just waits for the one socket's config to be accepted, not two.
+
+### Reconnect speed, audio continuity, and connection accounting (review round 4, owner decisions)
+
+- **Outage audio is kept, unchanged (finding 2, reconfirmed):** audio captured during an outage stays
+  in the existing 60 s `bufferedAudio` buffer and is sent after reconnect, exactly as before - this is
+  what the "Mất mạng. Nội dung được giữ." banner already promises. No code changed for this item.
+- **Reconnect speed:** in addition to the exponential backoff above, `SonioxLiveSession` also
+  reconnects the instant iOS's own `NWPathMonitor` (wrapped by `NetworkPathMonitoring`/
+  `RealNetworkPathMonitor` - a system framework already linked into the app, not a new dependency)
+  reports the network path is available again while a reconnect is pending. This does not reset
+  `reconnectAttempt` (a flapping network reporting "available" repeatedly must not reset backoff to
+  its shortest delay every time) and preserves the single-pending-attempt/max-one-connection
+  guarantees: a `reconnectScheduleToken` counter invalidates whatever backoff timer is still pending
+  the instant the path-triggered reconnect fires, so a stale timer that fires anyway afterward is
+  recognised and does nothing.
+- **Never show an empty segment (finding 6):** the segment open at the moment of a drop is now
+  closed like a genuine `<end>` only if it had accumulated any final text; one with none is discarded
+  outright (`SonioxJoinEngine.closeSegment`) rather than displayed. Live evidence: the second mock
+  session's Console log traced back to a "Người nói A" segment with no text and no language, from a
+  purely non-final open segment closed at a drop.
+- **Resend audio never confirmed finalized (finding 3):** `SonioxLiveSession` keeps a second, separate
+  rolling buffer (`unfinalizedSentAudio`, bounded to 15 s / 480,000 bytes - independent of, and
+  smaller than, the 60 s outage buffer above) of audio already sent to the current socket but not yet
+  confirmed finalized by it, trimmed from the front on every response using Soniox's own
+  `final_audio_proc_ms` (converted to bytes at the fixed 32,000 bytes/s rate). On reconnect, this
+  buffer is resent to the new socket FIRST, before the outage buffer, so speech Soniox had not yet
+  finalized when the drop happened is re-recognized rather than lost forever - live evidence: the
+  first mock session's last words before a drop were lost this way, since the open segment kept only
+  its final text and the audio for the rest had already gone to the dead socket. Combined with
+  finding 6 above, the pre-drop non-final tail was never shown as a segment, so the resend's
+  re-recognition lands as one new segment, never a duplicate of one already on screen
+  (`SonioxLiveSessionTests.test_reconnectResendOfUnfinalizedAudioDoesNotProduceADuplicateSegment`).
+  The outage buffer's own bound and clearing rules are unchanged, but its flushed audio now also
+  feeds into the same finalized-tracking, so it too becomes resendable if the new socket drops again
+  before Soniox finalizes it.
+- **Connection accounting (finding 1, live evidence: two open sockets after a reconnect):** the
+  Console log showed every `SonioxTranslationStatusShape` diagnostic line duplicated, less than 1 ms
+  apart, right after a reconnect - proof that two real sockets were briefly both connected and
+  receiving the same audio, with the orphan never closed, so the session was probably billed twice.
+  The screen itself stayed correct throughout (stale events from the orphan were already discarded).
+  The real cause is believed to live partly in the adapter: `SonioxStreamSocket.close()` now also
+  calls the plain `URLSessionTask.cancel()` alongside the WebSocket-specific `cancel(with:reason:)`,
+  since the latter alone is not documented to reliably abort a task still mid-handshake - exactly the
+  moment a reconnect is most likely to call `close()` on the socket it is abandoning. A genuine
+  session-level gap was also found and fixed: an INITIAL connect failure's `.closed` handler never
+  closed its own socket at all. Both `SonioxStreamSocket` and `SonioxLiveSession` now log every socket
+  open/close via `os.Logger` (subsystem `com.clongnguyen6.sermiva`, category
+  `SonioxConnectionLifecycle`) with a running open-connection count and a per-session attempt count -
+  no key, text, or URL - so a live session's Console log can be scanned for the count ever exceeding
+  1. `SonioxStreamSocket` itself stays untested (AGENTS.md); what `SonioxLiveSessionTests` proves
+  instead is the SESSION side: no more than one tracked socket ever exists across several consecutive
+  reconnects, and Kết thúc closes every connection the session has ever opened, not just the current
+  one.
+- **Ending mid-reconnect waits, rather than discarding buffered audio (finding 4b):** pressing Kết
+  thúc while `.reconnecting` now waits a fixed, short (3 s) grace period before actually ending,
+  instead of closing the socket immediately - live evidence: the first mock session lost its last two
+  sentences exactly this way. This is a simple timeout, not a "wait until confirmed flushed"
+  mechanism, which would have no bound if the network never came back at all. The screen during the
+  wait is exactly what `.reconnecting` already renders - the "Mất mạng. Nội dung được giữ." banner,
+  the dock's "Mic giữ, chờ mạng", "Đang kết nối lại…" - no new state, no new copy. A second Kết thúc
+  tap during the wait is a no-op (`LiveSessionController.isEndPending`). Known edge case, named as
+  follow-up rather than fixed this round: "Tạm dừng" stays tappable during the wait and would call
+  `pause()`, which does not know about the pending end.
+- **Initial connect failure shows a banner (finding 5):** previously, a failed FIRST connection
+  (never a mid-session reconnect - that already has "Mất mạng") returned silently to `.idle`. It now
+  shows the approved prototype's own string, in the existing (non-info) banner style: **"Lỗi mạng,
+  thử lại sau"** (`design/claude-handoff/Sermiva.dc.html` ~810, Settings' key-status object, key
+  `network`). Cleared only once a LATER "Bắt đầu" attempt actually succeeds - never merely by
+  retrying. Never shown for a genuine auth rejection (that already goes to its own banner), and never
+  in demo (`DemoSessionController.showsNetworkErrorBanner` is always `false`).
 
 **On-device translation is independent of the Soniox socket entirely.** An M reconnect never
 abandons an in-progress `me`-language translation (`SonioxJoinEngine.abandonMDirectTranslationsInProgress`
@@ -325,6 +396,20 @@ segments, never anything else.
 - The mic-denied banner and "Mở Cài đặt iPhone" were seen live.
 - Airplane mode before start: the session could not start (see "Airplane mode before start" below for
   exactly what the screen shows). Mid-session reconnect is not yet tested.
+
+**Second mock-conversation live session (owner's iPhone, from commit 8846c89):**
+
+- No duplicate segments, no empty segments, and no misattributed translations across the whole
+  session.
+- Overlap: Soniox dropped part of one overlapping voice rather than inventing or misattributing
+  anything - consistent with "no overlap signal exists" above; the app did not fabricate any text.
+- The two sentences spoken after the network returned were both present, because the owner waited
+  ~30 s before ending. Network back to reconnected took roughly that same ~30 s, entirely spent in
+  backoff - the live evidence behind this round's `NWPathMonitor`-triggered immediate reconnect
+  (see "Reconnect speed" above), which did not exist yet during this session.
+- The two-open-sockets bug (finding 1 above) was found from the owner's filtered Console log, not
+  from anything visible on screen - the screen itself stayed correct throughout, since stale events
+  from the orphaned socket were already discarded.
 
 **Still not yet measured, for the next session:**
 
