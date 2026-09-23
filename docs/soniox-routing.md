@@ -158,16 +158,19 @@ join has already been abandoned by the rule above.
 
 ## Live measurements
 
-Placeholder for the owner's first live session: usage measured before and after a timed pause
-(both streams stay open with keepalive during pause, so this checks whether idle keepalive time is
-actually billed).
+Not yet measured. Two live sessions have run (see the top of this file) but neither one paused
+long enough, with the Soniox Console open before and after, to read this off - the table below was
+never actually filled in by either session.
+
+The next live session that includes a pause should read, from the Soniox Console (whichever usage
+unit it displays - minutes or dollars, both streams, note which):
 
 - Usage before pause:
 - Pause duration:
 - Usage after pause:
-- Conclusion:
-
-*(left empty; the owner fills this in after a live session)*
+- Conclusion: whether the Console's usage figure moved by roughly the pause duration (both streams
+  stay open with keepalive during pause per Session lifecycle below, so a mover confirms the
+  keepalive page's billing statement; no movement would contradict it and needs its own follow-up).
 
 ## Segment mapping (from stream M)
 

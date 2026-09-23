@@ -397,6 +397,11 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
 
         let m = makeSocket()
         let t = makeSocket()
+        // Labels the one-shot translation_status wire-shape diagnostic
+        // only (see `SonioxStreamSocket`) - a no-op for a test's fake,
+        // which never conforms to the concrete adapter type.
+        (m as? SonioxStreamSocket)?.streamLabel = "M"
+        (t as? SonioxStreamSocket)?.streamLabel = "T"
         streamM = m
         streamT = t
 

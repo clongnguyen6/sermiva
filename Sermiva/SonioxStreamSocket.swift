@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The thin WebSocket adapter for one Soniox stream, per
 /// docs/soniox-routing.md's "Stream contract" section. Deliberately dumb:
@@ -22,6 +23,36 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
     var onEvent: ((SonioxSocketEvent) -> Void)?
 
     private static let endpoint = URL(string: "wss://stt-rt.soniox.com/transcribe-websocket")!
+
+    /// Set by `SonioxLiveSession.connectBothFresh` right after creating
+    /// this socket, purely to label the one-shot wire-shape diagnostic
+    /// below - "M" or "T". Left at "?" for any socket nothing ever labels
+    /// (e.g. a fake in a test, which never reaches this class at all).
+    var streamLabel: String = "?"
+
+    /// docs/soniox-routing.md's Unknowns table: `translation_status` has
+    /// never been read directly off the wire - `"none"` is inferred from
+    /// the docs' two-way example and an observed symptom, not confirmed.
+    /// This records only the shape - the set of distinct raw strings seen,
+    /// and which one a marker (`<end>`/`<fin>`) carried - never token text,
+    /// the key, or a URL. One log line per newly-seen distinct value, plus
+    /// one per marker occurrence (both low-volume by construction), so a
+    /// live session's Console log settles into a short, readable summary
+    /// rather than one line per token.
+    private static let diagnosticLogger = Logger(subsystem: "com.clongnguyen6.sermiva", category: "SonioxTranslationStatusShape")
+    private var seenTranslationStatusValues: Set<String> = []
+
+    private func recordTranslationStatusShape(_ wire: SonioxTokenWire) {
+        let raw = wire.translationStatus ?? "<missing>"
+        let label = streamLabel
+        if !seenTranslationStatusValues.contains(raw) {
+            seenTranslationStatusValues.insert(raw)
+            Self.diagnosticLogger.log("stream \(label, privacy: .public) saw a new translation_status value: \(raw, privacy: .public)")
+        }
+        if wire.text == "<end>" || wire.text == "<fin>" {
+            Self.diagnosticLogger.log("stream \(label, privacy: .public) marker \(wire.text, privacy: .public) carried translation_status: \(raw, privacy: .public)")
+        }
+    }
 
     private let urlSession: URLSession
     /// `nonisolated(unsafe)` so `close()` can run from a nonisolated
@@ -127,6 +158,9 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
         if let code = response.errorCode, (401...403).contains(code) {
             onEvent?(.authRejected)
             return
+        }
+        for wireToken in response.tokens ?? [] {
+            recordTranslationStatusShape(wireToken)
         }
         // Mapped from the wire tokens to the app's own `SonioxToken` here,
         // in the adapter, so nothing downstream of this seam ever touches
