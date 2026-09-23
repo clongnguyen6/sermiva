@@ -266,15 +266,17 @@ final class SonioxJoinEngineTests: XCTestCase {
 
     /// The reconnect path closes the open segment the same way - it must
     /// not leave a stale tail baked in either.
-    func test_segmentClosedByReconnectHasNoStaleNonFinalTail() {
+    /// Review round 4, finding 6 superseded this test's own original
+    /// assertion (an empty-but-final segment): a segment with no final text
+    /// at all must never be displayed, not merely emptied.
+    func test_segmentClosedByReconnectWithNoFinalTokenIsRemovedRatherThanShownEmpty() {
         let engine = SonioxJoinEngine(meLanguage: "vi")
         engine.applyStreamM([original("Xin ch", final: false, start: 0, end: 500, speaker: "1", lang: nil)])
         XCTAssertEqual(engine.segments[0].source, "Xin ch")
 
         engine.closeOpenSegmentForReconnect()
 
-        XCTAssertTrue(engine.segments[0].isFinal)
-        XCTAssertEqual(engine.segments[0].source, "", "a segment closed for a reconnect, with no final token of its own, must not keep its partial tail")
+        XCTAssertTrue(engine.segments.isEmpty, "a segment closed for a reconnect, with no final token of its own, must never be displayed")
     }
 
     /// Diagnosis for the "two consecutive B segments, both 'Why?'" live
@@ -503,6 +505,7 @@ final class SonioxJoinEngineTests: XCTestCase {
         ])
 
         XCTAssertFalse(fired, "whitespace-only final text must never be sent for translation")
+        XCTAssertTrue(engine.segments.isEmpty, "a whitespace-only final segment must never be displayed either")
     }
 
     func test_applyTranslationStartedShowsThePlaceholder() {
@@ -620,5 +623,37 @@ final class SonioxJoinEngineTests: XCTestCase {
         engine.applyStreamM([original("tiếp", final: true, start: 500, end: 900, speaker: "1", lang: "vi")])
 
         XCTAssertEqual(engine.segments.count, 2, "a marker already closed the previous segment - the next token always starts a new one")
+    }
+
+    // MARK: - Review round 4, finding 6: never show an empty segment.
+
+    /// Live evidence: a segment "Người nói A" appeared with no text and no
+    /// language, because an open segment whose content was all non-final
+    /// was closed at a reconnect drop.
+    func test_reconnectDropNeverLeavesAnEmptySegmentOnScreen() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        // Non-final only - Soniox never finalized any of it before the drop.
+        engine.applyStreamM([original("uh", final: false, start: 0, end: 200, speaker: "1", lang: nil)])
+        XCTAssertEqual(engine.segments.count, 1, "sanity: the open segment exists while still non-final")
+
+        engine.closeOpenSegmentForReconnect()
+        engine.abandonMDirectTranslationsInProgress()
+        engine.handleStreamMReconnected()
+
+        XCTAssertTrue(engine.segments.isEmpty, "a segment with no final text must never be displayed - not as \"Người nói A\" with nothing in it")
+    }
+
+    /// A segment closed with SOME final text, even if a non-final tail was
+    /// also discarded, must still display normally - this rule only ever
+    /// removes a segment that has NO final text at all.
+    func test_reconnectDropStillShowsASegmentThatHadAnyFinalTextAtAll() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([original("Xin", final: true, start: 0, end: 300, speaker: "1", lang: "vi")])
+        engine.applyStreamM([original(" ch", final: false, start: 300, end: 500, speaker: "1", lang: nil)])
+
+        engine.closeOpenSegmentForReconnect()
+
+        XCTAssertEqual(engine.segments.count, 1)
+        XCTAssertEqual(engine.segments[0].source, "Xin", "a segment with SOME final text must still display, with only its stale non-final tail dropped")
     }
 }

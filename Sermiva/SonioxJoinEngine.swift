@@ -280,7 +280,6 @@ final class SonioxJoinEngine {
 
     private func closeSegment(id: Int) {
         guard let index = segments.firstIndex(where: { $0.id == id }) else { return }
-        segments[index].isFinal = true
         // A closed segment must show only its locked final text - never a
         // non-final tail left over from whichever response last updated it
         // (see `applyStreamM`'s end-of-response recompute, which only ever
@@ -289,9 +288,22 @@ final class SonioxJoinEngine {
         // `<end>` - can freeze mid-word with a partial tail baked in as if
         // it were final.
         let finalText = finalSourceById[id] ?? ""
+        // Review round 4, finding 6 (live evidence): an open segment whose
+        // content was entirely non-final, closed by a reconnect before any
+        // of it was ever finalized, showed up as "Người nói A" with no text
+        // and no language at all. A segment with no final text must never
+        // be displayed - it never existed as far as anything final is
+        // concerned, and with the resend on reconnect (see
+        // docs/soniox-routing.md), that audio gets re-recognized by the new
+        // connection anyway.
+        guard !finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            segments.remove(at: index)
+            finalSourceById.removeValue(forKey: id)
+            return
+        }
+        segments[index].isFinal = true
         segments[index].source = finalText
         guard segments[index].lang == meLanguage else { return }
-        guard !finalText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         onMeSegmentFinalized?(id, finalText)
     }
 
