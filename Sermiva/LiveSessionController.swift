@@ -93,6 +93,10 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     private var isConnected = false
     /// Bumped whenever a pending end grace wait must no longer act.
     private var endGraceToken = 0
+    /// Bumped at every Bắt đầu / Phiên mới: a permission answer only ever
+    /// applies to the attempt that asked for it, and only while it still
+    /// waits for it - never after Kết thúc, never to a later attempt.
+    private var permissionAttempt = 0
     /// Bumped at the start of every new attempt (`beginRequestingMic`) and
     /// again when its own check actually begins (`prepareTranslationForSessionStart`),
     /// so a belated availability result from an attempt that is no longer
@@ -321,12 +325,20 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         // idle screen behind it. Bumping immediately here closes that
         // window entirely, before mic permission is even requested.
         translationCheckEpoch += 1
+        // Review of 46e9ca0, item 1: whatever the previous session still
+        // owns - a connection closing after Kết thúc, on-device translation -
+        // is let go of here, at the tap, not only once `liveSession.start`
+        // runs: the permission answer can take any time, and a capture
+        // failure never reaches `start` at all.
+        liveSession.discardPreviousSession()
         showsTranslationUnavailableBanner = false
         isPaused = false
         isConnected = false
         state = .requestingMic
+        permissionAttempt += 1
+        let attempt = permissionAttempt
         micPermission.requestPermission { [weak self] granted in
-            guard let self else { return }
+            guard let self, self.permissionAttempt == attempt, self.state == .requestingMic else { return }
             if granted {
                 self.beginConnecting()
             } else {
@@ -451,7 +463,8 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     /// `.connecting` or `.reconnecting` later showed `.listening` ("Đã kết
     /// nối", a "Tạm dừng" button, a recognizing caret) with the mic off.
     /// While `.connecting` the state itself stays `.connecting` - it
-    /// becomes `.paused` the moment the connection is established.
+    /// becomes `.paused` the moment the connection is established - and the
+    /// dock says "Mic tắt", the truth (`SessionPresentation.micDockText`).
     private func handleCaptureStoppedExternally() {
         isMicCapturing = false
         guard state == .connecting || isSessionRunning, !isPaused, !isEndPending else { return }
@@ -508,12 +521,6 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     /// `prepareTranslationForSessionStart` re-runs its own availability
     /// check, so no stale per-session state survives either way.
     private func startNewSession() {
-        // The ended session's connection may still be in its close window
-        // after Kết thúc. Close it before anything else: if this attempt's
-        // capture then fails, nothing would otherwise close it for 1.5 s,
-        // and its late `<fin>` answer would put the old transcript back on
-        // an idle screen (found by the invariant test).
-        liveSession.endImmediately { }
         segments = []
         elapsed = 0
         beginRequestingMic()

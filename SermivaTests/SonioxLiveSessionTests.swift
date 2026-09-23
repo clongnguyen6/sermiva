@@ -93,7 +93,7 @@ final class SonioxLiveSessionTests: XCTestCase {
         let (session, factory, scheduler) = makeSession()
         startAndEstablish(session, factory: factory)
         factory.createdSockets[0].simulateClosed()
-        XCTAssertEqual(scheduler.pending.count, 1)
+        XCTAssertEqual(scheduler.pending.count, 2, "the backoff timer, plus the dropped connection's own health check")
 
         var ended = false
         session.end { ended = true }
@@ -107,7 +107,7 @@ final class SonioxLiveSessionTests: XCTestCase {
         let (session, factory, scheduler) = makeSession()
         startAndEstablish(session, factory: factory)
         factory.createdSockets[0].simulateClosed()
-        XCTAssertEqual(scheduler.pending.count, 1)
+        XCTAssertEqual(scheduler.pending.count, 2, "the backoff timer, plus the dropped connection's own health check")
 
         session.beginPauseKeepalive() // must not crash even with no socket open
         session.endPauseKeepalive()
@@ -124,7 +124,7 @@ final class SonioxLiveSessionTests: XCTestCase {
         let (session, factory, scheduler) = makeSession()
         startAndEstablish(session, factory: factory)
         factory.createdSockets[0].simulateClosed()
-        XCTAssertEqual(scheduler.pending.count, 1)
+        XCTAssertEqual(scheduler.pending.count, 2, "the backoff timer, plus the dropped connection's own health check")
 
         session.onAuthError = { [weak session] in
             session?.endImmediately { }
@@ -694,7 +694,7 @@ final class SonioxLiveSessionTests: XCTestCase {
         XCTAssertEqual(pathMonitors.createdMonitors.last?.startCount, 1, "sanity: the monitor starts once the session starts")
 
         factory.createdSockets[0].simulateClosed()
-        XCTAssertEqual(scheduler.pending.count, 1, "sanity: a normal backoff timer is pending")
+        XCTAssertEqual(scheduler.pending.count, 2, "sanity: a normal backoff timer is pending, plus the dropped connection's own health check")
 
         pathMonitors.createdMonitors.last?.simulatePathAvailable()
 

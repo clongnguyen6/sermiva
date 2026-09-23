@@ -299,7 +299,10 @@ final class SessionStateMachineTests: XCTestCase {
         XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .idle, isDemo: false), "Mic tắt")
         XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .paused, isDemo: false), "Đã tạm dừng")
         XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .requestingMic, isDemo: false), "Đang mở mic…")
-        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .connecting, isDemo: false), "Đang mở mic…")
+        // Review of 46e9ca0, item 2: capture opens before connecting, so a
+        // stopped mic while connecting was stopped (an interruption), not
+        // being opened.
+        XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .connecting, isDemo: false), "Mic tắt")
         XCTAssertEqual(DemoSessionController.micDockText(isMicCapturing: false, state: .micDenied, isDemo: false), "Chưa có quyền mic")
         // Review round 5, lead ruling (finding 5): "Mic giữ, chờ mạng"
         // requires `isMicCapturing` too now - confirming Kết thúc while

@@ -36,18 +36,23 @@ enum SessionPresentation {
         if isMicCapturing {
             return "Đang nghe"
         }
+        // "Đang mở mic…" only while the mic is actually being opened - the
+        // permission answer is pending. A live session opens capture before
+        // it connects, so while `.connecting` the mic is either capturing
+        // (handled above) or was stopped by an interruption: "Mic tắt"
+        // (review of 46e9ca0, item 2).
         switch state {
         case .paused: return "Đã tạm dừng"
-        case .requestingMic, .connecting: return "Đang mở mic…"
+        case .requestingMic: return "Đang mở mic…"
         case .micDenied: return "Chưa có quyền mic"
-        case .idle, .ended, .authError, .listening, .reconnecting: return "Mic tắt"
+        case .idle, .connecting, .ended, .authError, .listening, .reconnecting: return "Mic tắt"
         }
     }
 
     static func micDotColorRole(isMicCapturing: Bool, state: SessionState, isDemo: Bool) -> MicDotColorRole {
         guard !isDemo else { return .neutral }
         if isMicCapturing { return .live }
-        if state == .connecting || state == .requestingMic { return .warn }
+        if state == .requestingMic { return .warn }
         return .neutral
     }
 

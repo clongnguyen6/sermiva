@@ -35,6 +35,14 @@ protocol SonioxLiveSessionProtocol: AnyObject {
     /// left to accomplish, and the caller (an auth-error exit) needs the
     /// guarantee that no socket survives past this call.
     func endImmediately(completion: @escaping @MainActor () -> Void)
+    /// The user started a new attempt (Bắt đầu, Phiên mới) - called at the
+    /// tap itself, before the mic-permission answer or capture, both of
+    /// which can take any time or fail. Nothing of the previous session may
+    /// act or show again after this: a connection still closing after
+    /// Kết thúc is closed, and on-device translation it still has queued or
+    /// in flight is abandoned under a new session epoch, so no late result
+    /// lands anywhere. Emits nothing.
+    func discardPreviousSession()
 
     /// Set by `LiveSessionController` once its own per-session availability
     /// check resolves - `true` only for `.installed`. `false` by default and
@@ -140,13 +148,15 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     private var translationRequests: [Int: (sessionEpoch: Int, segmentId: Int)] = [:]
     /// Documented choice (c), awaiting the owner's decision: a `me` segment
     /// that only the `<fin>` answer after Kết thúc finalizes is not sent to
-    /// on-device translation. Flipping this to `true` is the whole change
-    /// for the recommended alternative: such a segment is then enqueued
-    /// while the connection closes, translated after Kết thúc (the
-    /// indicator only shows while the screen is running, so none shows
-    /// then), and abandoned at "Phiên mới" (`start` abandons whatever is
-    /// left; the session-epoch guard above keeps any late result off the
-    /// next session's segments).
+    /// on-device translation. Changing this constant to `true` is the whole
+    /// change for the recommended alternative - nothing else depends on it:
+    /// such a segment is then enqueued while the connection closes and
+    /// translated after Kết thúc (its result lands on the ended transcript;
+    /// "Đang dịch…" never shows, since the screen is not running). The tap
+    /// of Bắt đầu or Phiên mới abandons whatever is still queued or in
+    /// flight (`discardPreviousSession`, before the permission answer or
+    /// capture), and the session-epoch guard above drops any late result.
+    /// The invariant test reads this constant and holds with either value.
     static let translatesSegmentsFinalizedAfterEnd = false
     /// Set by `LiveSessionController` via `setTranslationAvailable` once its
     /// own per-session availability check resolves. `false` by default and
@@ -181,22 +191,25 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// happened to be, skipping audio that was never finalized.
     private var unfinalizedStartByte = 0
 
-    /// Bumped at every `start()`. `.authRejected` is checked against this,
-    /// not socket identity: auth wins from any socket this session opened,
+    /// Bumped at every `start()` and `discardPreviousSession()`.
+    /// `.authRejected` is checked against this, not socket identity: auth
+    /// wins from any socket this session opened,
     /// including one already superseded, until the session has fully
     /// closed - but never leaks into a later session reusing this object.
     private var sessionEpoch = 0
     /// Review round 4, finding 1: how many connection attempts THIS session
     /// (since the last `start()`) has made - purely a logging aid.
     private var sessionConnectionAttempt = 0
-    /// Attempts scheduled since a server last ANSWERED on a connection.
-    /// Review of 2046102, item 5: reset only by the first response on a
-    /// connection - Soniox sends no explicit "config accepted" message, and
-    /// the socket reporting its config SENT proves nothing about the server
-    /// accepting it. A server that takes the config, errors, and closes must
-    /// keep backing off, not reconnect every second forever.
+    /// Attempts scheduled since a connection last proved healthy. Soniox
+    /// sends no explicit "config accepted" message, and neither the config
+    /// being sent (review of 2046102, item 5) nor one server answer (review
+    /// of 46e9ca0, item 3: a server that answers once and closes was
+    /// reconnected every second, forever) proves a connection works. Reset
+    /// only once a connection has stayed established for
+    /// `healthyConnectionSeconds` - as long as the longest backoff delay.
     private var reconnectAttempt = 0
-    private var hasAnsweredOnThisConnection = false
+    private let healthyConnectionSeconds: TimeInterval = 30
+    private var healthyScheduleToken = 0
     private let reconnectBaseDelay: TimeInterval = 1
     private let reconnectMaxDelay: TimeInterval = 30
     /// Per HANDOFF section 6, retry/backoff is a `reconnecting` (mid-
@@ -454,6 +467,23 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         }
     }
 
+    func discardPreviousSession() {
+        log("discarding the previous session in phase \(phase)")
+        let previousEndCompletion = pendingEndCompletion
+        pendingEndCompletion = nil
+        // A new epoch first: abandoning below then touches no segment and
+        // emits nothing (`currentSegmentId` drops other epochs' requests),
+        // and any report still on its way is dropped the same way.
+        sessionEpoch += 1
+        closeSocket()
+        stopSessionActivities()
+        closeScheduleToken += 1
+        phase = .inactive
+        isTranslationAvailable = false
+        joinEngine = nil
+        previousEndCompletion?()
+    }
+
     func endImmediately(completion: @escaping @MainActor () -> Void) {
         guard phase != .inactive else {
             completion()
@@ -539,12 +569,6 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         case .response(let response):
             guard phase == .streaming || phase == .ending else { return }
             if phase == .streaming {
-                if !hasAnsweredOnThisConnection {
-                    // The server answered: the connection really works, so
-                    // backoff starts over (see `reconnectAttempt`).
-                    hasAnsweredOnThisConnection = true
-                    reconnectAttempt = 0
-                }
                 trimFinalizedAudio(finalAudioProcMs: response.finalAudioProcMs)
             }
             guard let engine = joinEngine else { return }
@@ -581,7 +605,15 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     private func beginStreaming() {
         log("\(socketLabel(socket)) streaming")
         phase = .streaming
-        hasAnsweredOnThisConnection = false
+        // Backoff starts over only if this connection stays established
+        // long enough to have proved healthy (see `reconnectAttempt`).
+        healthyScheduleToken += 1
+        let token = healthyScheduleToken
+        scheduler.schedule(after: healthyConnectionSeconds) { [weak self] in
+            guard let self, self.healthyScheduleToken == token, self.phase == .streaming else { return }
+            self.log("connection healthy for \(Int(self.healthyConnectionSeconds)) s - backoff reset")
+            self.reconnectAttempt = 0
+        }
         // The resent audio is the start of this connection's own stream.
         unfinalizedStartByte = 0
         for chunk in unfinalizedSentAudio {

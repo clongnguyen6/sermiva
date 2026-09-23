@@ -116,6 +116,12 @@ final class FakeSonioxLiveSession: SonioxLiveSessionProtocol {
         completion()
     }
 
+    private(set) var discardPreviousSessionCount = 0
+
+    func discardPreviousSession() {
+        discardPreviousSessionCount += 1
+    }
+
     private(set) var makeTranslationRequestsCallCount = 0
     private(set) var reportedTranslationStarted: [Int] = []
     private(set) var reportedTranslationSuccess: [(id: Int, target: String)] = []
