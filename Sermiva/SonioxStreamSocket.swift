@@ -28,8 +28,30 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
     /// socket, purely to label the one-shot wire-shape diagnostic below -
     /// always "M" in option C's single-socket design. Left at "?" for any
     /// socket nothing ever labels (e.g. a fake in a test, which never
-    /// reaches this class at all).
-    var streamLabel: String = "?"
+    /// reaches this class at all). `nonisolated(unsafe)` so `close()` (a
+    /// nonisolated context - see `task`) can include it in the connection
+    /// lifecycle log below; set once, right after creation, never mutated
+    /// afterward.
+    nonisolated(unsafe) var streamLabel: String = "?"
+
+    /// Review round 4, finding 1 (live evidence): the Console log showed
+    /// every `SonioxTranslationStatusShape` line duplicated, <1 ms apart,
+    /// right after a reconnect - proof that TWO real `SonioxStreamSocket`
+    /// instances were independently connected and receiving the same live
+    /// audio at once, with the orphaned one never closed (so the session
+    /// was probably billed twice). This logs every socket open/close with a
+    /// running total, so a live session's Console log can be scanned for
+    /// that total ever exceeding 1 - the app-level generation bookkeeping
+    /// alone (`SonioxLiveSession`) cannot prove this from outside a real
+    /// network. No key, text, or URL - counts and the M/T-style label only.
+    private static let lifecycleLogger = Logger(subsystem: "com.clongnguyen6.sermiva", category: "SonioxConnectionLifecycle")
+    /// `nonisolated(unsafe)`: mutated from both `connect()` (MainActor) and
+    /// `close()` (nonisolated, reachable from `deinit`) - matches `task`'s
+    /// own reasoning. In practice every real call site in this app runs on
+    /// the main actor; nothing here claims otherwise for `deinit`, which is
+    /// why this is a plain running total, not a strict correctness-critical
+    /// value - it is a diagnostic aid, not billing logic.
+    nonisolated(unsafe) private static var openConnectionCount = 0
 
     /// docs/soniox-routing.md's Unknowns table: `translation_status` has
     /// never been read directly off the wire - `"none"` is inferred from
@@ -73,6 +95,8 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
         let config = SonioxStreamConfig(apiKey: apiKey, languageHints: languageHints, translation: .init(targetLanguage: targetLanguage))
         let task = urlSession.webSocketTask(with: Self.endpoint)
         self.task = task
+        Self.openConnectionCount += 1
+        Self.lifecycleLogger.log("stream \(self.streamLabel, privacy: .public) connection opened - \(Self.openConnectionCount, privacy: .public) open right now")
         task.resume()
         guard let configData = try? JSONEncoder().encode(config), let configText = String(data: configData, encoding: .utf8) else {
             onEvent?(.closed(nil))
@@ -116,9 +140,25 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
 
     /// `nonisolated` so this can also be called from
     /// `SonioxLiveSession.deinit` (a nonisolated context) - see `task`.
+    /// Review round 4, finding 1: `cancel(with:reason:)` alone is the
+    /// WebSocket-specific graceful close (a close frame per RFC 6455), and
+    /// is not documented to reliably abort a task that has not yet finished
+    /// its HTTP-upgrade handshake - exactly the moment a reconnect is most
+    /// likely to call `close()` on the socket it is abandoning. The plain
+    /// `URLSessionTask.cancel()` unconditionally tears the task down at the
+    /// URLSession level regardless of handshake state, so both are called
+    /// now - calling cancel twice on the same task is documented safe.
+    /// Guarded on `task != nil` so a second `close()` call (this app's own
+    /// `handleDrop`/`end` sequence, plus `deinit`'s own belt-and-suspenders
+    /// call, can both reach the same socket) never double-decrements or
+    /// double-logs the open count.
     nonisolated func close() {
+        guard task != nil else { return }
         task?.cancel(with: .normalClosure, reason: nil)
+        task?.cancel()
         task = nil
+        Self.openConnectionCount -= 1
+        Self.lifecycleLogger.log("stream \(self.streamLabel, privacy: .public) connection closed - \(Self.openConnectionCount, privacy: .public) open right now")
     }
 
     private func sendControlFrame(type: String) {

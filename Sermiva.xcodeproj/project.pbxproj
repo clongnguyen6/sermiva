@@ -55,6 +55,7 @@
 		CEC2915BF19846C4A3774F7E /* LiveSessionControllerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45962B9A2D9C477CBC26D686 /* LiveSessionControllerTests.swift */; };
 		1C88089842604499BF9AD99F /* SonioxKeychainStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE00EEB3E6C447DCAF91C143 /* SonioxKeychainStoreTests.swift */; };
 		B25D319B74384D989DF54ECE /* SonioxSocketConnecting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DC8D39039D74F4D97EA88F7 /* SonioxSocketConnecting.swift */; };
+		C19ADD31319D28721899806C /* NetworkPathMonitoring.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C740FE639875362E0EBD6E3 /* NetworkPathMonitoring.swift */; };
 		8C3FAD3A654447E1A99DF191 /* SonioxLiveSessionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC3EE366C1DF45D897EFF8F6 /* SonioxLiveSessionTests.swift */; };
 /* End PBXBuildFile section */
 
@@ -126,6 +127,7 @@
 		45962B9A2D9C477CBC26D686 /* LiveSessionControllerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSessionControllerTests.swift; sourceTree = "<group>"; };
 		BE00EEB3E6C447DCAF91C143 /* SonioxKeychainStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxKeychainStoreTests.swift; sourceTree = "<group>"; };
 		7DC8D39039D74F4D97EA88F7 /* SonioxSocketConnecting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxSocketConnecting.swift; sourceTree = "<group>"; };
+		3C740FE639875362E0EBD6E3 /* NetworkPathMonitoring.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetworkPathMonitoring.swift; sourceTree = "<group>"; };
 		DC3EE366C1DF45D897EFF8F6 /* SonioxLiveSessionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SonioxLiveSessionTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -181,6 +183,7 @@
 				85236940B0BF48158F43C178 /* SonioxWireModels.swift */,
 				43751FA6D0AC4118950E8797 /* SonioxStreamSocket.swift */,
 				7DC8D39039D74F4D97EA88F7 /* SonioxSocketConnecting.swift */,
+				3C740FE639875362E0EBD6E3 /* NetworkPathMonitoring.swift */,
 				22A71BF94A1B4CC48722C07B /* SonioxLiveSession.swift */,
 				37E07FE3A4D045E3949AAF02 /* SonioxAPIClient.swift */,
 				A8E1C33C183742FF8D6D5822 /* SonioxKeychainStore.swift */,
@@ -397,6 +400,7 @@
 				0B572FF729DE48E7A4BB21CC /* SonioxWireModels.swift in Sources */,
 				9C3D2A28CC8E4AF7BA3BE557 /* SonioxStreamSocket.swift in Sources */,
 				B25D319B74384D989DF54ECE /* SonioxSocketConnecting.swift in Sources */,
+				C19ADD31319D28721899806C /* NetworkPathMonitoring.swift in Sources */,
 				18B0DFBA483841DA9E0737E4 /* SonioxLiveSession.swift in Sources */,
 				163A1E39E4504590865463D1 /* SonioxAPIClient.swift in Sources */,
 				F7D2C62FAD9F41BB95F5BBC7 /* SonioxKeychainStore.swift in Sources */,

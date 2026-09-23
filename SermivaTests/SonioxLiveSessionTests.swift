@@ -20,10 +20,16 @@ final class SonioxLiveSessionTests: XCTestCase {
     private let config = SonioxSessionConfig(apiKey: "sx_test_key_not_real", meLanguage: "vi", targetLanguage: "en", guestHint: nil)
 
     private func makeSession() -> (session: SonioxLiveSession, factory: FakeSonioxSocketFactory, scheduler: ManualScheduler) {
+        let (session, factory, scheduler, _) = makeSessionWithPathMonitor()
+        return (session, factory, scheduler)
+    }
+
+    private func makeSessionWithPathMonitor() -> (session: SonioxLiveSession, factory: FakeSonioxSocketFactory, scheduler: ManualScheduler, pathMonitors: FakeNetworkPathMonitorFactory) {
         let factory = FakeSonioxSocketFactory()
         let scheduler = ManualScheduler()
-        let session = SonioxLiveSession(makeSocket: factory.make, scheduler: scheduler)
-        return (session, factory, scheduler)
+        let pathMonitors = FakeNetworkPathMonitorFactory()
+        let session = SonioxLiveSession(makeSocket: factory.make, scheduler: scheduler, makePathMonitor: pathMonitors.make)
+        return (session, factory, scheduler, pathMonitors)
     }
 
     /// Starts the session and completes the initial handshake (the socket
@@ -201,13 +207,20 @@ final class SonioxLiveSessionTests: XCTestCase {
         scheduler.drainOnce()
         factory.createdSockets[1].simulateConfigSent()
         XCTAssertEqual(factory.createdSockets[1].sentAudioChunks.count, 1)
+        // Confirmed finalized before the second drop: this isolates the
+        // OUTAGE buffer's own clearing behaviour (what this test covers)
+        // from finding 3's separate "resend what was never finalized"
+        // mechanism, which would otherwise legitimately carry this same
+        // audio into the next outage precisely because Soniox never
+        // confirmed it - see the finding 3 tests below for that case.
+        factory.createdSockets[1].simulateResponse(finalAudioProcMs: 4)
 
         // A second, separate outage.
         factory.createdSockets[1].simulateClosed()
         scheduler.drainOnce()
         factory.createdSockets[2].simulateConfigSent()
 
-        XCTAssertEqual(factory.createdSockets[2].sentAudioChunks.count, 0, "a later, separate outage must not replay the previous outage's already-flushed audio")
+        XCTAssertEqual(factory.createdSockets[2].sentAudioChunks.count, 0, "a later, separate outage must not replay the previous outage's already-flushed AND finalized audio")
     }
 
     /// Re-review finding 3: ending mid-outage is the obvious choice for
@@ -528,5 +541,192 @@ final class SonioxLiveSessionTests: XCTestCase {
         let second = await iterator.next()!
         XCTAssertEqual(second.source, "New session")
         XCTAssertTrue(session.reportTranslationStarted(id: second.id), "the new session's own request must proceed normally, right behind the skipped stale one")
+    }
+
+    // MARK: - Review round 4, finding 1: at most one open connection, ever -
+    // live evidence was every SonioxTranslationStatusShape line duplicated
+    // right after a reconnect, proof that two real sockets were briefly
+    // both connected and receiving the same audio, with the orphan never
+    // closed. The real cause lives partly in the adapter itself
+    // (`SonioxStreamSocket.close()`, strengthened to also call the plain
+    // `URLSessionTask.cancel()`, since the WebSocket-specific
+    // `cancel(with:reason:)` alone is not documented to reliably abort a
+    // task still mid-handshake) - fakes cannot reach that, since
+    // `FakeSonioxSocketConnection` has no real `URLSessionWebSocketTask` to
+    // race against. What fakes CAN prove, and what these tests cover, is
+    // the SESSION side: `SonioxLiveSession` must never let more than one
+    // socket exist untracked, must always close whatever it creates, and
+    // must close every connection it has ever opened when the session ends
+    // - regardless of how many reconnects happened first.
+
+    /// The number of sockets currently open (connected, not yet closed)
+    /// among everything the factory has ever created.
+    private func openSocketCount(_ factory: FakeSonioxSocketFactory) -> Int {
+        factory.createdSockets.filter { $0.connectCount > 0 && !$0.isClosed }.count
+    }
+
+    func test_atMostOneConnectionIsEverOpenAcrossSeveralConsecutiveReconnects() {
+        let (session, factory, scheduler) = makeSession()
+        startAndEstablish(session, factory: factory)
+        XCTAssertEqual(openSocketCount(factory), 1)
+
+        for _ in 0..<5 {
+            factory.createdSockets.last?.simulateClosed()
+            XCTAssertLessThanOrEqual(openSocketCount(factory), 1, "no more than one connection may ever be open, even right after a drop")
+            scheduler.drainOnce()
+            XCTAssertLessThanOrEqual(openSocketCount(factory), 1, "...or right after the retry creates a new socket, before it has even connected")
+            factory.createdSockets.last?.simulateConfigSent()
+            XCTAssertEqual(openSocketCount(factory), 1, "exactly one connection is open once the reconnect settles")
+        }
+
+        XCTAssertEqual(factory.createdSockets.count, 6, "sanity: five reconnects on top of the initial connect")
+    }
+
+    func test_endingClosesEveryConnectionCreatedAcrossTheWholeReconnectSequence() {
+        let (session, factory, scheduler) = makeSession()
+        startAndEstablish(session, factory: factory)
+
+        for _ in 0..<3 {
+            factory.createdSockets.last?.simulateClosed()
+            scheduler.drainOnce()
+            factory.createdSockets.last?.simulateConfigSent()
+        }
+
+        var ended = false
+        session.end { ended = true }
+        scheduler.drainAll()
+
+        XCTAssertTrue(ended)
+        XCTAssertTrue(factory.createdSockets.allSatisfy(\.isClosed), "Kết thúc must close EVERY connection this session ever opened, not just the currently-tracked one")
+        XCTAssertEqual(openSocketCount(factory), 0)
+    }
+
+    /// The exact gap this round found in the session's own bookkeeping: an
+    /// INITIAL connect failure (never reaching `.configSent`) must close its
+    /// own socket immediately, not leave it open for something else to
+    /// eventually get around to.
+    func test_initialConnectFailureClosesItsOwnSocketImmediately() {
+        let (session, factory, _) = makeSession()
+        var started: Bool?
+        session.start(config: config) { ok in started = ok }
+
+        factory.createdSockets[0].simulateClosed()
+
+        XCTAssertEqual(started, false)
+        XCTAssertTrue(factory.createdSockets[0].isClosed, "an initial connect failure must close its own socket immediately")
+    }
+
+    // MARK: - Review round 4, finding 3 (owner decision): resend audio the
+    // dropped socket never confirmed finalized, on reconnect, before the
+    // outage buffer. Live evidence: in the first mock session, speech
+    // Soniox had not yet finalized when the network dropped was lost for
+    // good - the open segment kept only its final text, and the audio for
+    // the rest had already gone to the now-dead socket.
+
+    /// Byte-level proof: of three one-second chunks sent to the socket that
+    /// then drops, only the first is ever reported finalized
+    /// (`final_audio_proc_ms`) - so only the other two, still unconfirmed,
+    /// may ever reach the reconnecting socket. Resending the first chunk
+    /// too would re-recognize speech Soniox already finalized, which is
+    /// exactly what would duplicate a segment.
+    func test_reconnectResendsOnlyAudioNotYetFinalizedByTheDroppedSocket() {
+        let (session, factory, scheduler) = makeSession()
+        startAndEstablish(session, factory: factory)
+
+        let chunk1 = Data(repeating: 1, count: 32_000) // 1s at 32,000 bytes/s
+        let chunk2 = Data(repeating: 2, count: 32_000)
+        let chunk3 = Data(repeating: 3, count: 32_000)
+        session.ingestAudio(chunk1)
+        session.ingestAudio(chunk2)
+        session.ingestAudio(chunk3)
+
+        factory.createdSockets[0].simulateResponse(finalAudioProcMs: 1000) // only chunk1 finalized
+        factory.createdSockets[0].simulateClosed()
+        scheduler.drainOnce()
+        factory.createdSockets[1].simulateConfigSent()
+
+        XCTAssertEqual(factory.createdSockets[1].sentAudioChunks, [chunk2, chunk3], "only audio never confirmed finalized by the dropped socket may be resent")
+    }
+
+    /// The end-to-end proof the owner asked for: pre-drop non-final speech
+    /// was never shown as a segment (finding 6), so the resend re-recognizing
+    /// it after reconnect must land as exactly one segment, never two.
+    func test_reconnectResendOfUnfinalizedAudioDoesNotProduceADuplicateSegment() {
+        let (session, factory, scheduler) = makeSession()
+        startAndEstablish(session, factory: factory)
+        var lastSegments: [Segment] = []
+        session.onSegmentsChanged = { lastSegments = $0 }
+
+        factory.createdSockets[0].simulateResponse(tokens: [
+            SonioxToken(text: "Xin ch", isFinal: false, startMs: nil, endMs: nil, speaker: "1", language: nil, translationStatus: .original),
+        ])
+        session.ingestAudio(Data(repeating: 9, count: 32_000))
+
+        factory.createdSockets[0].simulateClosed()
+        XCTAssertTrue(lastSegments.isEmpty, "sanity: the never-finalized segment was never shown, per finding 6 - nothing exists yet to duplicate")
+        scheduler.drainOnce()
+        factory.createdSockets[1].simulateConfigSent()
+        XCTAssertFalse(factory.createdSockets[1].sentAudioChunks.isEmpty, "sanity: the never-finalized audio must actually have been resent to the new socket")
+
+        // The new socket re-recognizes the resent audio and finalizes it.
+        factory.createdSockets[1].simulateResponse(tokens: [
+            SonioxToken(text: "Xin chào", isFinal: true, startMs: 0, endMs: 1000, speaker: "1", language: "vi", translationStatus: .original),
+            SonioxToken(text: "<end>", isFinal: true, startMs: nil, endMs: nil, speaker: nil, language: nil, translationStatus: .original),
+        ])
+
+        XCTAssertEqual(lastSegments.count, 1, "the resend must land as exactly one segment, never a duplicate")
+        XCTAssertEqual(lastSegments[0].source, "Xin chào")
+    }
+
+    // MARK: - Review round 4, finding 4a (owner decision): reconnect the
+    // instant iOS reports the network path is available again, instead of
+    // waiting out backoff - live evidence showed ~30s wasted waiting during
+    // the second mock session, all of it spent in backoff after the network
+    // had already come back.
+
+    func test_pathAvailableDuringReconnectConnectsImmediatelyWithoutWaitingForBackoff() {
+        let (session, factory, scheduler, pathMonitors) = makeSessionWithPathMonitor()
+        startAndEstablish(session, factory: factory)
+        XCTAssertEqual(pathMonitors.createdMonitors.last?.startCount, 1, "sanity: the monitor starts once the session starts")
+
+        factory.createdSockets[0].simulateClosed()
+        XCTAssertEqual(scheduler.pending.count, 1, "sanity: a normal backoff timer is pending")
+
+        pathMonitors.createdMonitors.last?.simulatePathAvailable()
+
+        XCTAssertEqual(factory.createdSockets.count, 2, "the path becoming available must open a new connection immediately, without waiting for the backoff timer to fire")
+    }
+
+    func test_pathAvailablePreemptsThePendingBackoffTimerSoItNeverOpensASecondConnection() {
+        let (session, factory, scheduler, pathMonitors) = makeSessionWithPathMonitor()
+        startAndEstablish(session, factory: factory)
+
+        factory.createdSockets[0].simulateClosed()
+        pathMonitors.createdMonitors.last?.simulatePathAvailable()
+        XCTAssertEqual(factory.createdSockets.count, 2)
+
+        scheduler.drainAll() // the original backoff timer, now stale, fires anyway
+        XCTAssertEqual(factory.createdSockets.count, 2, "a backoff timer preempted by the path becoming available must not go on to open a second connection once it eventually fires")
+    }
+
+    func test_pathAvailableWhileNotReconnectingIsIgnored() {
+        let (session, factory, _, pathMonitors) = makeSessionWithPathMonitor()
+        startAndEstablish(session, factory: factory)
+
+        pathMonitors.createdMonitors.last?.simulatePathAvailable()
+
+        XCTAssertEqual(factory.createdSockets.count, 1, "the path becoming available while already connected must not open a redundant new connection")
+    }
+
+    func test_endingCancelsThePathMonitor() {
+        let (session, factory, scheduler, pathMonitors) = makeSessionWithPathMonitor()
+        startAndEstablish(session, factory: factory)
+
+        var ended = false
+        session.end { ended = true }
+        scheduler.drainAll()
+
+        XCTAssertTrue(ended)
+        XCTAssertGreaterThan(pathMonitors.createdMonitors.last?.cancelCount ?? 0, 0, "ending the session must cancel the path monitor too, not just the socket")
     }
 }

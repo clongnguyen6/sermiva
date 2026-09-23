@@ -282,3 +282,41 @@ final class FakeSonioxSocketFactory {
         return socket
     }
 }
+
+/// Stands in for `NetworkPathMonitoring` - a test drives "the network is
+/// back" by calling `simulatePathAvailable()` directly, instead of a real
+/// `NWPathMonitor` ever running.
+@MainActor
+final class FakeNetworkPathMonitor: NetworkPathMonitoring {
+    var onPathAvailable: (() -> Void)?
+    private(set) var startCount = 0
+    // `nonisolated(unsafe)` matching `FakeSonioxSocketConnection.closeCount`
+    // above - the real `cancel()` this stands in for is also `nonisolated`.
+    nonisolated(unsafe) private(set) var cancelCount = 0
+
+    func start() {
+        startCount += 1
+    }
+
+    nonisolated func cancel() {
+        cancelCount += 1
+    }
+
+    func simulatePathAvailable() {
+        onPathAvailable?()
+    }
+}
+
+/// Hands out a fresh `FakeNetworkPathMonitor` on every call, one per
+/// `SonioxLiveSession.start` - so a test can index `createdMonitors` to
+/// reach the monitor for a specific session (including a later "Phiên mới").
+@MainActor
+final class FakeNetworkPathMonitorFactory {
+    private(set) var createdMonitors: [FakeNetworkPathMonitor] = []
+
+    func make() -> NetworkPathMonitoring {
+        let monitor = FakeNetworkPathMonitor()
+        createdMonitors.append(monitor)
+        return monitor
+    }
+}
