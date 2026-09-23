@@ -1,4 +1,5 @@
 import SwiftUI
+import Translation
 
 /// HANDOFF.md section 2.1. The real-key path validates against the actual
 /// Soniox service (`SonioxAPIClient`) and stores the key in Keychain only -
@@ -24,6 +25,18 @@ struct SetupView: View {
     @State private var apiKey: String = ""
     @State private var isKeyVisible = false
     @State private var validationState: ValidationState = .notChecked
+    /// The outcome's Setup download step: `nil` until a validated key's
+    /// `me -> target` availability turns out `.supported` (needs a
+    /// download), at which point this is set once to trigger
+    /// `.translationTask` below - the system's own permission/progress UI,
+    /// which this view cannot restyle. Never reused as a stored session -
+    /// `prepareTranslation()` inside that closure is the only call made
+    /// through it.
+    @State private var translationDownloadConfiguration: TranslationSession.Configuration?
+    /// The key already saved to Keychain, waiting for the download check
+    /// above to settle (successfully, unsupported, declined, or errored)
+    /// before actually continuing to the conversation.
+    @State private var keyPendingTranslationCheck: String?
 
     @ScaledMetric(relativeTo: .body) private var titleSize: CGFloat = 20
     @ScaledMetric(relativeTo: .body) private var bodySize: CGFloat = 15
@@ -95,6 +108,10 @@ struct SetupView: View {
             }
             .padding(.horizontal, 20)
         }
+        .translationTask(translationDownloadConfiguration) { session in
+            defer { finishTranslationCheck() }
+            try? await session.prepareTranslation()
+        }
     }
 
     private var trimmedKey: String {
@@ -131,7 +148,6 @@ struct SetupView: View {
             let outcome = await SonioxAPIClient.validateKey(
                 key,
                 meLanguage: LiveLanguageConfig.default.me,
-                targetLanguage: LiveLanguageConfig.default.target,
                 guestHint: LiveLanguageConfig.default.guestHint
             )
             await MainActor.run {
@@ -139,12 +155,13 @@ struct SetupView: View {
                 case .valid(let warning):
                     validationState = .valid(warning: warning)
                     SonioxKeychainStore.saveKey(key)
-                    onKeyValidated(key)
+                    keyPendingTranslationCheck = key
+                    Task { await beginTranslationDownloadCheck() }
                 case .invalidKey:
                     validationState = .invalidKey
                 case .unusableConfiguration:
                     // The key itself was accepted, but the model cannot
-                    // serve the fixed vi/auto/en configuration - not stored,
+                    // serve the fixed vi/auto configuration - not stored,
                     // not passed on to onKeyValidated.
                     validationState = .unusableConfiguration
                 case .networkError:
@@ -152,6 +169,31 @@ struct SetupView: View {
                 }
             }
         }
+    }
+
+    /// The outcome's Setup download step, right after a successful "Kiểm
+    /// tra và tiếp tục", before any metered session: `.installed` continues
+    /// with no prompt; `.supported` triggers `.translationTask` above (the
+    /// system's own permission/progress sheet); `.unsupported`, a decline,
+    /// or an error all just continue to the conversation - the live
+    /// session-start check shows the banner if it is still unavailable
+    /// then.
+    private func beginTranslationDownloadCheck() async {
+        let (source, target) = await TranslationLanguages.resolve()
+        switch await LanguageAvailability().status(from: source, to: target) {
+        case .installed, .unsupported:
+            finishTranslationCheck()
+        case .supported:
+            translationDownloadConfiguration = TranslationSession.Configuration(source: source, target: target)
+        @unknown default:
+            finishTranslationCheck()
+        }
+    }
+
+    private func finishTranslationCheck() {
+        guard let key = keyPendingTranslationCheck else { return }
+        keyPendingTranslationCheck = nil
+        onKeyValidated(key)
     }
 
     private var keyField: some View {

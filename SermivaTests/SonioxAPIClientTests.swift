@@ -21,11 +21,11 @@ final class SonioxAPIClientTests: XCTestCase {
         XCTAssertNil(SonioxAPIClient.classify(modelsStatus: 503))
     }
 
-    func test_concurrencyWarningOnlyBelowTwo() {
+    func test_concurrencyWarningOnlyBelowOne() {
         XCTAssertNil(SonioxAPIClient.concurrencyWarning(forLimit: nil))
+        XCTAssertNil(SonioxAPIClient.concurrencyWarning(forLimit: 1), "option C needs only one connection")
         XCTAssertNil(SonioxAPIClient.concurrencyWarning(forLimit: 2))
         XCTAssertNil(SonioxAPIClient.concurrencyWarning(forLimit: 10))
-        XCTAssertNotNil(SonioxAPIClient.concurrencyWarning(forLimit: 1))
         XCTAssertNotNil(SonioxAPIClient.concurrencyWarning(forLimit: 0))
     }
 
@@ -43,34 +43,48 @@ final class SonioxAPIClientTests: XCTestCase {
         SonioxModelsResponse.TranslationTarget(targetLanguage: targetLanguage)
     }
 
-    func test_allLanguagesOneWayTranslationCoversBothLanguagesEvenWithNoExplicitTargets() {
+    func test_allLanguagesOneWayTranslationCoversMeEvenWithNoExplicitTargets() {
         let model = SonioxModelsResponse.Model(
             id: "stt-rt-v5",
             languages: [language("vi"), language("en")],
             oneWayTranslation: "all_languages",
             translationTargets: []
         )
-        XCTAssertTrue(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", targetLanguage: "en", guestLanguage: nil), "'all_languages' must cover a target even when translation_targets is empty - this is the documented shortcut, not a missing-data case")
+        XCTAssertTrue(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", guestLanguage: nil), "'all_languages' must cover me even when translation_targets is empty - this is the documented shortcut, not a missing-data case")
     }
 
-    func test_specificTranslationTargetsCoverBothLanguagesWhenListedByTargetLanguage() {
+    func test_specificTranslationTargetsCoverMeWhenListedByTargetLanguage() {
         let model = SonioxModelsResponse.Model(
             id: "stt-rt-v5",
             languages: [language("vi"), language("en"), language("ja")],
             oneWayTranslation: "",
-            translationTargets: [target("vi"), target("en"), target("ja")]
+            translationTargets: [target("vi"), target("ja")]
         )
-        XCTAssertTrue(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", targetLanguage: "en", guestLanguage: nil))
+        XCTAssertTrue(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", guestLanguage: nil))
     }
 
-    func test_targetMissingFromTranslationTargetsIsUnusableWhenNotAllLanguages() {
+    /// `target` is never checked here - option C translates `me -> target`
+    /// on the device, not through Soniox - so a model missing `target` from
+    /// `translation_targets` entirely must still qualify as long as `me`
+    /// itself is covered.
+    func test_targetMissingFromTranslationTargetsIsIrrelevant() {
         let model = SonioxModelsResponse.Model(
             id: "stt-rt-v5",
             languages: [language("vi"), language("en")],
             oneWayTranslation: "",
             translationTargets: [target("vi")]
         )
-        XCTAssertFalse(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", targetLanguage: "en", guestLanguage: nil), "target missing from translation_targets, with one_way_translation not 'all_languages', must not be reported as usable")
+        XCTAssertTrue(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", guestLanguage: nil), "target support is irrelevant in option C - only me's own one-way translation coverage matters")
+    }
+
+    func test_meMissingFromTranslationTargetsIsUnusableWhenNotAllLanguages() {
+        let model = SonioxModelsResponse.Model(
+            id: "stt-rt-v5",
+            languages: [language("vi"), language("en")],
+            oneWayTranslation: "",
+            translationTargets: [target("en")]
+        )
+        XCTAssertFalse(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", guestLanguage: nil), "me missing from translation_targets, with one_way_translation not 'all_languages', must not be reported as usable")
     }
 
     func test_undecodedLanguagesIsUnusableRatherThanCrashing() {
@@ -80,7 +94,7 @@ final class SonioxAPIClientTests: XCTestCase {
             oneWayTranslation: "all_languages",
             translationTargets: []
         )
-        XCTAssertFalse(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", targetLanguage: "en", guestLanguage: nil), "me/target must actually be listed in languages, even when one_way_translation says 'all_languages'")
+        XCTAssertFalse(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", guestLanguage: nil), "me must actually be listed in languages, even when one_way_translation says 'all_languages'")
     }
 
     func test_specificGuestLanguageMustAppearInLanguagesToBeUsable() {
@@ -90,7 +104,7 @@ final class SonioxAPIClientTests: XCTestCase {
             oneWayTranslation: "all_languages",
             translationTargets: []
         )
-        XCTAssertFalse(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", targetLanguage: "en", guestLanguage: "ja"), "a specific, non-auto guest language missing from languages must not be reported as usable")
+        XCTAssertFalse(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", guestLanguage: "ja"), "a specific, non-auto guest language missing from languages must not be reported as usable")
     }
 
     func test_autoGuestHintSkipsTheGuestLanguageCheck() {
@@ -100,7 +114,7 @@ final class SonioxAPIClientTests: XCTestCase {
             oneWayTranslation: "all_languages",
             translationTargets: []
         )
-        XCTAssertTrue(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", targetLanguage: "en", guestLanguage: nil), "guestLanguage nil means auto - a recognition hint only - and must not require a languages entry")
+        XCTAssertTrue(SonioxAPIClient.modelSupportsConfiguredLanguages(model, meLanguage: "vi", guestLanguage: nil), "guestLanguage nil means auto - a recognition hint only - and must not require a languages entry")
     }
 
     // MARK: - Live reopen finding 6: an undecodable 200 body has confirmed
@@ -110,13 +124,13 @@ final class SonioxAPIClientTests: XCTestCase {
     // JSON string.
 
     func test_undecodedModelsBodyIsNetworkErrorNotUnusableConfiguration() {
-        let outcome = SonioxAPIClient.outcomeForModelsResponse(nil, meLanguage: "vi", targetLanguage: "en", guestLanguage: nil)
+        let outcome = SonioxAPIClient.outcomeForModelsResponse(nil, meLanguage: "vi", guestLanguage: nil)
         XCTAssertEqual(outcome, .networkError, "a body that did not decode has established nothing about the model - it must not claim the specific incompatibility")
     }
 
     func test_decodedResponseWithNoRealtimeModelIsUnusableConfiguration() {
         let decoded = SonioxModelsResponse(models: [])
-        let outcome = SonioxAPIClient.outcomeForModelsResponse(decoded, meLanguage: "vi", targetLanguage: "en", guestLanguage: nil)
+        let outcome = SonioxAPIClient.outcomeForModelsResponse(decoded, meLanguage: "vi", guestLanguage: nil)
         XCTAssertEqual(outcome, .unusableConfiguration, "a response that decoded fine but has no stt-rt-v5 entry is genuinely unusable, not a network error")
     }
 
@@ -128,7 +142,7 @@ final class SonioxAPIClientTests: XCTestCase {
             translationTargets: []
         )
         let decoded = SonioxModelsResponse(models: [model])
-        let outcome = SonioxAPIClient.outcomeForModelsResponse(decoded, meLanguage: "vi", targetLanguage: "en", guestLanguage: nil)
+        let outcome = SonioxAPIClient.outcomeForModelsResponse(decoded, meLanguage: "vi", guestLanguage: nil)
         XCTAssertEqual(outcome, .qualifies)
     }
 }

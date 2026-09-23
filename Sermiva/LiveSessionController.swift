@@ -1,4 +1,5 @@
 import Foundation
+import Translation
 
 /// The three independent settings from HANDOFF.md section 4. Settings (the
 /// screen where the owner would change these) is out of scope for this
@@ -30,6 +31,18 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     @Published private(set) var elapsed: TimeInterval = 0
 
     let isDemo = false
+
+    /// Created once, ever, on this controller's first session start, then
+    /// never reassigned/invalidated/nilled again (fatalError rule 2) - see
+    /// `prepareTranslationForSessionStart`. `nil` until that first async
+    /// resolution completes, which is what keeps
+    /// `ConversationView`'s `.translationTask` closure from running before
+    /// then.
+    @Published private(set) var translationConfiguration: TranslationSession.Configuration?
+    /// Re-checked at every live session start (fresh each "Phiên mới"),
+    /// since the device's installed language packs can change between
+    /// sessions - never in demo.
+    @Published private(set) var showsTranslationUnavailableBanner = false
 
     private let apiKey: String
     private let languageConfig: LiveLanguageConfig
@@ -110,6 +123,24 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         SessionPresentation.canEnd(for: state)
     }
 
+    // MARK: - On-device me -> target translation (pass-through to `liveSession`)
+
+    func makeTranslationRequests() -> AsyncStream<(id: Int, source: String)> {
+        liveSession.makeTranslationRequests()
+    }
+
+    func reportTranslationStarted(id: Int) {
+        liveSession.reportTranslationStarted(id: id)
+    }
+
+    func reportTranslationSuccess(id: Int, target: String) {
+        liveSession.reportTranslationSuccess(id: id, target: target)
+    }
+
+    func reportTranslationFailure(id: Int) {
+        liveSession.reportTranslationFailure(id: id)
+    }
+
     // MARK: - State machine
 
     private enum PrimaryAction {
@@ -142,6 +173,7 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         audioCapture.stop()
         isMicCapturing = false
         state = .ended
+        showsTranslationUnavailableBanner = false
         liveSession.end { }
     }
 
@@ -175,6 +207,8 @@ final class LiveSessionController: ObservableObject, SessionControlling {
             state = .idle
             return
         }
+
+        prepareTranslationForSessionStart()
 
         let config = SonioxSessionConfig(
             apiKey: apiKey,
@@ -250,11 +284,12 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         audioCapture.stop()
         isMicCapturing = false
         state = .authError
+        showsTranslationUnavailableBanner = false
         // A rejected key is not going to start working mid-stream, and a
         // graceful finalize sequence has nothing left to accomplish after
-        // a 401/402/403 - close both sockets immediately rather than wait
-        // 1.5 s (or leave them open at all if the user taps "Nhập lại
-        // khóa" before that wait finishes).
+        // a 401/402/403 - close the socket immediately rather than wait
+        // 1.5 s (or leave it open at all if the user taps "Nhập lại khóa"
+        // before that wait finishes).
         liveSession.endImmediately { }
     }
 
@@ -290,5 +325,34 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     private func stopElapsedTimer() {
         elapsedTimer?.invalidate()
         elapsedTimer = nil
+    }
+
+    // MARK: - On-device me -> target translation setup
+
+    /// Runs at every live session start (fatalError rule: "At every live
+    /// session start, the controller calls `LanguageAvailability().status(
+    /// from:to:)`"). `translationConfiguration` itself is created only
+    /// once, ever, per controller (fatalError rule 2) - guarded below - so
+    /// a later "Phiên mới" only re-checks availability, never replaces it.
+    private func prepareTranslationForSessionStart() {
+        showsTranslationUnavailableBanner = false
+        // me != target is enforced before the configuration is created
+        // (fatalError rule 8) - always true for the fixed vi/en default,
+        // checked here as a real guard rather than assumed.
+        guard languageConfig.me != languageConfig.target else { return }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let (source, target) = await TranslationLanguages.resolve()
+            if self.translationConfiguration == nil {
+                self.translationConfiguration = TranslationSession.Configuration(source: source, target: target)
+            }
+            let status = await LanguageAvailability().status(from: source, to: target)
+            // Only while this session attempt is still genuinely running -
+            // not after it has already been aborted or ended (`.idle`,
+            // `.micDenied`, `.authError`, `.ended`) - matching
+            // `SessionPresentation.canEnd`'s own notion of "still running".
+            guard SessionPresentation.canEnd(for: self.state) else { return }
+            self.showsTranslationUnavailableBanner = status != .installed
+        }
     }
 }

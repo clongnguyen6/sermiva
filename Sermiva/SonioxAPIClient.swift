@@ -3,18 +3,21 @@ import Foundation
 /// Outcome of validating a Soniox key against the real service, per
 /// docs/soniox-routing.md's "Key validation and language list" section.
 /// `concurrencyWarning` is set when the account's own concurrency limit is
-/// below the two simultaneous connections this app's two-stream session
-/// needs - reported before any session starts, not discovered mid-stream.
+/// below the single connection this app's option-C session needs - reported
+/// before any session starts, not discovered mid-stream.
 ///
 /// `unusableConfiguration` covers a 200 response that decoded successfully
 /// but still does not confirm this app can work: no `stt-rt-v5` entry, or a
-/// model that does not support one_way translation for the configured
-/// `me`/`target`/`guest` languages. The key itself was accepted, so calling
-/// it invalid would be dishonest; `SetupView` maps this to its own
-/// "Khóa hợp lệ, nhưng không hỗ trợ cấu hình ngôn ngữ này." status line - it
-/// never falls back to the generic "Lỗi mạng" copy. A 200 body that does
-/// not even decode has confirmed nothing about the model either way - that
-/// is `networkError`, not this; see `validateKey` below.
+/// model that does not support one_way translation into the configured
+/// `me` language, or does not list `guest` when `guest` is specific.
+/// `target` is not a Soniox concern in option C - it is translated on the
+/// device, not by a second Soniox stream - so it is never checked here. The
+/// key itself was accepted, so calling it invalid would be dishonest;
+/// `SetupView` maps this to its own "Khóa hợp lệ, nhưng không hỗ trợ cấu
+/// hình ngôn ngữ này." status line - it never falls back to the generic
+/// "Lỗi mạng" copy. A 200 body that does not even decode has confirmed
+/// nothing about the model either way - that is `networkError`, not this;
+/// see `validateKey` below.
 enum SonioxKeyValidationOutcome: Equatable {
     case valid(concurrencyWarning: String?)
     case invalidKey
@@ -35,7 +38,6 @@ enum SonioxAPIClient {
     static func validateKey(
         _ key: String,
         meLanguage: String,
-        targetLanguage: String,
         guestHint: String?,
         urlSession: URLSession = .shared
     ) async -> SonioxKeyValidationOutcome {
@@ -59,7 +61,7 @@ enum SonioxAPIClient {
             return outcome
         }
         let decoded = try? JSONDecoder().decode(SonioxModelsResponse.self, from: modelsData)
-        switch outcomeForModelsResponse(decoded, meLanguage: meLanguage, targetLanguage: targetLanguage, guestLanguage: guestHint) {
+        switch outcomeForModelsResponse(decoded, meLanguage: meLanguage, guestLanguage: guestHint) {
         case .networkError: return .networkError
         case .unusableConfiguration: return .unusableConfiguration
         case .qualifies: break
@@ -93,8 +95,8 @@ enum SonioxAPIClient {
     }
 
     static func concurrencyWarning(forLimit limit: Int?) -> String? {
-        guard let limit, limit < 2 else { return nil }
-        return "Giới hạn kết nối đồng thời của tài khoản là \(limit) - phiên này cần 2."
+        guard let limit, limit < 1 else { return nil }
+        return "Giới hạn kết nối đồng thời của tài khoản là \(limit) - phiên này cần 1."
     }
 
     enum ModelsResponseOutcome: Equatable {
@@ -117,40 +119,39 @@ enum SonioxAPIClient {
     static func outcomeForModelsResponse(
         _ decoded: SonioxModelsResponse?,
         meLanguage: String,
-        targetLanguage: String,
         guestLanguage: String?
     ) -> ModelsResponseOutcome {
         guard let decoded else { return .networkError }
         guard
             let model = decoded.realtimeModel,
-            modelSupportsConfiguredLanguages(model, meLanguage: meLanguage, targetLanguage: targetLanguage, guestLanguage: guestLanguage)
+            modelSupportsConfiguredLanguages(model, meLanguage: meLanguage, guestLanguage: guestLanguage)
         else {
             return .unusableConfiguration
         }
         return .qualifies
     }
 
-    /// `languages` (guest picker and support check) must list `me`,
-    /// `target`, and `guest` when `guest` is a specific, non-auto language -
-    /// `languages` entries are `{code, name}` objects, matched by `code`.
-    /// This app's two-stream session then needs `stt-rt-v5` to support
-    /// one_way translation into both `me` and `target`: per the docs, a
-    /// language is covered when `one_way_translation == "all_languages"`,
-    /// or else when it appears as a `target_language` in
-    /// `translation_targets`. Any other `one_way_translation` value is
-    /// undocumented (see docs/soniox-routing.md's Unknowns table) and is
-    /// never treated as covering anything beyond what `translation_targets`
-    /// itself lists.
+    /// `languages` (guest picker and support check) must list `me` and
+    /// `guest` when `guest` is a specific, non-auto language - `languages`
+    /// entries are `{code, name}` objects, matched by `code`. This app's
+    /// single `one_way(me)` stream then needs `stt-rt-v5` to support
+    /// one_way translation into `me`: per the docs, a language is covered
+    /// when `one_way_translation == "all_languages"`, or else when it
+    /// appears as a `target_language` in `translation_targets`. Any other
+    /// `one_way_translation` value is undocumented (see
+    /// docs/soniox-routing.md's Unknowns table) and is never treated as
+    /// covering anything beyond what `translation_targets` itself lists.
+    /// `target` is never checked here - option C translates `me -> target`
+    /// on the device, not through Soniox.
     static func modelSupportsConfiguredLanguages(
         _ model: SonioxModelsResponse.Model,
         meLanguage: String,
-        targetLanguage: String,
         guestLanguage: String?
     ) -> Bool {
         let languageCodes = Set((model.languages ?? []).map(\.code))
-        guard languageCodes.contains(meLanguage), languageCodes.contains(targetLanguage) else { return false }
+        guard languageCodes.contains(meLanguage) else { return false }
         if let guestLanguage, !languageCodes.contains(guestLanguage) { return false }
-        return translationCovers(meLanguage, in: model) && translationCovers(targetLanguage, in: model)
+        return translationCovers(meLanguage, in: model)
     }
 
     private static func translationCovers(_ language: String, in model: SonioxModelsResponse.Model) -> Bool {

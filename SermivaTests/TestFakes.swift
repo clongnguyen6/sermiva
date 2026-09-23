@@ -96,6 +96,28 @@ final class FakeSonioxLiveSession: SonioxLiveSessionProtocol {
         endImmediatelyCount += 1
         completion()
     }
+
+    private(set) var makeTranslationRequestsCallCount = 0
+    private(set) var reportedTranslationStarted: [Int] = []
+    private(set) var reportedTranslationSuccess: [(id: Int, target: String)] = []
+    private(set) var reportedTranslationFailure: [Int] = []
+
+    func makeTranslationRequests() -> AsyncStream<(id: Int, source: String)> {
+        makeTranslationRequestsCallCount += 1
+        return AsyncStream { $0.finish() }
+    }
+
+    func reportTranslationStarted(id: Int) {
+        reportedTranslationStarted.append(id)
+    }
+
+    func reportTranslationSuccess(id: Int, target: String) {
+        reportedTranslationSuccess.append((id, target))
+    }
+
+    func reportTranslationFailure(id: Int) {
+        reportedTranslationFailure.append(id)
+    }
 }
 
 /// Records scheduled actions instead of waiting on a real clock, so tests

@@ -1,4 +1,5 @@
 import Foundation
+import Translation
 
 /// Drives the section-5 session state machine for offline demo playback of
 /// the `cafe_vi_en` fixture. No network, no Soniox, and - per the project
@@ -68,6 +69,25 @@ final class DemoSessionController: ObservableObject, SessionControlling {
     var headerText: String {
         SessionPresentation.languageHeaderText(config: languageConfig)
     }
+
+    /// `nil` unconditionally - demo never reaches Apple Translation, so
+    /// `ConversationView`'s `.translationTask` closure never runs here
+    /// (fatalError rule 3).
+    let translationConfiguration: TranslationSession.Configuration? = nil
+    /// Demo never shows this banner, per the outcome's decision - it is
+    /// visibly separated from live per AGENTS.md's demo/live invariant.
+    let showsTranslationUnavailableBanner = false
+
+    /// Never actually invoked - `translationConfiguration` is always `nil`
+    /// here, so `.translationTask`'s closure never calls this - but demo
+    /// still needs a real, terminating stream to satisfy `SessionControlling`.
+    func makeTranslationRequests() -> AsyncStream<(id: Int, source: String)> {
+        AsyncStream { $0.finish() }
+    }
+
+    func reportTranslationStarted(id: Int) {}
+    func reportTranslationSuccess(id: Int, target: String) {}
+    func reportTranslationFailure(id: Int) {}
 
     deinit {
         // The mic must not stay open once this controller leaves the view tree.

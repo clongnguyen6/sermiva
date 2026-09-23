@@ -10,9 +10,12 @@ struct SonioxSessionConfig {
 /// What `LiveSessionController` drives - real network and audio-buffering
 /// behind a small, fake-able surface, so the controller's state-machine
 /// wiring is testable without ever opening a socket. See
-/// `SonioxLiveSession` for the real implementation and
-/// `SonioxJoinEngine`/`SonioxJoinEngineTests` for where the actual join
-/// logic is proven.
+/// `SonioxLiveSession` for the real implementation, `SonioxJoinEngine` for
+/// where the M-only segment assembly is proven, and `MeTranslationQueue`
+/// for the on-device `me -> target` translation queue this protocol also
+/// exposes (`makeTranslationRequests`/`reportTranslation...`) - the narrow
+/// interface `ConversationView`'s `.translationTask` closure drives, per
+/// docs/soniox-routing.md and the outcome's fatalError rules.
 @MainActor
 protocol SonioxLiveSessionProtocol: AnyObject {
     var onSegmentsChanged: (@MainActor ([Segment]) -> Void)? { get set }
@@ -25,24 +28,37 @@ protocol SonioxLiveSessionProtocol: AnyObject {
     func beginPauseKeepalive()
     func endPauseKeepalive()
     func end(completion: @escaping @MainActor () -> Void)
-    /// Closes both sockets synchronously, with no finalize/empty-frame
+    /// Closes the socket synchronously, with no finalize/empty-frame
     /// sequence and no wait - appropriate once the server has already
     /// rejected the key (401/402/403): a graceful finalize has nothing
     /// left to accomplish, and the caller (an auth-error exit) needs the
     /// guarantee that no socket survives past this call.
     func endImmediately(completion: @escaping @MainActor () -> Void)
+
+    /// A fresh stream every call (fatalError rule 4) of final `me`-language
+    /// segments waiting to be translated on-device, one at a time, in
+    /// order. `ConversationView`'s `.translationTask` closure is the only
+    /// consumer - `TranslationSession` never appears on this seam.
+    func makeTranslationRequests() -> AsyncStream<(id: Int, source: String)>
+    /// Called the instant the closure actually starts translating `id` -
+    /// not when it was merely queued (fatalError rule 7).
+    func reportTranslationStarted(id: Int)
+    /// Writes the whole translated text once.
+    func reportTranslationSuccess(id: Int, target: String)
+    /// An error means "no translation" - never retried automatically
+    /// (fatalError rule 8).
+    func reportTranslationFailure(id: Int)
 }
 
-/// Owns the two `one_way` sockets from docs/soniox-routing.md, the audio
-/// buffering that gives both streams the same origin, keepalive during
-/// pause, and reconnect (with retry/backoff) on an unexpected drop. This
-/// reconnect/retry policy is app-owned logic - not Soniox's wire shape -
-/// so it is exercised in `SonioxLiveSessionTests` through a fake conforming
-/// to `SonioxSocketConnecting`, injected via `makeSocket`. Everything this
-/// class decides about what a token *means* is delegated to
-/// `SonioxJoinEngine`; the one thing that stays untested is the adapter
-/// that turns real WebSocket bytes into `SonioxSocketEvent` -
-/// `SonioxStreamSocket` itself - per AGENTS.md.
+/// Owns the single `one_way(me)` socket from docs/soniox-routing.md, the
+/// audio buffering that lets it start streaming cleanly, keepalive during
+/// pause, and reconnect (with retry/backoff) on an unexpected drop.
+/// Everything this class decides about what an M token *means* is
+/// delegated to `SonioxJoinEngine`; on-device `me -> target` translation is
+/// queued through `MeTranslationQueue` and reported back into the same
+/// engine, so `segments` keeps exactly one writer. The one thing that stays
+/// untested is the adapter that turns real WebSocket bytes into
+/// `SonioxSocketEvent` - `SonioxStreamSocket` itself - per AGENTS.md.
 @MainActor
 final class SonioxLiveSession: SonioxLiveSessionProtocol {
     var onSegmentsChanged: (@MainActor ([Segment]) -> Void)?
@@ -58,12 +74,20 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     nonisolated(unsafe) private let scheduler: DemoScheduler
 
     private var config: SonioxSessionConfig?
-    private var streamM: SonioxSocketConnecting?
-    private var streamT: SonioxSocketConnecting?
+    private var socket: SonioxSocketConnecting?
     private var joinEngine: SonioxJoinEngine?
 
-    private var mConfigSent = false
-    private var tConfigSent = false
+    /// Persists across "Phiên mới" (this object is reused, only
+    /// `joinEngine` is recreated) purely so translation request ids never
+    /// repeat - see `enqueueMeTranslation` and `translationRequestSegmentId`
+    /// below for why that is what keeps a stale, still-in-flight on-device
+    /// translation from a just-ended session from ever landing on a
+    /// same-numbered segment in the next one.
+    private let translationQueue = MeTranslationQueue()
+    private var nextTranslationRequestId = 1
+    private var translationRequestSegmentId: [Int: Int] = [:]
+
+    private var configSent = false
     private var bufferedAudio: [Data] = []
     private var bufferedAudioByteCount = 0
     /// 60 s of the converted 16 kHz mono Int16 stream (32,000 bytes/s) -
@@ -74,26 +98,23 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// reconnecting section for what happens to audio beyond this bound,
     /// and what the buffer means across a multi-attempt outage.
     private let bufferedAudioMaxBytes = 60 * 32_000
-    /// Set once the current pair of sockets has genuinely started
-    /// streaming (both configs sent, first buffered flush done). `false`
-    /// during the initial connect and during a reconnect, so `ingestAudio`
-    /// buffers until the (possibly brand-new) pair shares one
-    /// byte-identical origin again - see the reconnecting section of
-    /// docs/soniox-routing.md.
+    /// Set once the current socket has genuinely started streaming (config
+    /// sent, first buffered flush done). `false` during the initial
+    /// connect and during a reconnect, so `ingestAudio` buffers until the
+    /// (possibly brand-new) socket has accepted its config.
     private var hasStartedStreaming = false
     private var isEnding = false
     /// `true` from the moment a drop is first detected until a replacement
-    /// pair has both reported their config sent. Distinguishes "this is
-    /// the first drop, run the abandon/notify dance" from "this is a
-    /// retry's own pair failing again, just retry" - see `handleDrop`.
+    /// socket has reported its config sent. Distinguishes "this is the
+    /// first drop, run the abandon/notify dance" from "this is a retry's
+    /// own socket failing again, just retry" - see `handleDrop`.
     private var isReconnecting = false
     /// Every socket this session ever opens is stamped with the
     /// generation active when it was created. `handle` discards any event
     /// whose generation does not match the current one. Bumped the moment
     /// a drop is first processed (before anything else runs) - not only
-    /// when a replacement pair is actually created - so a *second* close
-    /// event from the SAME dropped pair (e.g. T detecting the same outage
-    /// moments after M did) is immediately recognised as stale, rather
+    /// when a replacement socket is actually created - so a stale event
+    /// from an already-superseded socket is immediately recognised, rather
     /// than being treated as an independent second drop that would
     /// schedule an overlapping retry timer.
     private var connectionGeneration = 0
@@ -138,8 +159,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// never got to fire - see `SonioxStreamSocket.close()`'s own
     /// synchronous cancel.
     deinit {
-        streamM?.close()
-        streamT?.close()
+        socket?.close()
     }
 
     func start(config: SonioxSessionConfig, completion: @escaping @MainActor (Bool) -> Void) {
@@ -148,12 +168,23 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         isReconnecting = false
         sessionEpoch += 1
         reconnectAttempt = 0
-        mConfigSent = false
-        tConfigSent = false
+        configSent = false
         bufferedAudio = []
         bufferedAudioByteCount = 0
         hasStartedStreaming = false
-        joinEngine = SonioxJoinEngine(meLanguage: config.meLanguage)
+        let engine = SonioxJoinEngine(meLanguage: config.meLanguage)
+        engine.onMeSegmentFinalized = { [weak self] segmentId, source in
+            self?.enqueueMeTranslation(segmentId: segmentId, source: source)
+        }
+        joinEngine = engine
+        // `translationQueue` persists across "Phiên mới" (unlike
+        // `joinEngine`, recreated per `start()` above) - wired here (a
+        // MainActor-isolated method, unlike `init`, which is deliberately
+        // `nonisolated` - see its own doc comment) every session start;
+        // harmless to re-wire the same way each time.
+        translationQueue.onAbandoned = { [weak self] requestId in
+            self?.handleTranslationAbandoned(requestId: requestId)
+        }
 
         var settled = false
         pendingStartCompletion = { [weak self] ok in
@@ -162,25 +193,22 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
             self?.pendingStartCompletion = nil
             completion(ok)
         }
-        connectBothFresh()
+        connectFresh()
     }
 
     func ingestAudio(_ data: Data) {
         guard hasStartedStreaming else {
             // Initial connect, or mid-reconnect: buffer until the current
-            // pair of sockets both share one byte-identical origin, per
-            // docs/soniox-routing.md's audio-origin rule.
-            guard mConfigSent, tConfigSent else {
+            // socket has accepted its config.
+            guard configSent else {
                 appendBufferedAudio(data)
                 return
             }
             hasStartedStreaming = true
-            streamM?.sendAudio(data)
-            streamT?.sendAudio(data)
+            socket?.sendAudio(data)
             return
         }
-        streamM?.sendAudio(data)
-        streamT?.sendAudio(data)
+        socket?.sendAudio(data)
     }
 
     private func appendBufferedAudio(_ data: Data) {
@@ -200,8 +228,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         keepaliveTimer?.invalidate()
         keepaliveTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.streamM?.sendKeepalive()
-                self?.streamT?.sendKeepalive()
+                self?.socket?.sendKeepalive()
             }
         }
     }
@@ -213,25 +240,21 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
 
     func end(completion: @escaping @MainActor () -> Void) {
         prepareToEnd()
-        streamM?.sendFinalize()
-        streamT?.sendFinalize()
-        streamM?.sendEmptyFrame()
-        streamT?.sendEmptyFrame()
-        // The docs' end sequence waits for `finished` on both, then closes;
-        // this app is not the one that gets to hold a metered stream open
+        socket?.sendFinalize()
+        socket?.sendEmptyFrame()
+        // The docs' end sequence waits for `finished`, then closes; this
+        // app is not the one that gets to hold a metered stream open
         // indefinitely waiting for it, so a short grace window stands in
         // for that wait, and `close()` always runs after it either way.
         scheduler.schedule(after: 1.5) { [weak self] in
-            self?.streamM?.close()
-            self?.streamT?.close()
+            self?.socket?.close()
             completion()
         }
     }
 
     func endImmediately(completion: @escaping @MainActor () -> Void) {
         prepareToEnd()
-        streamM?.close()
-        streamT?.close()
+        socket?.close()
         completion()
     }
 
@@ -253,19 +276,25 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         // immediately after `end`/`endImmediately`, not only once
         // something later happens to call `start` again.
         clearBufferedAudio()
-        // Same reasoning for the join engine's own pending joins: a
-        // reconnect already abandons them explicitly (docs/soniox-routing.md)
-        // so the internal state stays honest rather than silently
-        // depending on the server's own `<fin>` arriving before `close()`
-        // fires - `end`/`endImmediately` must not be the one path left
-        // where a still-pending join's state quietly goes stale instead.
-        joinEngine?.abandonAllPendingJoins()
+        // Abandons any still-queued or in-flight on-device translation -
+        // NOT the underlying stream itself (see `MeTranslationQueue.abandonAll`):
+        // `.translationTask`'s closure and its stream live for the whole
+        // conversation, across "Phiên mới", so they must keep working for
+        // the next session.
+        translationQueue.abandonAll()
+        // Same reasoning for the M-direct (non-`me`) in-progress translations
+        // a reconnect already abandons explicitly (docs/soniox-routing.md),
+        // so the internal state stays honest rather than silently depending
+        // on the server's own `<fin>` arriving before `close()` fires -
+        // `end`/`endImmediately` must not be the one path left where a
+        // still-pending one quietly goes stale instead.
+        joinEngine?.abandonMDirectTranslationsInProgress()
         if let engine = joinEngine {
             onSegmentsChanged?(engine.segments)
         }
     }
 
-    private func handle(_ event: SonioxSocketEvent, isStreamM: Bool, generation: Int, epoch: Int) {
+    private func handle(_ event: SonioxSocketEvent, generation: Int, epoch: Int) {
         // Auth wins across a session's own reconnect attempts - deliberately
         // NOT behind the generation guard below, which exists to filter
         // stale reconnect-attempt noise, not a terminal "the key is
@@ -284,9 +313,8 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         case .authRejected:
             break // handled above, unreachable here
         case .configSent:
-            if isStreamM { mConfigSent = true } else { tConfigSent = true }
+            configSent = true
             flushBufferedAudioIfReady()
-            guard mConfigSent, tConfigSent else { return }
             reconnectAttempt = 0
             if let completion = pendingStartCompletion {
                 pendingStartCompletion = nil
@@ -297,11 +325,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
             }
         case .response(let response):
             guard let engine = joinEngine else { return }
-            if isStreamM {
-                engine.applyStreamM(response.tokens)
-            } else {
-                engine.applyStreamT(response.tokens)
-            }
+            engine.applyStreamM(response.tokens)
             onSegmentsChanged?(engine.segments)
         case .closed:
             guard !isEnding else { return }
@@ -310,29 +334,25 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
                 completion(false)
                 return
             }
-            // Move this pair out of "current" immediately - a second close
-            // event from the SAME pair (e.g. T also detecting the drop
-            // moments after M) must be recognised as stale by the guard
-            // above, not treated as an independent second drop.
+            // Move this socket out of "current" immediately - a second
+            // close event from the SAME socket must be recognised as
+            // stale by the guard above, not treated as an independent
+            // second drop.
             connectionGeneration += 1
             handleDrop()
         }
     }
 
     private func flushBufferedAudioIfReady() {
-        guard mConfigSent, tConfigSent, !bufferedAudio.isEmpty else { return }
+        guard configSent, !bufferedAudio.isEmpty else { return }
         for chunk in bufferedAudio {
-            streamM?.sendAudio(chunk)
-            streamT?.sendAudio(chunk)
+            socket?.sendAudio(chunk)
         }
         clearBufferedAudio()
     }
 
-    /// A drop on either socket reconnects BOTH together, so they share one
-    /// fresh audio origin again from byte zero - a one-sided reconnect can
-    /// never restore a shared origin between two independently-reset
-    /// clocks. The first drop runs the abandon/notify dance once; if the
-    /// replacement pair itself then fails before ever finishing that
+    /// The first drop runs the abandon/notify dance once; if the
+    /// replacement socket itself then fails before ever finishing that
     /// dance, this just retries - `isReconnecting` already being `true` is
     /// what tells the two cases apart. Captured audio is NOT cleared here:
     /// it keeps accumulating (bounded by `bufferedAudioMaxBytes`) across
@@ -345,7 +365,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
             isReconnecting = true
             reconnectAttempt = 0
             joinEngine?.closeOpenSegmentForReconnect()
-            joinEngine?.abandonAllPendingJoins()
+            joinEngine?.abandonMDirectTranslationsInProgress()
             joinEngine?.handleStreamMReconnected()
             if let engine = joinEngine {
                 onSegmentsChanged?(engine.segments)
@@ -353,20 +373,17 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
             onDisconnected?()
         }
 
-        streamM?.close()
-        streamT?.close()
-        streamM = nil
-        streamT = nil
-        mConfigSent = false
-        tConfigSent = false
+        socket?.close()
+        socket = nil
+        configSent = false
         hasStartedStreaming = false
 
         scheduleReconnectAttempt()
     }
 
     /// HANDOFF section 6: "retry backoff". Doubles from `reconnectBaseDelay`
-    /// up to `reconnectMaxDelay`, resetting to zero the moment a pair fully
-    /// connects again (`handle`'s `.configSent` branch). Checks
+    /// up to `reconnectMaxDelay`, resetting to zero the moment the socket
+    /// fully connects again (`handle`'s `.configSent` branch). Checks
     /// `isReconnecting`/`isEnding` again when it actually fires, since a
     /// lot can happen during the wait: the session could have ended, or an
     /// auth error could have already won.
@@ -375,18 +392,16 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         reconnectAttempt += 1
         scheduler.schedule(after: delay) { [weak self] in
             guard let self, self.isReconnecting, !self.isEnding else { return }
-            self.connectBothFresh()
+            self.connectFresh()
         }
     }
 
-    /// Opens a brand-new pair of sockets against the current `config` and
-    /// wires both back into `handle`, stamped with a freshly-incremented
-    /// generation so any lingering event from a superseded pair is
-    /// discarded rather than mistaken for this pair's own status. Used both
-    /// for the initial connect and for every reconnect/retry attempt - in
-    /// every case the two sockets must come up as one pair sharing a fresh
-    /// origin, never independently.
-    private func connectBothFresh() {
+    /// Opens a brand-new socket against the current `config` and wires it
+    /// back into `handle`, stamped with a freshly-incremented generation so
+    /// any lingering event from a superseded socket is discarded rather
+    /// than mistaken for this socket's own status. Used both for the
+    /// initial connect and for every reconnect/retry attempt.
+    private func connectFresh() {
         guard let config else { return }
         connectionGeneration += 1
         let generation = connectionGeneration
@@ -395,20 +410,50 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         var hints = [config.meLanguage, config.targetLanguage]
         if let guestHint = config.guestHint { hints.append(guestHint) }
 
-        let m = makeSocket()
-        let t = makeSocket()
-        // Labels the one-shot translation_status wire-shape diagnostic
-        // only (see `SonioxStreamSocket`) - a no-op for a test's fake,
-        // which never conforms to the concrete adapter type.
-        (m as? SonioxStreamSocket)?.streamLabel = "M"
-        (t as? SonioxStreamSocket)?.streamLabel = "T"
-        streamM = m
-        streamT = t
+        let newSocket = makeSocket()
+        socket = newSocket
 
-        m.onEvent = { [weak self] event in self?.handle(event, isStreamM: true, generation: generation, epoch: epoch) }
-        t.onEvent = { [weak self] event in self?.handle(event, isStreamM: false, generation: generation, epoch: epoch) }
+        newSocket.onEvent = { [weak self] event in self?.handle(event, generation: generation, epoch: epoch) }
 
-        m.connect(apiKey: config.apiKey, languageHints: hints, targetLanguage: config.meLanguage)
-        t.connect(apiKey: config.apiKey, languageHints: hints, targetLanguage: config.targetLanguage)
+        newSocket.connect(apiKey: config.apiKey, languageHints: hints, targetLanguage: config.meLanguage)
+    }
+
+    // MARK: - On-device me -> target translation
+
+    private func enqueueMeTranslation(segmentId: Int, source: String) {
+        let requestId = nextTranslationRequestId
+        nextTranslationRequestId += 1
+        translationRequestSegmentId[requestId] = segmentId
+        translationQueue.enqueue(id: requestId, source: source)
+    }
+
+    func makeTranslationRequests() -> AsyncStream<(id: Int, source: String)> {
+        translationQueue.makeRequests()
+    }
+
+    func reportTranslationStarted(id: Int) {
+        guard let segmentId = translationRequestSegmentId[id] else { return }
+        joinEngine?.applyTranslationStarted(segmentId: segmentId)
+        if let engine = joinEngine { onSegmentsChanged?(engine.segments) }
+    }
+
+    func reportTranslationSuccess(id: Int, target: String) {
+        guard let segmentId = translationRequestSegmentId.removeValue(forKey: id) else { return }
+        translationQueue.finished(id: id)
+        joinEngine?.applyTranslationSuccess(segmentId: segmentId, target: target)
+        if let engine = joinEngine { onSegmentsChanged?(engine.segments) }
+    }
+
+    func reportTranslationFailure(id: Int) {
+        guard let segmentId = translationRequestSegmentId.removeValue(forKey: id) else { return }
+        translationQueue.finished(id: id)
+        joinEngine?.applyTranslationFailure(segmentId: segmentId)
+        if let engine = joinEngine { onSegmentsChanged?(engine.segments) }
+    }
+
+    private func handleTranslationAbandoned(requestId: Int) {
+        guard let segmentId = translationRequestSegmentId.removeValue(forKey: requestId) else { return }
+        joinEngine?.applyTranslationFailure(segmentId: segmentId)
+        if let engine = joinEngine { onSegmentsChanged?(engine.segments) }
     }
 }

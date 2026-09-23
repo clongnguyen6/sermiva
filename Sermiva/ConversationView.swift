@@ -1,4 +1,5 @@
 import SwiftUI
+import Translation
 import UIKit
 
 /// HANDOFF.md section 2.2, "Phu de" display style only. Demo mode: the
@@ -34,9 +35,39 @@ struct ConversationView<Controller: SessionControlling>: View {
                     authErrorBanner
                 } else if controller.state == .reconnecting {
                     networkLostBanner
+                } else if controller.showsTranslationUnavailableBanner {
+                    translationUnavailableBanner
                 }
                 content
                 bottomDock
+            }
+        }
+        // Fatal-error rule 3: attached to the root ZStack, which lives for
+        // the whole conversation (RootView's `.liveConversation` case;
+        // sheets only ever cover it, never replace it) - never in
+        // RootView. `controller.translationConfiguration` is `nil` in
+        // demo, so this closure never runs there.
+        .translationTask(controller.translationConfiguration) { session in
+            // Fatal-error rule 1: `session` is used only here, inside this
+            // closure - never stored, never passed out. Rule 4: a fresh
+            // stream every time this runs, consumed sequentially (rule 5 -
+            // no concurrent `translate` calls, since nothing here spawns a
+            // child `Task`). Rule 6: the `for await` loop ending (the view
+            // disappearing, or this task being cancelled) is exactly what
+            // makes `makeTranslationRequests()`'s own stream terminate,
+            // which is where queued/in-flight ids get abandoned - see
+            // `MeTranslationQueue`.
+            for await request in controller.makeTranslationRequests() {
+                // Rule 7: "Đang dịch…" starts here, not when merely queued.
+                controller.reportTranslationStarted(id: request.id)
+                do {
+                    let response = try await session.translate(request.source)
+                    controller.reportTranslationSuccess(id: request.id, target: response.targetText)
+                } catch {
+                    // Rule 8: every error means "no translation" - never
+                    // retried automatically.
+                    controller.reportTranslationFailure(id: request.id)
+                }
             }
         }
         .sheet(isPresented: $showEndSheet) {
@@ -186,6 +217,28 @@ struct ConversationView<Controller: SessionControlling>: View {
             ProgressView()
                 .tint(Tokens.warn)
             Text("Mất mạng. Nội dung được giữ.")
+                .font(.system(size: bannerTextSize))
+                .foregroundStyle(Tokens.text2)
+            Spacer()
+        }
+        .padding(10)
+        .background(Tokens.surface2)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
+    }
+
+    /// The banner shown from a live session's start-of-session
+    /// availability check (`.installed` fails) through the rest of that
+    /// session, per docs/soniox-routing.md - reuses the same banner style
+    /// as the other three above (HANDOFF 2.2's "info" banner variant).
+    /// `controller.showsTranslationUnavailableBanner` is always `false` in
+    /// demo, so this never shows there.
+    private var translationUnavailableBanner: some View {
+        HStack {
+            Image(systemName: "info.circle")
+                .foregroundStyle(Tokens.text3)
+            Text("Lời của Bạn sẽ không được dịch sang tiếng Anh trên máy này.")
                 .font(.system(size: bannerTextSize))
                 .foregroundStyle(Tokens.text2)
             Spacer()

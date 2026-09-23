@@ -34,6 +34,12 @@ final class SermivaUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Mic tắt"].waitForExistence(timeout: 10), "the mic dock must say Mic tat in demo, at every session state")
         XCTAssertEqual(startButton.label, "Tạm dừng", "the primary button must reflect the listening state, not still say Bat dau or wrongly say Tiep tuc")
 
+        // Demo never reaches Apple Translation (`translationConfiguration`
+        // is always nil there), so the "translation unavailable" banner -
+        // reachable only from a live session's own availability check -
+        // must never show here.
+        XCTAssertFalse(app.staticTexts["Lời của Bạn sẽ không được dịch sang tiếng Anh trên máy này."].exists, "demo must never show the live-only translation-unavailable banner")
+
         let currentSegment = app.otherElements["currentSegment"]
         XCTAssertTrue(currentSegment.waitForExistence(timeout: 10), "the first fixture segment must appear once listening starts")
 

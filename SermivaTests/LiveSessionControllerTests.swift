@@ -209,6 +209,24 @@ final class LiveSessionControllerTests: XCTestCase {
         XCTAssertEqual(audio.stopCount, 1, "dropping the controller must stop capture, not leave the mic open")
     }
 
+    // MARK: - On-device me -> target translation pass-through
+
+    func test_translationMethodsPassThroughToTheLiveSession() {
+        let session = FakeSonioxLiveSession()
+        let (controller, _, _, _) = makeController(session: session)
+
+        _ = controller.makeTranslationRequests()
+        controller.reportTranslationStarted(id: 1)
+        controller.reportTranslationSuccess(id: 1, target: "Hello")
+        controller.reportTranslationFailure(id: 2)
+
+        XCTAssertEqual(session.makeTranslationRequestsCallCount, 1)
+        XCTAssertEqual(session.reportedTranslationStarted, [1])
+        XCTAssertEqual(session.reportedTranslationSuccess.map(\.id), [1])
+        XCTAssertEqual(session.reportedTranslationSuccess.map(\.target), ["Hello"])
+        XCTAssertEqual(session.reportedTranslationFailure, [2])
+    }
+
     func test_audioBufferCallbackForwardsToTheLiveSession() {
         let (controller, audio, session, _) = makeController()
         controller.primaryButtonTapped() // -> listening, wires onAudioBuffer
