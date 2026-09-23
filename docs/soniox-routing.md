@@ -55,12 +55,16 @@ result back - is plain, testable Swift with no dependency on Apple's framework:
 
 - `SessionControlling` (implemented by both `DemoSessionController` and `LiveSessionController`)
   exposes `translationConfiguration`, `makeTranslationRequests() -> AsyncStream<(id: Int, source:
-  String)>`, and `reportTranslationStarted(id:)`/`reportTranslationSuccess(id:target:)`/
+  String)>`, and `reportTranslationStarted(id:) -> Bool`/`reportTranslationSuccess(id:target:)`/
   `reportTranslationFailure(id:)`.
 - `LiveSessionController` forwards these to `SonioxLiveSession`, which owns `MeTranslationQueue` (the
   FIFO queue itself - no `TranslationSession` anywhere in it) and `SonioxJoinEngine` (which still owns
   `segments`, including a `me`-language segment's `target`/`translationInProgress`/`targetAbandoned`,
   via `applyTranslationStarted`/`applyTranslationSuccess`/`applyTranslationFailure`).
+- `LanguageAvailability`'s own async calls sit behind `MeToTargetAvailabilityChecking`
+  (`RealMeToTargetAvailabilityChecker` in production), so `LiveSessionControllerTests` can drive the
+  gate/banner/config-once logic below with a fake status instead of the real, Simulator-unavailable
+  framework.
 - `ConversationView`'s `.translationTask` closure is the only place a real `TranslationSession` is
   ever touched - a `for await` loop over `makeTranslationRequests()`, sequential, one request at a
   time, reporting back by id. This closure is the "Apple adapter" - thin and untested, exactly like
@@ -73,6 +77,30 @@ rules with a fake standing in for the closure (driving the same `makeTranslation
 `reportTranslation...` contract the real closure drives, with a fake translated string instead of a
 real `TranslationSession`), and what would let a different per-segment engine replace Apple later by
 changing only that one closure.
+
+### Two gates, not one (review round 2, finding 1)
+
+The live session-start availability check does not merely drive the banner - it actually gates
+whether anything is ever enqueued or translated, matching the documented "only `.installed`..."
+contract literally:
+
+1. **Enqueue-time gate** (`SonioxLiveSession.enqueueMeTranslation`): a `me` segment only ever reaches
+   the queue at all while `isTranslationAvailable` is `true` - a flag `LiveSessionController` sets via
+   `setTranslationAvailable(_:)` once its own check confirms `.installed`, reset to `false` at every
+   session start (fail closed while that check is still in flight).
+2. **Report-started gate** (`reportTranslationStarted(id:) -> Bool`): even a request that WAS
+   legitimately enqueued can still surface from the queue's own long-lived, cross-session `AsyncStream`
+   after it should no longer be honoured - availability dropped, or (see the ending section below) the
+   session that enqueued it has since ended. Returning `false` here is what tells `ConversationView`'s
+   closure to skip the actual `translate` call entirely for that request, never merely to discard its
+   result afterward. `true` means the closure should actually call `translate` and show "Đang dịch…".
+
+**The configuration itself is created at most once, ever, and only once `.installed` is actually
+confirmed** - never for `.supported` or `.unsupported` (review round 2's explicit decision). Creating
+it for `.supported` would let the very first `translate` call trigger the system's own download sheet
+mid-session, with the mic already live - never acceptable. If a later session start finds the
+language pack has since been removed, the (already-created) configuration is left exactly as it is
+(fatalError rule 2 forbids touching it again) - only `isTranslationAvailable` and the banner move.
 
 ### The eight fatalError rules (owner-confirmed against Apple's docs)
 
@@ -92,15 +120,23 @@ handoff:
    through `SessionControlling`, and is `nil` in demo, so the demo closure never runs.
 4. `makeTranslationRequests()` returns a fresh `AsyncStream` every call, so a re-run of the closure
    (should SwiftUI ever re-invoke it) never double-consumes a stream still wired to a previous run.
+   `MeTranslationQueue` tags each stream with its own generation, so a SUPERSEDED stream's belated
+   `onTermination` (it can fire well after a newer stream already exists) can never abandon the newer
+   stream's own pending requests - review round 2's finding 3, reproduced and fixed; see
+   `MeTranslationQueueTests`.
 5. Inside the closure, `translate` calls are sequential - at most one is ever awaited at a time (a
    plain `for await` loop, no child `Task` spawned per request).
 6. Every `catch` in the closure, and the stream's own `onTermination` (the view disappearing, or the
    task being cancelled), marks the affected queued/in-flight ids abandoned and clears "Đang dịch…".
+   Abandoning never finishes the stream itself (it must keep working for the next session, per rule 3)
+   - so a request already sitting in its buffer before the abandonment still surfaces later; that is
+   exactly what `reportTranslationStarted`'s `Bool` return exists to catch (review round 2, finding 2).
 7. "Đang dịch…" for a `me` segment is true only from the moment the closure actually calls
-   `translate` for that id (`reportTranslationStarted`) until it returns or throws - being merely
-   queued does not count (AGENTS.md's activity-indicator invariant).
+   `translate` for that id (`reportTranslationStarted` returned `true`) until it returns or throws -
+   being merely queued does not count (AGENTS.md's activity-indicator invariant).
 8. `me != target` is enforced before the configuration is created. Empty/whitespace-only source is
-   never sent. Every error means "no translation" - never retried automatically.
+   never sent. Every error means "no translation" - never retried automatically. See "Two gates, not
+   one" above for how "only `.installed` enqueues/translates" is actually enforced, not just implied.
 
 Other iOS 18 rules: resolve `vi`/`en` against `LanguageAvailability().supportedLanguages` by
 `languageCode`, preferring `en-US` when several English entries exist (`TranslationLanguages.swift`);
@@ -130,13 +166,28 @@ Right after a successful "Kiểm tra và tiếp tục", before any metered sessi
 4. `.unsupported`, a decline, or an error: continue to the conversation regardless - the live
    session-start check then shows the banner below if it is still unavailable.
 
+**Single-shot, honest handoff (review round 2, finding 4):** the whole window from tapping "Kiểm tra
+và tiếp tục" through this download check actually settling is one `isProcessing` state in `SetupView`
+(`validationState == .checking || keyPendingTranslationCheck != nil`), and BOTH
+"Kiểm tra và tiếp tục" and "Dùng thử bản demo" are disabled for its entire duration - not just during
+the network call. Before this fix, the download check's own async window left both buttons live: a
+second tap could set `translationDownloadConfiguration` a second time, and tapping "Dùng thử bản demo"
+mid-check could switch straight to demo only for the still-pending `onKeyValidated` to yank the user
+back into live moments later. There is never a path from demo into live except the user's own tap on
+"Dùng thử bản demo" while nothing else is in flight.
+
 ## Banner when vi -> en is unavailable (owner decision)
 
-Shown with the existing banner style (HANDOFF 2.2's "info" variant), lowest priority among
-`ConversationView`'s banners (mic-denied, auth-error and network-lost all take precedence). Text,
-verbatim: **"Lời của Bạn sẽ không được dịch sang tiếng Anh trên máy này."** Visible only from the
-live session-start availability check through the rest of that session, and never in demo
-(`DemoSessionController.showsTranslationUnavailableBanner` is always `false`).
+HANDOFF 2.2's "info" banner variant, not the danger/warn style the other three `ConversationView`
+banners use - matched exactly against the prototype's own `bannerStyle` (`design/claude-handoff/
+Sermiva.dc.html`, the `isBannerInfo` branch): `surface` background (not `surface2`), `text2` icon/text
+colour (not `text3`), and `10 10 10 14` padding (an extra 4 pt on the leading edge, not the other
+banners' uniform 10) - review round 2, finding 8. Lowest priority among `ConversationView`'s banners
+(mic-denied, auth-error and network-lost all take precedence). Text, verbatim: **"Lời của Bạn sẽ
+không được dịch sang tiếng Anh trên máy này."** Visible only from the live session-start availability
+check through the rest of that session - cleared immediately on a failed connect too (review round 2,
+finding 5: the check can resolve, and set the banner, before the connect attempt itself fails) - and
+never in demo (`DemoSessionController.showsTranslationUnavailableBanner` is always `false`).
 
 ## `target` mapping and "Đang dịch…" (from `Segment`)
 
@@ -168,6 +219,10 @@ abandoned. Translation-request ids are drawn from a counter that never resets ac
 (unlike Soniox segment ids, which do reset per `SonioxJoinEngine`) - this is what stops a stale,
 still-in-flight translation from a just-ended session ever landing on a same-numbered segment in the
 next one; see `SonioxLiveSessionTests.test_aStaleReportFromAnEndedSessionNeverLandsOnTheNextSessionsSameNumberedSegment`.
+Abandoning removes that id's tracking, but a request already sitting in the queue's own stream buffer
+before the abandonment still gets pulled out by a later `for await` - "Two gates, not one" above (and
+`test_endedSessionsQueuedRequestStillSurfacesButMustNeverBeStarted`) is what actually stops it from
+ever reaching `translate`.
 
 ## Why option B was stopped
 
@@ -229,6 +284,17 @@ a pause should read, from the Soniox Console (whichever usage unit it displays -
   confirms the keepalive page's billing statement; no movement would contradict it and needs its own
   follow-up).
 
+Also not yet measured: on-device `vi -> en` translation latency, from when the owner finishes a
+sentence (M's `<end>` for that segment) to when the English line actually appears (`target` lands).
+The same live session should record this over at least five sentences of different lengths (e.g.
+short/medium/long) and note it here next to the pause measurement above:
+
+- Sentence 1 (length, latency):
+- Sentence 2 (length, latency):
+- Sentence 3 (length, latency):
+- Sentence 4 (length, latency):
+- Sentence 5 (length, latency):
+
 ## Segment mapping (from stream M)
 
 `Segment { id; speaker; lang; source; target; isFinal; startedAt; overlap; targetAbandoned;
@@ -267,7 +333,7 @@ translationInProgress }`
 | Whether the `.translationTask` closure and its `for await` loop survive the app backgrounding without re-running (which would matter for fatalError rule 4's re-run guard). | Assume it can re-run; `makeTranslationRequests()` already returns a fresh stream every call, so a re-run cannot double-consume. |
 | Whether an in-flight `translate` call returns or throws cleanly when the app backgrounds or the task is cancelled mid-call. | Treated as any other error/termination - abandoned, never retried (rule 6/8). |
 | What `LanguageAvailability().status(from:to:)` actually returns on the owner's device for the resolved `vi`/`en-US` identifiers - `.installed` is assumed since both are reportedly already downloaded, but never logged live. | The one-shot resolved-identifier log (`TranslationLanguages.swift`) is what a live session should read to confirm. |
-| Per-segment translation latency for a typical utterance length - unmeasured, so how quickly "Đang dịch…" resolves in practice is unknown. | No assumption made; the indicator is purely signal-driven (rule 7), never a timer, so latency does not affect correctness, only how long it visibly shows. |
+| Per-segment translation latency for a typical utterance length - unmeasured, so how quickly "Đang dịch…" resolves in practice is unknown. See "Live measurements" above for the five-sentence measurement plan. | No assumption made; the indicator is purely signal-driven (rule 7), never a timer, so latency does not affect correctness, only how long it visibly shows. |
 | What the system's own download-progress sheet (Setup's `.supported` path) actually looks like - only reachable after deleting the vi/en language packs on a real device, never seen. | The app cannot restyle it either way; `SetupView` only records that the check ran and continues once it settles. |
 | One-way on speech already in the target language: `translation_status: "none"` is inferred from the docs' two-way example and an observed symptom, never read directly off the wire. | Treat `translation_status: "none"` as original (untranslated) speech, including for `<end>`/`<fin>` markers; log the raw string once a live session can confirm it (`SonioxStreamSocket`'s one-shot diagnostic, unchanged). |
 | Does the server ack the config before the first result? | listening on send; errors move state. |
