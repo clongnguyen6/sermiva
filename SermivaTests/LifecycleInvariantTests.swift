@@ -84,7 +84,7 @@ final class LifecycleInvariantTests: XCTestCase {
     /// paused; resume - must reach `.listening`, never stay `.reconnecting`.
     func test_named1_pauseDuringReconnectThenConnectionReturnsWhilePausedThenResume() async {
         await assertScenarioHolds([
-            .tapPrimary, .connectSucceeds, .audio(ms: 500),
+            .tapPrimary, .micPermissionAnswers(granted: true), .connectSucceeds, .audio(ms: 500),
             .drop, .tapPrimary, .fireNextTimer, .connectSucceeds, .tapPrimary,
         ])
     }
@@ -93,7 +93,7 @@ final class LifecycleInvariantTests: XCTestCase {
     /// resume - must show `.reconnecting`, never claim `.listening`.
     func test_named2_pauseWhileListeningThenDropWhilePausedThenResume() async {
         await assertScenarioHolds([
-            .tapPrimary, .connectSucceeds, .audio(ms: 500),
+            .tapPrimary, .micPermissionAnswers(granted: true), .connectSucceeds, .audio(ms: 500),
             .tapPrimary, .drop, .tapPrimary,
         ])
     }
@@ -115,7 +115,7 @@ final class LifecycleInvariantTests: XCTestCase {
     /// `finalize`) must be applied, not discarded as stale.
     func test_named4_finAnswerAfterEndIsApplied() async {
         await assertScenarioHolds([
-            .tapPrimary, .connectSucceeds, .audio(ms: 1000),
+            .tapPrimary, .micPermissionAnswers(granted: true), .connectSucceeds, .audio(ms: 1000),
             .response(finalPermille: 0, tailPermille: 1000, speaker: 1, english: false, endMarker: false),
             .confirmEnd, .finAnswer, .advance(ms: 2000),
         ])
@@ -129,7 +129,7 @@ final class LifecycleInvariantTests: XCTestCase {
     /// backing off - 1 s, 2 s, 4 s - not reconnect every second forever.
     func test_named5_backoffKeepsGrowingWhenConnectionsCloseBeforeAnyResponse() async {
         await assertScenarioHolds([
-            .tapPrimary, .connectSucceeds,
+            .tapPrimary, .micPermissionAnswers(granted: true), .connectSucceeds,
             .drop, .fireNextTimer, .connectSucceeds,
             .drop, .fireNextTimer, .connectSucceeds,
             .drop, .fireNextTimer, .connectSucceeds,
@@ -141,7 +141,7 @@ final class LifecycleInvariantTests: XCTestCase {
     /// `.listening` with the mic off.
     func test_named6_interruptionWhileReconnectingPausesTheSession() async {
         await assertScenarioHolds([
-            .tapPrimary, .connectSucceeds, .audio(ms: 500), .drop,
+            .tapPrimary, .micPermissionAnswers(granted: true), .connectSucceeds, .audio(ms: 500), .drop,
             .interruptionBegan, .fireNextTimer, .connectSucceeds, .interruptionEnded,
         ])
     }
@@ -149,7 +149,7 @@ final class LifecycleInvariantTests: XCTestCase {
     /// Item 4: the same during the first connect.
     func test_named7_interruptionWhileConnectingPausesTheSession() async {
         await assertScenarioHolds([
-            .tapPrimary, .audio(ms: 300), .interruptionBegan, .connectSucceeds, .interruptionEnded,
+            .tapPrimary, .micPermissionAnswers(granted: true), .audio(ms: 300), .interruptionBegan, .connectSucceeds, .interruptionEnded,
         ])
     }
 
@@ -157,7 +157,7 @@ final class LifecycleInvariantTests: XCTestCase {
     /// out at least every 10 s.
     func test_named8_keepaliveWhilePausedOnAnEstablishedConnection() async {
         await assertScenarioHolds([
-            .tapPrimary, .connectSucceeds, .tapPrimary, .advance(ms: 25_000),
+            .tapPrimary, .micPermissionAnswers(granted: true), .connectSucceeds, .tapPrimary, .advance(ms: 25_000),
         ])
     }
 
@@ -167,16 +167,77 @@ final class LifecycleInvariantTests: XCTestCase {
     func test_named9_aTranslationFromAnEndedSessionNeverLandsOnTheNextSession() async {
         let vietnameseSentence = LifecycleEvent.response(finalPermille: 1000, tailPermille: 0, speaker: 1, english: false, endMarker: true)
         await assertScenarioHolds([
-            .tapPrimary, .availabilityResolves(installed: true), .connectSucceeds,
+            .tapPrimary, .micPermissionAnswers(granted: true), .availabilityResolves(installed: true), .connectSucceeds,
             .audio(ms: 400), vietnameseSentence, .audio(ms: 400), vietnameseSentence,
-            .confirmEnd, .advance(ms: 2000), .tapPrimary, .availabilityResolves(installed: true), .connectSucceeds,
+            .confirmEnd, .advance(ms: 2000), .tapPrimary, .micPermissionAnswers(granted: true), .availabilityResolves(installed: true), .connectSucceeds,
             .audio(ms: 400), vietnameseSentence,
             .translationCompletes(success: true), .translationCompletes(success: true),
         ])
     }
 
+    // MARK: - The review of 46e9ca0
+
+    /// Item 3: a server that answers once and then closes, again and again,
+    /// must be backed off 1 s, 2 s, 4 s - one answer does not make a
+    /// connection healthy.
+    func test_named10_aServerThatAnswersThenClosesKeepsBackingOff() async {
+        let answer = LifecycleEvent.response(finalPermille: 1000, tailPermille: 0, speaker: 1, english: false, endMarker: true)
+        await assertScenarioHolds([
+            .tapPrimary, .micPermissionAnswers(granted: true), .connectSucceeds, .audio(ms: 200), answer,
+            .drop, .fireNextTimer, .connectSucceeds, .audio(ms: 200), answer,
+            .drop, .fireNextTimer, .connectSucceeds, .audio(ms: 200), answer,
+            .drop, .fireNextTimer, .connectSucceeds,
+        ])
+    }
+
+    /// Item 3: a connection that stayed established for the documented
+    /// minimum proved healthy, so backoff starts over at 1 s.
+    func test_named11_aConnectionEstablishedLongEnoughResetsBackoff() async {
+        await assertScenarioHolds([
+            .tapPrimary, .micPermissionAnswers(granted: true), .connectSucceeds,
+            .drop, .fireNextTimer, .connectSucceeds,
+            .drop, .fireNextTimer, .connectSucceeds,
+            .advance(ms: 30_000), .drop, .fireNextTimer, .connectSucceeds,
+        ])
+    }
+
+    /// Kết thúc while the permission answer is still on its way: the late
+    /// answer must not start a session behind "Đã kết thúc".
+    func test_named12_endWhileRequestingMicThenThePermissionAnswerArrives() async {
+        await assertScenarioHolds([
+            .tapPrimary, .confirmEnd, .micPermissionAnswers(granted: true), .advance(ms: 2000),
+        ])
+    }
+
+    /// Item 1: a translate call from the ended session still running when
+    /// Phiên mới is tapped, with the permission answer still pending, must
+    /// never bring the old transcript back or land anywhere - whichever value
+    /// `translatesSegmentsFinalizedAfterEnd` has.
+    func test_named13_aLateTranslationAfterPhienMoiWhilePermissionIsPending() async {
+        let vietnameseSentence = LifecycleEvent.response(finalPermille: 1000, tailPermille: 0, speaker: 1, english: false, endMarker: true)
+        await assertScenarioHolds([
+            .tapPrimary, .micPermissionAnswers(granted: true), .availabilityResolves(installed: true), .connectSucceeds,
+            .audio(ms: 300), .response(finalPermille: 0, tailPermille: 1000, speaker: 1, english: false, endMarker: false),
+            .confirmEnd, .finAnswer, .advance(ms: 2000),
+            .tapPrimary, .translationCompletes(success: true),
+            .micPermissionAnswers(granted: true), .availabilityResolves(installed: true), .connectSucceeds,
+            .audio(ms: 300), vietnameseSentence,
+        ], allowingSkippedEvents: true)
+    }
+
+    /// Item 1, the capture-failure path: Phiên mới whose capture fails never
+    /// reaches the session's `start()`.
+    func test_named14_aLateTranslationAfterPhienMoiWhoseCaptureFails() async {
+        await assertScenarioHolds([
+            .tapPrimary, .micPermissionAnswers(granted: true), .availabilityResolves(installed: true), .connectSucceeds,
+            .audio(ms: 300), .response(finalPermille: 0, tailPermille: 1000, speaker: 1, english: false, endMarker: false),
+            .confirmEnd, .finAnswer, .advance(ms: 2000),
+            .captureFailsNextStart, .tapPrimary, .micPermissionAnswers(granted: true), .translationCompletes(success: true),
+        ], allowingSkippedEvents: true)
+    }
+
     private func twentySecondOutageThenSecondDrop(confirmedPermille: Int) -> [LifecycleEvent] {
-        [.tapPrimary, .connectSucceeds, .drop]
+        [.tapPrimary, .micPermissionAnswers(granted: true), .connectSucceeds, .drop]
             + Array(repeating: LifecycleEvent.audio(ms: 1000), count: 20)
             + [
                 .fireNextTimer, .connectSucceeds,
@@ -185,14 +246,17 @@ final class LifecycleInvariantTests: XCTestCase {
             ]
     }
 
-    private func assertScenarioHolds(_ events: [LifecycleEvent], file: StaticString = #filePath, line: UInt = #line) async {
+    /// `allowingSkippedEvents`: the scenario is meaningful under either
+    /// value of `SonioxLiveSession.translatesSegmentsFinalizedAfterEnd`, and
+    /// with it `false` there is no translate call to complete.
+    private func assertScenarioHolds(_ events: [LifecycleEvent], allowingSkippedEvents: Bool = false, file: StaticString = #filePath, line: UInt = #line) async {
         let outcome = await LifecycleScenario.run(events)
         if let violation = outcome.violation {
             let report = await LifecycleScenario.report(events)
             XCTFail("\(violation.key)\n\(report)", file: file, line: line)
             return
         }
-        if outcome.applied.count != events.count {
+        if !allowingSkippedEvents, outcome.applied.count != events.count {
             let report = await LifecycleScenario.report(events)
             XCTFail("sanity: every scripted event must have been applicable\n\(report)", file: file, line: line)
         }
@@ -247,6 +311,9 @@ enum LifecycleEvent: CustomStringConvertible {
     case availabilityResolves(installed: Bool)
     /// The on-device `translate` call in flight returns (or throws).
     case translationCompletes(success: Bool)
+    /// The oldest pending microphone-permission request is answered - as in
+    /// the app, always asynchronously after Bắt đầu / Phiên mới.
+    case micPermissionAnswers(granted: Bool)
 
     var description: String {
         switch self {
@@ -273,6 +340,7 @@ enum LifecycleEvent: CustomStringConvertible {
         case .captureFailsNextStart: return "next capture start will fail"
         case .availabilityResolves(let installed): return "availability check returns \(installed ? ".installed" : ".supported")"
         case .translationCompletes(let success): return "translate call \(success ? "returns" : "throws")"
+        case .micPermissionAnswers(let granted): return "mic permission answer: \(granted ? "granted" : "denied")"
         }
     }
 }
@@ -630,6 +698,24 @@ final class LifecycleFakeTranslator {
     }
 }
 
+/// Answers mic-permission requests only when the test says so, oldest
+/// first - `RealMicPermissionProvider` answers after a hop, never inline.
+@MainActor
+final class LifecycleFakeMicPermission: MicPermissionProviding {
+    private var pending: [@MainActor (Bool) -> Void] = []
+
+    var pendingCount: Int { pending.count }
+
+    func requestPermission(_ completion: @escaping @MainActor (Bool) -> Void) {
+        pending.append(completion)
+    }
+
+    func answerOldest(granted: Bool) {
+        guard !pending.isEmpty else { return }
+        pending.removeFirst()(granted)
+    }
+}
+
 struct LifecycleNetworkError: Error {}
 
 enum LifecycleAudio {
@@ -713,8 +799,12 @@ final class LifecycleWorld {
     static let meLanguage = "vi"
 
     enum Phase: String {
-        case idle, connecting, active, ended, authError
+        case idle, requestingMic, micDenied, connecting, active, ended, authError
     }
+
+    /// A connection that stayed established this long proved healthy: only
+    /// then does reconnect backoff start over (docs/soniox-routing.md).
+    static let healthyConnectionSeconds = 30.0
 
     let clock = LifecycleVirtualClock()
     private(set) var sockets: [LifecycleFakeSocket] = []
@@ -722,6 +812,8 @@ final class LifecycleWorld {
     let capture = LifecycleFakeCapture()
     let availability = LifecycleFakeAvailability()
     let translator = LifecycleFakeTranslator()
+    let micPermission = LifecycleFakeMicPermission()
+    private var permissionOwners: [Int] = []
     private(set) var controller: LiveSessionController!
     private var consumer: Task<Void, Never>?
     private var segmentsSubscription: AnyCancellable?
@@ -778,7 +870,7 @@ final class LifecycleWorld {
         )
         let controller = LiveSessionController(
             apiKey: "placeholder-not-a-key",
-            micPermission: FakeMicPermissionProvider(granted: true),
+            micPermission: micPermission,
             audioCapture: capture,
             liveSession: session,
             translationAvailability: availability,
@@ -829,7 +921,7 @@ final class LifecycleWorld {
             } else {
                 violate("(h) reconnect timing", "connection #\(socket.id) opened at t=\(fmt(clock.now))s while \(isConnected ? "already connected" : "an attempt was already in flight")")
             }
-        case .idle, .ended, .authError:
+        case .idle, .requestingMic, .micDenied, .ended, .authError:
             violate("(a) connections", "connection #\(socket.id) was opened while \(phase.rawValue)")
         }
         socket.onKeepalive = { [unowned self, unowned socket] in self.keepaliveSent(on: socket) }
@@ -838,11 +930,19 @@ final class LifecycleWorld {
         return socket
     }
 
-    /// (k) a keepalive only ever goes out while the session is paused.
+    /// (k) a keepalive only ever goes out while the session is paused, and
+    /// never later than 10 s after the previous one (or after the pause or
+    /// the connection began) - checked at each keepalive, so a longer
+    /// interval is caught even when no step ends inside the gap.
     private func keepaliveSent(on socket: LifecycleFakeSocket) {
         guard phase == .active, paused, socket.userSession == userSession else {
             violate("(k) keepalive", "keepalive sent to connection #\(socket.id) at t=\(fmt(clock.now))s while \(phase.rawValue)\(paused ? "" : ", not paused")")
             return
+        }
+        let previous = socket.keepaliveTimes.dropLast().last ?? -.infinity
+        let since = max(pausedSince, socket.establishedAt ?? clock.now, previous)
+        if clock.now - since > Self.keepaliveIntervalSeconds + 1e-6 {
+            violate("(k) keepalive", "keepalive to connection #\(socket.id) at t=\(fmt(clock.now))s came \(fmt(clock.now - since))s after t=\(fmt(since))s; the bound is \(fmt(Self.keepaliveIntervalSeconds))s")
         }
     }
 
@@ -869,7 +969,7 @@ final class LifecycleWorld {
         switch phase {
         case .connecting, .active: return true
         case .ended: return sockets.contains { $0.userSession == userSession && $0.isOpen }
-        case .idle, .authError: return false
+        case .idle, .requestingMic, .micDenied, .authError: return false
         }
     }
 
@@ -1020,6 +1120,28 @@ final class LifecycleWorld {
             reached("translationCompletes")
             translator.complete(success: success)
             return true
+        case .micPermissionAnswers(let granted):
+            guard micPermission.pendingCount > 0, !permissionOwners.isEmpty else { return false }
+            let owner = permissionOwners.removeFirst()
+            if owner == userSession, phase == .requestingMic {
+                if !granted {
+                    reached("micDenied")
+                    phase = .micDenied
+                } else if capture.failsNextStart {
+                    // Capture is attempted before the socket; a failure
+                    // returns to idle with no connection and no network banner.
+                    reached("captureFailsAtStart")
+                    phase = .idle
+                    networkBanner = false
+                } else {
+                    phase = .connecting
+                    checkOwners.append(userSession)
+                }
+            } else {
+                reached("stalePermissionAnswer")
+            }
+            micPermission.answerOldest(granted: granted)
+            return true
         }
     }
 
@@ -1033,11 +1155,10 @@ final class LifecycleWorld {
         // during the end grace wait (HANDOFF section 5, round 5 finding 4).
         guard !endPending else { return false }
         switch phase {
-        case .connecting, .authError:
+        case .requestingMic, .connecting, .authError:
             return false
-        case .idle, .ended:
+        case .idle, .micDenied, .ended:
             let isNewSession = phase == .ended
-            let captureFails = capture.failsNextStart
             userSession += 1
             paused = false
             graceDeadline = nil
@@ -1051,16 +1172,8 @@ final class LifecycleWorld {
             translationAvailable = false
             unavailableBanner = false
             segmentsDirty.isDirty = true
-            if captureFails {
-                // Capture is attempted before the socket; a failure returns
-                // to idle with no connection and no network banner.
-                reached("captureFailsAtStart")
-                phase = .idle
-                networkBanner = false
-            } else {
-                phase = .connecting
-                checkOwners.append(userSession)
-            }
+            phase = .requestingMic
+            permissionOwners.append(userSession)
             controller.primaryButtonTapped()
             if isNewSession, !controller.segments.isEmpty {
                 violate("(g) new session", "Phiên mới kept \(controller.segments.count) segment(s) from the previous session")
@@ -1081,7 +1194,8 @@ final class LifecycleWorld {
     }
 
     private func confirmEnd() -> Bool {
-        guard phase == .connecting || phase == .active, !endPending else { return false }
+        guard phase == .requestingMic || phase == .connecting || phase == .active, !endPending else { return false }
+        if phase == .requestingMic { reached("endWhileRequestingMic") }
         let established = sockets.first { $0.userSession == userSession && $0.isEstablished }
         if phase == .active, established == nil {
             reached(paused ? "endWhilePausedAndDisconnected" : "endWhileReconnecting")
@@ -1124,9 +1238,15 @@ final class LifecycleWorld {
     }
 
     /// A connection of the current, running session is gone: the next
-    /// attempt is due after the documented backoff.
-    private func startWaitingToReconnect() {
+    /// attempt is due after the documented backoff. Backoff starts over only
+    /// if the connection that just went away had stayed established for the
+    /// documented minimum - answering once proves nothing.
+    private func startWaitingToReconnect(after socket: LifecycleFakeSocket?) {
         guard phase == .active else { return }
+        if let establishedAt = socket?.establishedAt, clock.now - establishedAt >= Self.healthyConnectionSeconds - 1e-9 {
+            reached("healthyConnectionResetBackoff")
+            backoffExponent = 0
+        }
         reconnectDue = clock.now + min(Self.backoffMaxSeconds, Self.backoffBaseSeconds * pow(2, Double(backoffExponent)))
         backoffExponent += 1
     }
@@ -1181,7 +1301,7 @@ final class LifecycleWorld {
                 owedResend = []
                 owedOutage = []
             } else {
-                startWaitingToReconnect()
+                startWaitingToReconnect(after: nil)
             }
         }
         socket.onEvent?(.closed(LifecycleNetworkError()))
@@ -1196,7 +1316,7 @@ final class LifecycleWorld {
             if socket.serverFinalizedMs > 0, from < end { reached("resendAfterPartialFinalize") }
             if paused { reached("dropWhilePaused") }
             owedResend = from < end ? Array(socket.received[from..<end]) : []
-            startWaitingToReconnect()
+            startWaitingToReconnect(after: socket)
         }
         socket.onEvent?(.closed(LifecycleNetworkError()))
     }
@@ -1220,10 +1340,6 @@ final class LifecycleWorld {
         tokens += LifecycleAudio.runs(socket.received[newFinal..<tailEnd]).map {
             SonioxToken(text: " n\($0.lowerBound)_\($0.upperBound)", isFinal: false, startMs: nil, endMs: nil,
                         speaker: speaker == 0 ? nil : "\(speaker)", language: nil, translationStatus: .original)
-        }
-        if socket.userSession == userSession, phase == .active {
-            // The server answered on this connection: backoff starts over.
-            backoffExponent = 0
         }
         recordApplied(socket.received[oldFinal..<newFinal], from: socket)
         socket.serverFinalizedMs = newFinal
@@ -1322,6 +1438,8 @@ final class LifecycleWorld {
     private var expectedState: SessionState {
         switch phase {
         case .idle: return .idle
+        case .requestingMic: return .requestingMic
+        case .micDenied: return .micDenied
         case .connecting: return .connecting
         case .ended: return .ended
         case .authError: return .authError
@@ -1333,19 +1451,28 @@ final class LifecycleWorld {
         switch phase {
         case .connecting: return !paused
         case .active: return !paused && !endPending
-        case .idle, .ended, .authError: return false
+        case .idle, .requestingMic, .micDenied, .ended, .authError: return false
         }
     }
 
-    /// HANDOFF section 5's dock vocabulary, from ground truth.
+    /// HANDOFF section 5's dock vocabulary, from ground truth. "Đang mở
+    /// mic…" only while the permission answer - the mic being opened - is
+    /// pending; the live app opens capture before it connects, so while
+    /// connecting the mic is either capturing or stopped (an interruption).
     private var expectedDockText: String {
         let state = expectedState
         if expectedMicOn { return state == .reconnecting ? "Mic giữ, chờ mạng" : "Đang nghe" }
         switch state {
         case .paused: return "Đã tạm dừng"
-        case .connecting, .requestingMic: return "Đang mở mic…"
+        case .requestingMic: return "Đang mở mic…"
+        case .micDenied: return "Chưa có quyền mic"
         default: return "Mic tắt"
         }
+    }
+
+    private var expectedDotRole: SessionPresentation.MicDotColorRole {
+        if expectedMicOn { return .live }
+        return phase == .requestingMic ? .warn : .neutral
     }
 
     func check() -> LifecycleViolation? {
@@ -1407,12 +1534,15 @@ final class LifecycleWorld {
             return LifecycleViolation(key: "(b) displayed state", message: "mic running \(capture.isRunning), shown as capturing \(controller.isMicCapturing), but it should be \(expectedMicOn ? "on" : "off")")
         }
         if controller.micDockText != expectedDockText {
-            return LifecycleViolation(key: "(b) displayed state", message: "dock says \"\(controller.micDockText)\", truth is \"\(expectedDockText)\"")
+            return LifecycleViolation(key: "(b) dock", message: "dock says \"\(controller.micDockText)\", truth is \"\(expectedDockText)\"")
+        }
+        if controller.micDotColorRole != expectedDotRole {
+            return LifecycleViolation(key: "(b) dock", message: "dock dot is .\(controller.micDotColorRole), truth is .\(expectedDotRole)")
         }
         if controller.isEndPending != endPending {
             return LifecycleViolation(key: "(b) displayed state", message: "isEndPending \(controller.isEndPending), truth \(endPending)")
         }
-        let canEnd = sessionRuns && !endPending
+        let canEnd = (sessionRuns || phase == .requestingMic) && !endPending
         if controller.canEnd != canEnd {
             return LifecycleViolation(key: "(b) displayed state", message: "canEnd \(controller.canEnd), truth \(canEnd)")
         }
@@ -1515,8 +1645,10 @@ final class LifecycleWorld {
         let established = establishedSocket != nil
         let handshaking = handshakingSocket != nil
         switch phase {
-        case .idle:
+        case .idle, .micDenied:
             add(8) { _ in .tapPrimary }
+        case .requestingMic:
+            add(1) { _ in .confirmEnd }
         case .ended:
             add(3) { _ in .tapPrimary }
         case .connecting:
@@ -1553,6 +1685,7 @@ final class LifecycleWorld {
         // a while, so calls and queued requests span Kết thúc and Phiên mới.
         add(availability.heldCount > 0 ? 10 : 0) { rng in .availabilityResolves(installed: rng.chance(80)) }
         add(translator.inFlight != nil ? 2 : 0) { rng in .translationCompletes(success: rng.chance(80)) }
+        add(micPermission.pendingCount > 0 ? 12 : 0) { rng in .micPermissionAnswers(granted: rng.chance(92)) }
         add(established ? 6 : 0) { rng in
             let anyPermille = rng.int(0...1000)
             let finalPermille = rng.pick([0, 100, 250, 500, 750, 1000, anyPermille])
