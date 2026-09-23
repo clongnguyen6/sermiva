@@ -98,6 +98,8 @@ struct SetupView: View {
                 }
                 .foregroundStyle(Tokens.accent)
                 .frame(minHeight: 44)
+                .disabled(isProcessing)
+                .opacity(isProcessing ? 0.5 : 1)
                 .accessibilityIdentifier("demoButton")
 
                 Text("Khóa chỉ lưu trên máy này.")
@@ -118,8 +120,21 @@ struct SetupView: View {
         apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    /// True from the moment "Kiểm tra và tiếp tục" is tapped until either a
+    /// terminal failure (`invalidKey`/`unusableConfiguration`/`networkError`)
+    /// or `onKeyValidated` actually fires - which includes the async
+    /// download-check window between a `.valid` key and the actual handoff.
+    /// Review round 2, finding 4: without covering that whole window, a
+    /// second tap re-ran the download check (setting its `@State`
+    /// configuration a second time) and "Dùng thử bản demo" stayed tappable,
+    /// so a late `onKeyValidated` could yank the user from demo into live
+    /// after they had already chosen demo.
+    private var isProcessing: Bool {
+        validationState == .checking || keyPendingTranslationCheck != nil
+    }
+
     private var canCheck: Bool {
-        !trimmedKey.isEmpty && validationState != .checking
+        !trimmedKey.isEmpty && !isProcessing
     }
 
     private var statusText: String? {
