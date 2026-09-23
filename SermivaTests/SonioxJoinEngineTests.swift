@@ -625,6 +625,37 @@ final class SonioxJoinEngineTests: XCTestCase {
         XCTAssertEqual(engine.segments.count, 2, "a marker already closed the previous segment - the next token always starts a new one")
     }
 
+    /// Review round 5, finding 10: `Character.isWhitespace` is `true` for a
+    /// leading newline, so a token starting with one is already a genuine
+    /// word boundary under the existing rule, exactly like a leading space -
+    /// locking this in with its own test rather than leaving it as an
+    /// untested side effect of `isWhitespace`'s definition.
+    func test_finalTokenStartingWithANewlineIsTreatedAsAWordBoundary() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([original("Chào", final: true, start: 0, end: 400, speaker: "1", lang: "vi")])
+        XCTAssertEqual(engine.segments.count, 1)
+
+        engine.applyStreamM([original("\nHi", final: true, start: 400, end: 700, speaker: "2", lang: "en")])
+
+        XCTAssertEqual(engine.segments.count, 2, "a leading newline is whitespace - a genuine word boundary, same as a leading space")
+        XCTAssertEqual(engine.segments[1].source, "\nHi")
+    }
+
+    /// Punctuation (a comma directly attached, no leading space) is NOT
+    /// whitespace, so it is a continuation like any other non-whitespace-
+    /// leading token - it must never cut a new segment on its own, even
+    /// with a different speaker/language.
+    func test_finalTokenStartingWithPunctuationButNoLeadingWhitespaceNeverCutsANewSegment() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([original("Chào", final: true, start: 0, end: 400, speaker: "1", lang: "vi")])
+        XCTAssertEqual(engine.segments.count, 1)
+
+        engine.applyStreamM([original(", hi", final: true, start: 400, end: 700, speaker: "2", lang: "en")])
+
+        XCTAssertEqual(engine.segments.count, 1, "punctuation with no leading whitespace is a continuation, not a word boundary")
+        XCTAssertEqual(engine.segments[0].source, "Chào, hi")
+    }
+
     // MARK: - Review round 4, finding 6: never show an empty segment.
 
     /// Live evidence: a segment "Người nói A" appeared with no text and no
