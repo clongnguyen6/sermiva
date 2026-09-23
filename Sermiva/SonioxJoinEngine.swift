@@ -209,7 +209,18 @@ final class SonioxJoinEngine {
             return
         }
 
-        if let lockedLang = segments[index].lang,
+        // Review round 3, finding 7 (live evidence): diarization can flip
+        // speaker between subword tokens of the same word ("B" / "ạn" of
+        // "Bạn") - a speaker or language change may only ever cut a new
+        // segment at a genuine word boundary: a token whose text starts
+        // with whitespace (the first token after a marker is already a
+        // boundary by construction, via `!isCurrentMSegmentOpen` above). A
+        // continuation token - no leading whitespace - stays in the open
+        // segment regardless of what speaker/language it itself carries;
+        // the segment's own `speaker`/`lang` stay exactly as its first
+        // token locked them, never re-inferred from a later continuation.
+        let isWordBoundary = token.text.first?.isWhitespace ?? true
+        if isWordBoundary, let lockedLang = segments[index].lang,
            (speakerLabel != segments[index].speaker || token.language != lockedLang) {
             // A final token changed speaker or language from the open
             // segment's locked values: cut a new segment rather than

@@ -95,7 +95,7 @@ final class SonioxJoinEngineTests: XCTestCase {
         engine.applyStreamM([original("Chào", final: true, start: 0, end: 500, speaker: "1", lang: "vi")])
         XCTAssertEqual(engine.segments.count, 1)
 
-        engine.applyStreamM([original("Hi", final: true, start: 600, end: 900, speaker: "2", lang: "en")])
+        engine.applyStreamM([original(" Hi", final: true, start: 600, end: 900, speaker: "2", lang: "en")])
 
         XCTAssertEqual(engine.segments.count, 2, "a final token from a different speaker must start a new segment even with no <end>")
         XCTAssertTrue(engine.segments[0].isFinal, "the previous segment must be locked closed")
@@ -258,7 +258,7 @@ final class SonioxJoinEngineTests: XCTestCase {
         engine.applyStreamM([original("worl", final: false, start: 400, end: 900, speaker: "1", lang: nil)])
         XCTAssertEqual(engine.segments[0].source, "Hello worl", "sanity: the partial tail is showing")
 
-        engine.applyStreamM([original("Hi", final: true, start: 1000, end: 1200, speaker: "2", lang: "en")])
+        engine.applyStreamM([original(" Hi", final: true, start: 1000, end: 1200, speaker: "2", lang: "en")])
 
         XCTAssertTrue(engine.segments[0].isFinal)
         XCTAssertEqual(engine.segments[0].source, "Hello ", "a segment closed by a speaker change must show only its locked final text, never the previous response's partial tail")
@@ -391,10 +391,10 @@ final class SonioxJoinEngineTests: XCTestCase {
         engine.applyStreamM([original("Hi", final: true, start: 0, end: 500, speaker: "7", lang: "en")])
         XCTAssertEqual(engine.segments[0].speaker, "A", "whichever raw id speaks first gets A, regardless of its numeric value")
 
-        engine.applyStreamM([original("Hey", final: true, start: 600, end: 900, speaker: "3", lang: "en")])
+        engine.applyStreamM([original(" Hey", final: true, start: 600, end: 900, speaker: "3", lang: "en")])
         XCTAssertEqual(engine.segments[1].speaker, "B")
 
-        engine.applyStreamM([original("Again", final: true, start: 1000, end: 1300, speaker: "7", lang: "en")])
+        engine.applyStreamM([original(" Again", final: true, start: 1000, end: 1300, speaker: "7", lang: "en")])
         XCTAssertEqual(engine.segments[2].speaker, "A", "the same raw id, still within the same connection, must keep its earlier letter")
     }
 
@@ -564,5 +564,61 @@ final class SonioxJoinEngineTests: XCTestCase {
         engine.applyTranslationStarted(segmentId: id)
 
         XCTAssertFalse(engine.segments[0].translationInProgress, "an already-abandoned segment must never be revived by a stray later report")
+    }
+
+    // MARK: - Review round 3, finding 7: never cut a segment inside a word.
+    // Live evidence: diarization flipped speaker between the subword tokens
+    // "B" and "ạn" of "Bạn", and the old rule cut on ANY final-token
+    // speaker/language change, splitting "Bạn nghề gì?" into a lone "B"
+    // (labelled B) and "ạn nghề gì?" (labelled A). A continuation token -
+    // one whose text does not start with whitespace - must stay in the
+    // open segment regardless of what speaker/language it itself carries.
+
+    func test_finalTokenWithNoLeadingWhitespaceNeverCutsANewSegmentEvenOnASpeakerChange() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([original("B", final: true, start: 0, end: 100, speaker: "1", lang: "vi")])
+        XCTAssertEqual(engine.segments.count, 1)
+
+        engine.applyStreamM([original("ạn nghề gì?", final: true, start: 100, end: 900, speaker: "2", lang: "vi")])
+
+        XCTAssertEqual(engine.segments.count, 1, "a continuation token (no leading whitespace) must never cut a new segment, even with a different speaker")
+        XCTAssertEqual(engine.segments[0].source, "Bạn nghề gì?")
+        XCTAssertEqual(engine.segments[0].speaker, "A", "the segment's speaker stays the label of its FIRST token, never inferred from a later continuation")
+    }
+
+    func test_finalTokenWithNoLeadingWhitespaceNeverCutsANewSegmentEvenOnALanguageChange() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([original("Chào", final: true, start: 0, end: 400, speaker: "1", lang: "vi")])
+        engine.applyStreamM([original("ish", final: true, start: 400, end: 700, speaker: "1", lang: "en")])
+
+        XCTAssertEqual(engine.segments.count, 1, "a continuation token must never cut on a language change either")
+        XCTAssertEqual(engine.segments[0].source, "Chàoish")
+        XCTAssertEqual(engine.segments[0].lang, "vi", "the locked language stays the first token's, never the continuation's")
+    }
+
+    func test_finalTokenWithLeadingWhitespaceStillCutsOnASpeakerChange() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([original("Chào", final: true, start: 0, end: 400, speaker: "1", lang: "vi")])
+        XCTAssertEqual(engine.segments.count, 1)
+
+        engine.applyStreamM([original(" Hi", final: true, start: 400, end: 700, speaker: "2", lang: "en")])
+
+        XCTAssertEqual(engine.segments.count, 2, "a genuine new-word token must still cut a new segment on a speaker/language change")
+        XCTAssertEqual(engine.segments[0].source, "Chào")
+        XCTAssertEqual(engine.segments[1].source, " Hi")
+        XCTAssertEqual(engine.segments[1].speaker, "B")
+    }
+
+    /// The first token after a marker is always a boundary, regardless of
+    /// leading whitespace - a marker already closes the previous segment.
+    func test_firstTokenAfterAMarkerStartsANewSegmentEvenWithNoLeadingWhitespace() {
+        let engine = SonioxJoinEngine(meLanguage: "vi")
+        engine.applyStreamM([
+            original("Chào", final: true, start: 0, end: 400, speaker: "1", lang: "vi"),
+            endMarker(),
+        ])
+        engine.applyStreamM([original("tiếp", final: true, start: 500, end: 900, speaker: "1", lang: "vi")])
+
+        XCTAssertEqual(engine.segments.count, 2, "a marker already closed the previous segment - the next token always starts a new one")
     }
 }
