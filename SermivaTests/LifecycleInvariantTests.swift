@@ -161,6 +161,20 @@ final class LifecycleInvariantTests: XCTestCase {
         ])
     }
 
+    /// Item 3: a translate call still running when its session ends, and a
+    /// request still queued behind it, must never land on the next
+    /// session's segment of the same number.
+    func test_named9_aTranslationFromAnEndedSessionNeverLandsOnTheNextSession() async {
+        let vietnameseSentence = LifecycleEvent.response(finalPermille: 1000, tailPermille: 0, speaker: 1, english: false, endMarker: true)
+        await assertScenarioHolds([
+            .tapPrimary, .availabilityResolves(installed: true), .connectSucceeds,
+            .audio(ms: 400), vietnameseSentence, .audio(ms: 400), vietnameseSentence,
+            .confirmEnd, .advance(ms: 2000), .tapPrimary, .availabilityResolves(installed: true), .connectSucceeds,
+            .audio(ms: 400), vietnameseSentence,
+            .translationCompletes(success: true), .translationCompletes(success: true),
+        ])
+    }
+
     private func twentySecondOutageThenSecondDrop(confirmedPermille: Int) -> [LifecycleEvent] {
         [.tapPrimary, .connectSucceeds, .drop]
             + Array(repeating: LifecycleEvent.audio(ms: 1000), count: 20)
@@ -1532,8 +1546,10 @@ final class LifecycleWorld {
         add(capture.isRunning ? 1 : 0) { _ in .interruptionBegan }
         add(1) { _ in .interruptionEnded }
         add(capture.failsNextStart ? 0 : 1) { _ in .captureFailsNextStart }
-        add(availability.heldCount > 0 ? 4 : 0) { rng in .availabilityResolves(installed: rng.chance(75)) }
-        add(translator.inFlight != nil ? 5 : 0) { rng in .translationCompletes(success: rng.chance(80)) }
+        // Resolve availability early and keep translate calls in flight for
+        // a while, so calls and queued requests span Kết thúc and Phiên mới.
+        add(availability.heldCount > 0 ? 10 : 0) { rng in .availabilityResolves(installed: rng.chance(80)) }
+        add(translator.inFlight != nil ? 2 : 0) { rng in .translationCompletes(success: rng.chance(80)) }
         add(established ? 6 : 0) { rng in
             let anyPermille = rng.int(0...1000)
             let finalPermille = rng.pick([0, 100, 250, 500, 750, 1000, anyPermille])
