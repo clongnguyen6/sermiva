@@ -398,36 +398,73 @@ the structure that carries them is now:
   task report completion to the delegate and then drops the session's strong reference to it
   (finding 5). This is adapter code and stays untested (AGENTS.md); the new "URLSession invalidated"
   and "object deinit" log lines are how a live session can confirm it.
+- **Backoff resets only when a server answers (review of 2046102, item 5).** Soniox sends no explicit
+  "config accepted" message, and the socket reporting its config SENT proves nothing about the server
+  accepting it. So `reconnectAttempt` resets only on the first response on a connection - not when the
+  config is sent, and not on a drop. A connection that takes the config and closes before any
+  response (or sends a non-auth error and closes - the adapter no longer reports such an error as a
+  response) keeps backing off 1 s, 2 s, 4 s … 30 s instead of reconnecting every second forever.
+- **Keepalive runs on the session's own scheduler (item 6).** Every 10 s while paused, through the
+  same `DemoScheduler` as every other session timer, stopped by a token - so it cannot survive Kết
+  thúc, an auth rejection or "Phiên mới", and the invariant test can see every keepalive.
+- **An interruption pauses the session in any running state (item 4).** A call, Siri, a
+  media-services reset or a lost input route stops capture; `handleCaptureStoppedExternally` now
+  pauses from `.connecting` (the state becomes `.paused` the moment the connection is established),
+  `.listening` and `.reconnecting`. Round 5 only paused from `.listening`, so an interruption while
+  connecting or reconnecting later showed `.listening` - "Đã kết nối", a "Tạm dừng" button, a
+  recognizing caret - with the mic off. While `.connecting` the dock keeps HANDOFF's
+  `connecting` line, "Đang mở mic…", for that short window. `RealAudioCapture` does not restart capture
+  when an interruption ends; Tiếp tục does.
+- **Only the current path monitor counts.** A cancelled monitor's last callback can still be on its
+  way (the real one hops to the main actor); it is ignored, so a previous session's monitor can never
+  start an attempt in the next session.
+- **Translation requests carry their session.** Each on-device request records the session epoch it
+  was made in; a report for a request from any other session is dropped, so a late result can never
+  land on a later session's same-numbered segment - whatever the queue's own stream still holds.
+- **"Phiên mới" closes a connection still in its close window first.** If that attempt's capture then
+  fails, nothing else would close it for up to 1.5 s, and its late `<fin>` answer would put the old
+  transcript back on an idle screen (found by the invariant test).
 
 **The invariant test** (`SermivaTests/LifecycleInvariantTests.swift`) drives the real controller and
-session through fake sockets (app-owned events only, no Soniox JSON), a virtual clock, fake path
-monitors and fake capture, with seeded random event sequences. An oracle that tracks ground truth on
-its own checks after every event: (a) at most one open connection, none once stopped; (b) the
-screen's state, dock line, end-pending flag and banners match the real connection and mic; (c) every
-connection receives exactly the audio the bounds above say, in order, and nothing else; (d) the
-transcript shows every piece of finalized audio exactly once; (e) auth wins; (f) an end completes
-within its bound and the `<fin>` answer is applied; (g) nothing - connection, path monitor, audio,
-transcript - crosses into the next session. It was red against 54b3202 (its own commit comes first).
-A failure prints the seed and a shrunk minimal sequence with the state after every step. The
-committed seed count keeps `./scripts/verify.sh` fast; `TEST_RUNNER_SERMIVA_FUZZ_SEEDS` and
-`TEST_RUNNER_SERMIVA_FUZZ_SEED_BASE` on the `xcodebuild test` command line scale it locally. It does
-not cover keepalive timing (a real `Timer`), mic interruptions or capture failures, or anything the
-real service or the adapter actually does.
+session through fake sockets (app-owned events only, no Soniox JSON), a virtual clock behind both
+schedulers, fake path monitors, fake capture (with interruptions and start failures), a fake
+availability check the test resolves when it chooses, and a fake translator driven exactly the way
+`ConversationView`'s `.translationTask` closure drives the real one. Server closes, connect failures
+and path events are generated in every phase they can happen in: the first connect, the grace wait,
+the close window after Kết thúc, and after the `<fin>` answer. An oracle that tracks ground truth on
+its own checks after every event: (a) at most one open connection, and none ever opened outside a
+running session; (b) the screen's state, dock line, end-pending flag and banners match the real
+connection and mic; (c) every connection receives exactly the audio the bounds above say, in order,
+and nothing else; (d) the transcript shows every piece of finalized audio exactly once; (e) auth
+wins; (f) an end completes within its bound and the `<fin>` answer is applied; (g) nothing -
+connection, path monitor, audio, transcript - crosses into the next session; (h) the path monitor
+runs exactly while a session runs, a reconnect attempt starts exactly when the documented backoff
+says (resetting only after a server answer), and a path-available event while waiting starts one at
+once; (i) a translation lands only on the segment it was made for, "Đang dịch…" shows exactly while
+a real call for that segment runs, and no call starts before `.installed` or after Kết thúc; (k) a
+keepalive goes out at least every 10 s while paused on an established connection, and never
+otherwise. It was red against 54b3202 and, extended, against 2046102 (each test commit comes before
+its fix). A failure prints the seed and a shrunk minimal sequence with the state after every step.
 
-**Choices this round made that the owner has not ruled on** (each is what the invariant test now
-asserts): the grace wait also applies to a paused session whose connection is down; auth arriving in
-the close window after Kết thúc moves `.ended` to `.authError`; a `me` segment finalized only by the
-`<fin>` answer gets no on-device translation (the alternative - let it translate after Kết thúc and
-abandon at "Phiên mới" instead - changes when the queue is abandoned).
+The committed seed count keeps `./scripts/verify.sh` fast. To scale it locally, put the variables in
+xcodebuild's own environment with a `TEST_RUNNER_` prefix, which xcodebuild strips before passing
+them to the test process: `TEST_RUNNER_SERMIVA_FUZZ_SEEDS=30000 TEST_RUNNER_SERMIVA_FUZZ_SEED_BASE=1
+xcodebuild … test`. Written after `xcodebuild` as `NAME=value` arguments they become build settings
+and never reach the test. The test does not cover the real `Timer`s left (the controller's elapsed
+counter), the real service, the adapters, or real audio hardware.
 
-**Device-only follow-ups, pre-existing and unproven** (not fixed; the invariant test does not model
-them):
+**Choices awaiting the owner** (each is what the invariant test asserts): the grace wait also
+applies to a paused session whose connection is down; auth arriving in the close window after Kết
+thúc moves `.ended` to `.authError`; choice (c) - a `me` segment finalized only by the `<fin>` answer
+after Kết thúc gets no on-device translation. Choice (c) is one constant,
+`SonioxLiveSession.translatesSegmentsFinalizedAfterEnd` (currently `false`), which the invariant test
+reads: setting it `true` enqueues such a segment while the connection closes, translates it after
+Kết thúc (no "Đang dịch…", since the screen is not running), and abandons whatever is left at
+"Phiên mới", where the session-epoch guard keeps any late result off the next session's segments.
 
-- `RealAudioCapture` does not observe `AVAudioEngineConfigurationChange`. If the engine stops for a
-  configuration change, nothing reports it, and the dock could keep saying "Đang nghe" with no audio.
-- An interruption (a call, Siri) while `.reconnecting`: `handleCaptureStoppedExternally` only pauses
-  from `.listening`, so the mic stops while the state stays `.reconnecting`; once the connection comes
-  back the screen shows `.listening` with "Mic tắt", and only Tạm dừng then Tiếp tục restarts the mic.
+**Device-only follow-up, pre-existing and unproven** (not fixed; the invariant test does not model
+it): `RealAudioCapture` does not observe `AVAudioEngineConfigurationChange`. If the engine stops for
+a configuration change, nothing reports it, and the dock could keep saying "Đang nghe" with no audio.
 
 ### Reading the lifecycle log (next live session)
 
@@ -444,7 +481,8 @@ URL. Lines, each with its own object's small integer id:
   phase …`, `session #S auth rejected by socket #N …`.
 - `session #S socket #N [M] task created (connect attempt) - K real tasks open now`, `… close() called
   by the app`, `… task ACTUALLY completed - K real tasks open now`, `… URLSession invalidated`, `…
-  object deinit`.
+  object deinit`, `… server error code N` (a non-auth error; the close that follows drives the
+  reconnect).
 - `session #S socket #N [M] stream M saw a new translation_status value: …` and `… marker <fin>
   carried translation_status: …` (category `SonioxTranslationStatusShape`).
 
