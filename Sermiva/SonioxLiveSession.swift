@@ -122,18 +122,32 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// Review round 4, finding 4a (owner decision): reconnect the instant
     /// iOS reports the network path is available again, instead of waiting
     /// out backoff. Created in `start(config:)`, cancelled as soon as the
-    /// session stops - a session-lifetime resource, like `keepaliveTimer`.
+    /// session stops - a session-lifetime resource, like the keepalive.
     private var pathMonitor: NetworkPathMonitoring?
 
     /// Persists across "Phiên mới" (this object is reused, only
     /// `joinEngine` is recreated) purely so translation request ids never
-    /// repeat - see `enqueueMeTranslation` and `translationRequestSegmentId`
+    /// repeat - see `enqueueMeTranslation` and `translationRequests`
     /// below for why that is what keeps a stale, still-in-flight on-device
     /// translation from a just-ended session from ever landing on a
     /// same-numbered segment in the next one.
     private let translationQueue = MeTranslationQueue()
     private var nextTranslationRequestId = 1
-    private var translationRequestSegmentId: [Int: Int] = [:]
+    /// Which segment, of which session (`sessionEpoch`), each on-device
+    /// translation request was made for. A report for a request from any
+    /// other session is dropped here, so a late result can never land on a
+    /// later session's same-numbered segment, whatever the queue still holds.
+    private var translationRequests: [Int: (sessionEpoch: Int, segmentId: Int)] = [:]
+    /// Documented choice (c), awaiting the owner's decision: a `me` segment
+    /// that only the `<fin>` answer after Kết thúc finalizes is not sent to
+    /// on-device translation. Flipping this to `true` is the whole change
+    /// for the recommended alternative: such a segment is then enqueued
+    /// while the connection closes, translated after Kết thúc (the
+    /// indicator only shows while the screen is running, so none shows
+    /// then), and abandoned at "Phiên mới" (`start` abandons whatever is
+    /// left; the session-epoch guard above keeps any late result off the
+    /// next session's segments).
+    static let translatesSegmentsFinalizedAfterEnd = false
     /// Set by `LiveSessionController` via `setTranslationAvailable` once its
     /// own per-session availability check resolves. `false` by default and
     /// reset at every `start()` - fail closed until explicitly confirmed, so
@@ -175,7 +189,14 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// Review round 4, finding 1: how many connection attempts THIS session
     /// (since the last `start()`) has made - purely a logging aid.
     private var sessionConnectionAttempt = 0
+    /// Attempts scheduled since a server last ANSWERED on a connection.
+    /// Review of 2046102, item 5: reset only by the first response on a
+    /// connection - Soniox sends no explicit "config accepted" message, and
+    /// the socket reporting its config SENT proves nothing about the server
+    /// accepting it. A server that takes the config, errors, and closes must
+    /// keep backing off, not reconnect every second forever.
     private var reconnectAttempt = 0
+    private var hasAnsweredOnThisConnection = false
     private let reconnectBaseDelay: TimeInterval = 1
     private let reconnectMaxDelay: TimeInterval = 30
     /// Per HANDOFF section 6, retry/backoff is a `reconnecting` (mid-
@@ -184,13 +205,14 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// tapping Bắt đầu again.
     private var pendingStartCompletion: (@MainActor (Bool) -> Void)?
     private var pendingEndCompletion: (@MainActor () -> Void)?
-    private var keepaliveTimer: Timer?
+    private let keepaliveInterval: TimeInterval = 10
     /// Each scheduled timer captures the token current when it was
     /// scheduled; bumping the token is how a timer is cancelled (the
     /// scheduler seam has no cancel). A stale timer that fires anyway does
     /// nothing.
     private var reconnectScheduleToken = 0
     private var closeScheduleToken = 0
+    private var keepaliveScheduleToken = 0
 
     // `nonisolated` so `LiveSessionController`'s default parameter value
     // (`= SonioxLiveSession()`) can construct one without already running
@@ -248,12 +270,21 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
 
         self.config = config
         sessionEpoch += 1
+        // Normally a no-op (`end` already abandoned the queue). Anything a
+        // previous session still has queued belongs to another epoch, so
+        // abandoning it touches no segment of the new session.
+        translationQueue.abandonAll()
         phase = .starting
         reconnectAttempt = 0
         sessionConnectionAttempt = 0
         isTranslationAvailable = false
         let monitor = makePathMonitor()
-        monitor.onPathAvailable = { [weak self] in self?.handlePathAvailable() }
+        // A cancelled monitor's last callback can still be on its way (the
+        // real one hops to the main actor): only the current monitor counts.
+        monitor.onPathAvailable = { [weak self, weak monitor] in
+            guard let self, let monitor, monitor === self.pathMonitor else { return }
+            self.handlePathAvailable()
+        }
         monitor.start()
         pathMonitor = monitor
         let engine = SonioxJoinEngine(meLanguage: config.meLanguage)
@@ -355,18 +386,24 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
 
     // MARK: - Pause
 
+    /// Every 10 s while paused, through the same scheduler as every other
+    /// timer here, so a stopped keepalive (a token bump) can never fire
+    /// again - not after Kết thúc, an auth rejection, or into a later session.
     func beginPauseKeepalive() {
-        keepaliveTimer?.invalidate()
-        keepaliveTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                self?.sendKeepaliveIfStreaming()
-            }
-        }
+        keepaliveScheduleToken += 1
+        scheduleKeepalive(token: keepaliveScheduleToken)
     }
 
     func endPauseKeepalive() {
-        keepaliveTimer?.invalidate()
-        keepaliveTimer = nil
+        keepaliveScheduleToken += 1
+    }
+
+    private func scheduleKeepalive(token: Int) {
+        scheduler.schedule(after: keepaliveInterval) { [weak self] in
+            guard let self, self.keepaliveScheduleToken == token else { return }
+            self.sendKeepaliveIfStreaming()
+            self.scheduleKeepalive(token: token)
+        }
     }
 
     /// Keepalive only means something on an established connection; while
@@ -502,6 +539,12 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         case .response(let response):
             guard phase == .streaming || phase == .ending else { return }
             if phase == .streaming {
+                if !hasAnsweredOnThisConnection {
+                    // The server answered: the connection really works, so
+                    // backoff starts over (see `reconnectAttempt`).
+                    hasAnsweredOnThisConnection = true
+                    reconnectAttempt = 0
+                }
                 trimFinalizedAudio(finalAudioProcMs: response.finalAudioProcMs)
             }
             guard let engine = joinEngine else { return }
@@ -538,7 +581,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     private func beginStreaming() {
         log("\(socketLabel(socket)) streaming")
         phase = .streaming
-        reconnectAttempt = 0
+        hasAnsweredOnThisConnection = false
         // The resent audio is the start of this connection's own stream.
         unfinalizedStartByte = 0
         for chunk in unfinalizedSentAudio {
@@ -558,7 +601,6 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         log("\(socketLabel(socket)) dropped")
         closeSocket()
         phase = .reconnecting
-        reconnectAttempt = 0
         joinEngine?.closeOpenSegmentForReconnect()
         joinEngine?.abandonMDirectTranslationsInProgress()
         joinEngine?.handleStreamMReconnected()
@@ -638,15 +680,28 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// obey before ever calling `translate`.
     ///
     /// A segment finalized after Kết thúc (by the `<fin>` answer, while the
-    /// connection closes) is not enqueued: `end()` already abandoned the
-    /// queue, and a request enqueued after that could otherwise outlive the
-    /// session and land on a same-numbered segment after "Phiên mới".
+    /// connection closes) is not enqueued - see
+    /// `translatesSegmentsFinalizedAfterEnd`.
     private func enqueueMeTranslation(segmentId: Int, source: String) {
-        guard isTranslationAvailable, phase != .ending else { return }
+        guard isTranslationAvailable else { return }
+        guard phase != .ending || Self.translatesSegmentsFinalizedAfterEnd else { return }
         let requestId = nextTranslationRequestId
         nextTranslationRequestId += 1
-        translationRequestSegmentId[requestId] = segmentId
+        translationRequests[requestId] = (sessionEpoch, segmentId)
         translationQueue.enqueue(id: requestId, source: source)
+    }
+
+    /// The segment `id` was made for - only if it belongs to the current
+    /// session. A request from another session is forgotten here.
+    private func currentSegmentId(forRequest id: Int, removing: Bool) -> Int? {
+        guard let request = translationRequests[id] else { return nil }
+        guard request.sessionEpoch == sessionEpoch else {
+            translationRequests.removeValue(forKey: id)
+            translationQueue.finished(id: id)
+            return nil
+        }
+        if removing { translationRequests.removeValue(forKey: id) }
+        return request.segmentId
     }
 
     func makeTranslationRequests() -> AsyncStream<(id: Int, source: String)> {
@@ -654,13 +709,13 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     }
 
     func reportTranslationStarted(id: Int) -> Bool {
-        guard let segmentId = translationRequestSegmentId[id] else { return false }
+        guard let segmentId = currentSegmentId(forRequest: id, removing: false) else { return false }
         guard isTranslationAvailable else {
             // Availability dropped (or was never confirmed) between this
             // request being enqueued and the closure reaching it - treat
             // exactly like any other abandonment: no translate call, no
             // indicator, never retried.
-            translationRequestSegmentId.removeValue(forKey: id)
+            translationRequests.removeValue(forKey: id)
             translationQueue.finished(id: id)
             joinEngine?.applyTranslationFailure(segmentId: segmentId)
             if let engine = joinEngine { onSegmentsChanged?(engine.segments) }
@@ -672,21 +727,21 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     }
 
     func reportTranslationSuccess(id: Int, target: String) {
-        guard let segmentId = translationRequestSegmentId.removeValue(forKey: id) else { return }
+        guard let segmentId = currentSegmentId(forRequest: id, removing: true) else { return }
         translationQueue.finished(id: id)
         joinEngine?.applyTranslationSuccess(segmentId: segmentId, target: target)
         if let engine = joinEngine { onSegmentsChanged?(engine.segments) }
     }
 
     func reportTranslationFailure(id: Int) {
-        guard let segmentId = translationRequestSegmentId.removeValue(forKey: id) else { return }
+        guard let segmentId = currentSegmentId(forRequest: id, removing: true) else { return }
         translationQueue.finished(id: id)
         joinEngine?.applyTranslationFailure(segmentId: segmentId)
         if let engine = joinEngine { onSegmentsChanged?(engine.segments) }
     }
 
     private func handleTranslationAbandoned(requestId: Int) {
-        guard let segmentId = translationRequestSegmentId.removeValue(forKey: requestId) else { return }
+        guard let segmentId = currentSegmentId(forRequest: requestId, removing: true) else { return }
         joinEngine?.applyTranslationFailure(segmentId: segmentId)
         if let engine = joinEngine { onSegmentsChanged?(engine.segments) }
     }

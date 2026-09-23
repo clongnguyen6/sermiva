@@ -377,7 +377,10 @@ final class LiveSessionController: ObservableObject, SessionControlling {
                 // succeeding clears the network-error banner - never merely
                 // being retried.
                 self.showsNetworkErrorBanner = false
-                self.startElapsedTimer()
+                // An interruption during the connect already paused it.
+                if !self.isPaused {
+                    self.startElapsedTimer()
+                }
             } else {
                 // `onAuthError` (wired in init) already handles a genuine
                 // 401/402/403 on its own, independent of this completion.
@@ -440,13 +443,24 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         state = runningState()
     }
 
+    /// An interruption (a call, Siri), a media-services reset or a lost
+    /// input route stopped capture. Whatever the connection is doing, the
+    /// session is now paused - the one true state with the mic off that
+    /// the user can leave with Tiếp tục. Review of 2046102, item 4: round 5
+    /// only did this from `.listening`, so an interruption while
+    /// `.connecting` or `.reconnecting` later showed `.listening` ("Đã kết
+    /// nối", a "Tạm dừng" button, a recognizing caret) with the mic off.
+    /// While `.connecting` the state itself stays `.connecting` - it
+    /// becomes `.paused` the moment the connection is established.
     private func handleCaptureStoppedExternally() {
         isMicCapturing = false
-        guard state == .listening else { return }
+        guard state == .connecting || isSessionRunning, !isPaused, !isEndPending else { return }
         stopElapsedTimer()
         liveSession.beginPauseKeepalive()
         isPaused = true
-        state = runningState()
+        if state != .connecting {
+            state = runningState()
+        }
     }
 
     /// `SonioxLiveSession` reports a rejected key until the session's
@@ -494,6 +508,12 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     /// `prepareTranslationForSessionStart` re-runs its own availability
     /// check, so no stale per-session state survives either way.
     private func startNewSession() {
+        // The ended session's connection may still be in its close window
+        // after Kết thúc. Close it before anything else: if this attempt's
+        // capture then fails, nothing would otherwise close it for 1.5 s,
+        // and its late `<fin>` answer would put the old transcript back on
+        // an idle screen (found by the invariant test).
+        liveSession.endImmediately { }
         segments = []
         elapsed = 0
         beginRequestingMic()

@@ -689,9 +689,10 @@ final class LifecycleWorld {
     static let keepaliveIntervalSeconds = 10.0
     static let backoffBaseSeconds = 1.0
     static let backoffMaxSeconds = 30.0
-    /// Documented choice (c), awaiting the owner: a `me` segment finalized
-    /// only by the `<fin>` answer after Kết thúc is not translated.
-    static let translatesSegmentsFinalizedAfterEnd = false
+    /// Documented choice (c), awaiting the owner: whether a `me` segment
+    /// finalized only by the `<fin>` answer after Kết thúc is translated.
+    /// Read from the product, so the test asserts whichever answer ships.
+    static var translatesSegmentsFinalizedAfterEnd: Bool { SonioxLiveSession.translatesSegmentsFinalizedAfterEnd }
     static let meLanguage = "vi"
 
     enum Phase: String {

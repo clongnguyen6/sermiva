@@ -254,6 +254,14 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
             onEvent?(.authRejected)
             return
         }
+        // Any other error is not an answer to the stream: it must not reach
+        // `SonioxLiveSession` as a `.response`, which is what resets its
+        // reconnect backoff (review of 2046102, item 5). The server closes
+        // the connection after it, and that close drives the reconnect.
+        if let code = response.errorCode {
+            lifecycleLogger.log("\(self.logPrefix, privacy: .public) server error code \(code, privacy: .public)")
+            return
+        }
         for wireToken in response.tokens ?? [] {
             recordTranslationStatusShape(wireToken)
         }
