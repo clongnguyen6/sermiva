@@ -842,7 +842,7 @@ final class LifecycleWorld {
     private var finAnswerApplied = false
     /// Reconnect model: when the next attempt is due (nil while an attempt
     /// is in flight or a connection is established), and how many attempts
-    /// have been scheduled since a server last answered on a connection.
+    /// have been scheduled since a connection last stayed established 30 s.
     private var reconnectDue: Double?
     private var backoffExponent = 0
     private var isDeliveringPathEvent = false
@@ -915,7 +915,7 @@ final class LifecycleWorld {
                 if isDeliveringPathEvent {
                     reached("pathEventStartedAttempt")
                 } else if abs(clock.now - due) > 1e-6 {
-                    violate("(h) reconnect timing", "reconnect attempt #\(socket.id) opened at t=\(fmt(clock.now))s; the backoff says t=\(fmt(due))s (\(backoffExponent) attempts scheduled since a server last answered)")
+                    violate("(h) reconnect timing", "reconnect attempt #\(socket.id) opened at t=\(fmt(clock.now))s; the backoff says t=\(fmt(due))s (\(backoffExponent) attempts scheduled since a connection last proved healthy)")
                 }
                 reconnectDue = nil
             } else {
