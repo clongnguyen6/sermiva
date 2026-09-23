@@ -8,11 +8,14 @@ import Foundation
 /// testable without the WebSocket adapter - the boundary AGENTS.md and the
 /// outcome brief both require.
 ///
-/// Only final tokens drive segment text, translation text and the join's
-/// certainty checks. Non-final ("partial") tokens are provisional and are
-/// never allowed to decide a join, per the no-guess rule; they still update
-/// the currently open segment's displayed source text in place, the same
-/// spirit as `SegmentAssembler`'s partial handling for demo playback.
+/// Only final tokens drive segment text and committed translation text.
+/// The join's certainty checks are the opposite: a non-final original
+/// token disqualifies a window exactly like a final one would, checked the
+/// instant it is seen, per docs/soniox-routing.md's "T chunks" section -
+/// waiting for finality would let a wrong-language non-final original slip
+/// through uninspected. Non-final tokens still update the currently open
+/// segment's displayed source text in place, the same spirit as
+/// `SegmentAssembler`'s partial handling for demo playback.
 @MainActor
 final class SonioxJoinEngine {
     private(set) var segments: [Segment] = []
@@ -497,17 +500,28 @@ final class SonioxJoinEngine {
 
     /// Decides attribution for one COMPLETE chunk, using every one of its
     /// original tokens, final and non-final alike - never just the last
-    /// one seen, and never per raw token. A chunk attaches only when every
+    /// one seen, and never per raw token. A chunk attaches only when EVERY
     /// original token in it falls inside the bounds of the SAME single
-    /// still-open, not-yet-disqualified window.
+    /// still-open, not-yet-disqualified window - an original token that
+    /// matches no open window at all (not just a different one) also fails
+    /// this, exactly like a straddle across two windows: attaching on the
+    /// strength of only the tokens that happen to match would be guessing
+    /// about the ones that do not.
     private func attemptAttach(_ chunk: TChunk) -> TChunkAttachOutcome {
         var matchedIds = Set<Int>()
+        var sawUnmatchedOriginal = false
         for original in chunk.originals {
-            guard let startMs = original.startMs, let match = findOpenCandidate(forStartMs: startMs) else { continue }
+            guard let startMs = original.startMs, let match = findOpenCandidate(forStartMs: startMs) else {
+                sawUnmatchedOriginal = true
+                continue
+            }
             matchedIds.insert(match.id)
         }
         guard matchedIds.count == 1, let windowId = matchedIds.first else {
             return matchedIds.isEmpty ? .noWindowYet : .discarded
+        }
+        guard !sawUnmatchedOriginal else {
+            return .discarded
         }
         guard let join = pendingJoins[windowId], !join.disqualified else {
             return .discarded
@@ -516,11 +530,31 @@ final class SonioxJoinEngine {
         return .attached(windowId: windowId, translatedText: translatedText)
     }
 
+    /// The chunk that was just live-tracked as `currentChunkCandidate` has,
+    /// by definition, stopped being "currently mid-way through translating"
+    /// the instant it completes - regardless of whether a later chunk in
+    /// the SAME response goes on to target the same window again (which
+    /// re-sets the signal true via `markTranslationInProgress` once that
+    /// later chunk's own translation tokens actually arrive) or a
+    /// different one. Without this, a window whose only live-tracked chunk
+    /// already finished this response keeps showing "Đang dịch…" simply
+    /// because `clearStaleTTranslationSignal`'s response-wide check only
+    /// ever looks at whichever window the NEW chunk is heading for.
     private func finishCurrentTChunk(endedByMarker: Bool) {
         let chunk = currentTChunk
         currentTChunk = TChunk()
+        if case .window(let id) = currentChunkCandidate {
+            clearInProgressForCompletedChunk(segmentId: id)
+        }
         currentChunkCandidate = .unknown
         attachOrBuffer(chunk, endedByMarker: endedByMarker)
+    }
+
+    private func clearInProgressForCompletedChunk(segmentId: Int) {
+        guard let index = segments.firstIndex(where: { $0.id == segmentId }) else { return }
+        let segment = segments[index]
+        guard segment.translationInProgress, segment.target == nil, !segment.targetAbandoned else { return }
+        segments[index].translationInProgress = false
     }
 
     /// Attaches a chunk to whichever window it qualifies for (accumulating
@@ -557,8 +591,15 @@ final class SonioxJoinEngine {
             if let previous = activeWindowId { resolveJoin(id: previous) }
             activeWindowId = nil
         case .noWindowYet:
-            if let previous = activeWindowId { resolveJoin(id: previous) }
-            activeWindowId = nil
+            // Unlike `.discarded`, this chunk was never actually checked
+            // against any real, currently open window at all - it is
+            // genuinely undecided, not "resolved to elsewhere" (see
+            // docs/soniox-routing.md: "a chunk that still matches nothing
+            // is buffered again"). Whatever window was previously active
+            // stays exactly as active/pending as before; only a chunk that
+            // is actually decided against real windows (`.attached` to a
+            // different one, or `.discarded`) is a genuine "moved on"
+            // signal for it.
             bufferedTChunks.append((chunk: chunk, endedByMarker: endedByMarker))
             if bufferedTChunks.count > bufferedTChunksLimit {
                 bufferedTChunks.removeFirst(bufferedTChunks.count - bufferedTChunksLimit)
@@ -574,10 +615,21 @@ final class SonioxJoinEngine {
     /// chunk whose last original token is now provably in the past (before
     /// the earliest window that could ever exist) is dropped for good,
     /// since M only opens windows in increasing chronological order.
+    ///
+    /// Check 1 (the language check) is re-run against every one of a
+    /// buffered chunk's original tokens here, before `attemptAttach` - when
+    /// each token first arrived live, `checkOriginalAgainstOpenWindow` had
+    /// no window yet to check it against (that is exactly what made the
+    /// chunk "early"), so a wrong-language buffered chunk must not attach
+    /// on timing alone just because a window matching its timestamps
+    /// happens to open later - see docs/soniox-routing.md's "T chunks".
     private func replayBufferedTChunks(newWindowStart: Int) {
         let snapshot = bufferedTChunks
         bufferedTChunks = []
         for (chunk, endedByMarker) in snapshot {
+            for original in chunk.originals {
+                checkOriginalAgainstOpenWindow(original)
+            }
             attachOrBuffer(chunk, endedByMarker: endedByMarker)
         }
         bufferedTChunks.removeAll { entry in

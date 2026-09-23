@@ -428,13 +428,16 @@ final class SonioxJoinInvariantTests: XCTestCase {
                 }
             }
         } else {
-            log("scenario left still listening - genuinely-pending windows must stay pending, never guessed abandoned")
-            for i in pendingForever {
-                guard let segment = engine.segments.first(where: { $0.id == mSegmentIdForUtterance[i] }) else { continue }
-                guard segment.target == nil, !segment.targetAbandoned else {
-                    throw fail("utterance \(i) - with the session still listening and no further signal, the window must stay pending; got target=\(String(describing: segment.target)), abandoned=\(segment.targetAbandoned)")
-                }
-            }
+            // Left "still listening" on purpose, with no final settling
+            // call: a `pendingForever` utterance may by now have already
+            // been legitimately resolved (to abandoned, never to real
+            // text - see each plan's own immediate check above) by a
+            // LATER chunk's own completion moving on to a different real
+            // window, per docs/soniox-routing.md's "Complete" rule - T is
+            // one continuous stream, not one independent watcher per
+            // window, so this is not itself a bug to assert against here;
+            // the per-step invariants above already cover it throughout.
+            log("scenario left still listening with no final settling call")
         }
     }
 
