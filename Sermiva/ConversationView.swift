@@ -35,6 +35,8 @@ struct ConversationView<Controller: SessionControlling>: View {
                     authErrorBanner
                 } else if controller.state == .reconnecting {
                     networkLostBanner
+                } else if controller.showsNetworkErrorBanner {
+                    networkErrorBanner
                 } else if controller.showsTranslationUnavailableBanner {
                     translationUnavailableBanner
                 }
@@ -241,6 +243,24 @@ struct ConversationView<Controller: SessionControlling>: View {
             Text("Mất mạng. Nội dung được giữ.")
                 .font(.system(size: bannerTextSize))
                 .foregroundStyle(Tokens.text2)
+            Spacer()
+        }
+        .modifier(BannerStyle(background: Tokens.surface2))
+    }
+
+    /// Review round 4, finding 5: the approved prototype's own network-error
+    /// string (`design/claude-handoff/Sermiva.dc.html` `~810`, Settings key
+    /// status `network`), reused verbatim - no new copy - for the FIRST
+    /// connect of a session attempt failing for a non-auth reason. Never
+    /// shown for a mid-session reconnect (that already has `networkLostBanner`
+    /// above), and cleared only once a later attempt actually succeeds.
+    private var networkErrorBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle")
+                .foregroundStyle(Tokens.danger)
+            Text("Lỗi mạng, thử lại sau")
+                .font(.system(size: bannerTextSize))
+                .foregroundStyle(Tokens.danger)
             Spacer()
         }
         .modifier(BannerStyle(background: Tokens.surface2))

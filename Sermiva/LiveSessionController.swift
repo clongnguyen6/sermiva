@@ -44,6 +44,12 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     /// since the device's installed language packs can change between
     /// sessions - never in demo.
     @Published private(set) var showsTranslationUnavailableBanner = false
+    /// Review round 4, finding 5: set only when the FIRST connect of a
+    /// session attempt fails for a non-auth reason (`onAuthError` handles
+    /// auth separately, with its own banner) - never for a mid-session
+    /// reconnect, which already has "Mất mạng" via `.reconnecting`. Cleared
+    /// only once a later attempt actually succeeds.
+    @Published private(set) var showsNetworkErrorBanner = false
 
     private let apiKey: String
     private let languageConfig: LiveLanguageConfig
@@ -53,7 +59,12 @@ final class LiveSessionController: ObservableObject, SessionControlling {
     /// The seam behind the live session-start availability check - real
     /// Apple Translation calls by default, a fake in `LiveSessionControllerTests`.
     private let translationAvailability: MeToTargetAvailabilityChecking
+    private let scheduler: DemoScheduler
     private var elapsedTimer: Timer?
+    /// Review round 4, finding 4b (owner decision): set while `endSession`'s
+    /// short grace wait (see `endSession`) is pending, so a second Kết thúc
+    /// tap during that wait cannot schedule a second, overlapping one.
+    private var isEndPending = false
     /// Bumped at the start of every new attempt (`beginRequestingMic`) and
     /// again when its own check actually begins (`prepareTranslationForSessionStart`),
     /// so a belated availability result from an attempt that is no longer
@@ -69,7 +80,8 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         micPermission: MicPermissionProviding = RealMicPermissionProvider(),
         audioCapture: AudioCapturing = RealAudioCapture(),
         liveSession: SonioxLiveSessionProtocol = SonioxLiveSession(),
-        translationAvailability: MeToTargetAvailabilityChecking = RealMeToTargetAvailabilityChecker()
+        translationAvailability: MeToTargetAvailabilityChecking = RealMeToTargetAvailabilityChecker(),
+        scheduler: DemoScheduler = DispatchScheduler()
     ) {
         self.apiKey = apiKey
         self.languageConfig = languageConfig
@@ -77,6 +89,7 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         self.audioCapture = audioCapture
         self.liveSession = liveSession
         self.translationAvailability = translationAvailability
+        self.scheduler = scheduler
 
         self.audioCapture.onUnexpectedStop = { [weak self] in
             self?.handleCaptureStoppedExternally()
@@ -181,8 +194,33 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         }
     }
 
+    /// Review round 4, finding 4b (owner decision): the first mock session
+    /// lost its last two sentences because ending mid-reconnect closed the
+    /// socket immediately, discarding audio still only buffered locally,
+    /// waiting for the connection to come back so it could actually be sent
+    /// and finalized. Pressing Kết thúc while `.reconnecting` now waits a
+    /// short, fixed, bounded time first - a simple timeout, not a "wait
+    /// until confirmed flushed" mechanism, since the latter has no bound if
+    /// the network never comes back at all. The screen during this wait is
+    /// exactly what `.reconnecting` already renders - "Mất mạng. Nội dung
+    /// được giữ.", the dock's "Mic giữ, chờ mạng", "Đang kết nối lại…" - no
+    /// new state, no new copy; only `canEnd` (via `isEndPending`) changes,
+    /// so a second Kết thúc tap during the wait is a no-op rather than
+    /// scheduling an overlapping end.
     func endSession() {
-        guard canEnd else { return }
+        guard canEnd, !isEndPending else { return }
+        guard state == .reconnecting else {
+            finishEnding()
+            return
+        }
+        isEndPending = true
+        scheduler.schedule(after: 3) { [weak self] in
+            self?.isEndPending = false
+            self?.finishEnding()
+        }
+    }
+
+    private func finishEnding() {
         stopElapsedTimer()
         audioCapture.stop()
         isMicCapturing = false
@@ -247,6 +285,10 @@ final class LiveSessionController: ObservableObject, SessionControlling {
             guard let self, self.state == .connecting else { return }
             if ok {
                 self.state = .listening
+                // Review round 4, finding 5: only a LATER attempt actually
+                // succeeding clears the network-error banner - never merely
+                // being retried.
+                self.showsNetworkErrorBanner = false
                 self.startElapsedTimer()
             } else {
                 // `onAuthError` (wired in init) already handles a genuine
@@ -254,13 +296,14 @@ final class LiveSessionController: ObservableObject, SessionControlling {
                 // A `false` here is a plain connect/network failure with no
                 // matching state in HANDOFF section 5's vocabulary - the
                 // honest, no-new-copy choice is to stop (closing the
-                // socket that never really started) and return to `.idle`
-                // so the existing "Bắt đầu" flow can simply retry - left
-                // for the project owner to decide whether this deserves a
-                // real state of its own.
+                // socket that never really started) and return to `.idle`,
+                // now with the approved prototype's own network-error
+                // string shown, so the existing "Bắt đầu" flow can simply
+                // retry.
                 self.audioCapture.stop()
                 self.isMicCapturing = false
                 self.state = .idle
+                self.showsNetworkErrorBanner = true
                 // Review round 2: the availability check can resolve (and
                 // set the banner) before the connect failure above ever
                 // happens - clear it explicitly rather than leave it

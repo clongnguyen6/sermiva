@@ -77,6 +77,8 @@ final class DemoSessionController: ObservableObject, SessionControlling {
     /// Demo never shows this banner, per the outcome's decision - it is
     /// visibly separated from live per AGENTS.md's demo/live invariant.
     let showsTranslationUnavailableBanner = false
+    /// Demo never opens a real connection, so it can never fail one either.
+    let showsNetworkErrorBanner = false
 
     /// Never actually invoked - `translationConfiguration` is always `nil`
     /// here, so `.translationTask`'s closure never calls this - but demo

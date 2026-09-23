@@ -13,7 +13,8 @@ final class LiveSessionControllerTests: XCTestCase {
         micGranted: Bool = true,
         audio: FakeAudioCapture = FakeAudioCapture(),
         session: FakeSonioxLiveSession = FakeSonioxLiveSession(),
-        translationAvailability: FakeMeToTargetAvailabilityChecker = FakeMeToTargetAvailabilityChecker()
+        translationAvailability: FakeMeToTargetAvailabilityChecker = FakeMeToTargetAvailabilityChecker(),
+        scheduler: ManualScheduler = ManualScheduler()
     ) -> (controller: LiveSessionController, audio: FakeAudioCapture, session: FakeSonioxLiveSession, mic: FakeMicPermissionProvider) {
         let mic = FakeMicPermissionProvider(granted: micGranted)
         let controller = LiveSessionController(
@@ -21,7 +22,8 @@ final class LiveSessionControllerTests: XCTestCase {
             micPermission: mic,
             audioCapture: audio,
             liveSession: session,
-            translationAvailability: translationAvailability
+            translationAvailability: translationAvailability,
+            scheduler: scheduler
         )
         return (controller, audio, session, mic)
     }
@@ -189,6 +191,58 @@ final class LiveSessionControllerTests: XCTestCase {
         XCTAssertEqual(audio.stopCount, 1)
         XCTAssertEqual(session.endCount, 1)
         XCTAssertFalse(controller.canEnd)
+    }
+
+    // MARK: - Review round 4, finding 4b (owner decision): ending mid-
+    // reconnect waits a short bounded time for buffered audio to be sent
+    // and finalized, rather than discarding it immediately - live evidence:
+    // the first mock session lost its last two sentences exactly this way.
+
+    func test_endingWhileReconnectingWaitsBeforeActuallyEndingRatherThanDiscardingBufferedAudioImmediately() {
+        let scheduler = ManualScheduler()
+        let (controller, audio, session, _) = makeController(scheduler: scheduler)
+        controller.primaryButtonTapped() // -> listening
+        session.onDisconnected?()
+        XCTAssertEqual(controller.state, .reconnecting)
+
+        controller.endSession()
+
+        XCTAssertEqual(controller.state, .reconnecting, "must not end immediately - the screen stays exactly as .reconnecting already renders it")
+        XCTAssertEqual(session.endCount, 0, "must not close the socket yet - that is exactly what would discard audio still only buffered, waiting to be sent")
+        XCTAssertEqual(audio.stopCount, 0)
+
+        scheduler.drainAll()
+
+        XCTAssertEqual(controller.state, .ended, "once the grace wait elapses, the session ends completely")
+        XCTAssertEqual(session.endCount, 1)
+        XCTAssertEqual(audio.stopCount, 1)
+    }
+
+    func test_endingWhileListeningEndsImmediatelyWithNoWait() {
+        let scheduler = ManualScheduler()
+        let (controller, _, session, _) = makeController(scheduler: scheduler)
+        controller.primaryButtonTapped() // -> listening
+
+        controller.endSession()
+
+        XCTAssertEqual(controller.state, .ended, "only a mid-reconnect end waits - a normal end must not be delayed")
+        XCTAssertEqual(session.endCount, 1)
+        XCTAssertEqual(scheduler.pending.count, 0)
+    }
+
+    func test_secondEndTapDuringTheGraceWaitDoesNotScheduleAnOverlappingEnd() {
+        let scheduler = ManualScheduler()
+        let (controller, _, session, _) = makeController(scheduler: scheduler)
+        controller.primaryButtonTapped() // -> listening
+        session.onDisconnected?()
+
+        controller.endSession()
+        XCTAssertEqual(scheduler.pending.count, 1)
+        controller.endSession() // a second tap while still waiting
+
+        XCTAssertEqual(scheduler.pending.count, 1, "a second Kết thúc tap during the wait must not schedule a second, overlapping end")
+        scheduler.drainAll()
+        XCTAssertEqual(session.endCount, 1, "only one end must ever actually happen")
     }
 
     func test_newSessionAfterEndClearsSegmentsAndStartsAFreshLiveSession() {
@@ -430,5 +484,46 @@ final class LiveSessionControllerTests: XCTestCase {
         session.onAuthError?()
 
         XCTAssertFalse(controller.showsTranslationUnavailableBanner, "an auth error must clear a still-showing banner")
+    }
+
+    // MARK: - Review round 4, finding 5: the initial connect-failure banner
+
+    func test_failedInitialConnectShowsTheNetworkErrorBanner() {
+        let session = FakeSonioxLiveSession()
+        session.nextStartResult = false
+        let (controller, _, _, _) = makeController(session: session)
+
+        controller.primaryButtonTapped()
+
+        XCTAssertEqual(controller.state, .idle)
+        XCTAssertTrue(controller.showsNetworkErrorBanner)
+    }
+
+    func test_networkErrorBannerClearsOnlyOnceALaterAttemptSucceeds() {
+        let session = FakeSonioxLiveSession()
+        session.nextStartResult = false
+        let (controller, _, _, _) = makeController(session: session)
+        controller.primaryButtonTapped()
+        XCTAssertTrue(controller.showsNetworkErrorBanner, "sanity: showing after the first failure")
+
+        // Retrying while still failing must not clear it early.
+        controller.primaryButtonTapped()
+        XCTAssertTrue(controller.showsNetworkErrorBanner, "must not clear merely because a retry was attempted")
+
+        session.nextStartResult = true
+        controller.primaryButtonTapped()
+
+        XCTAssertEqual(controller.state, .listening)
+        XCTAssertFalse(controller.showsNetworkErrorBanner, "must clear once a later attempt actually succeeds")
+    }
+
+    func test_authErrorNeverShowsTheNetworkErrorBanner() {
+        let (controller, _, session, _) = makeController()
+        controller.primaryButtonTapped() // -> listening
+
+        session.onAuthError?()
+
+        XCTAssertEqual(controller.state, .authError)
+        XCTAssertFalse(controller.showsNetworkErrorBanner, "an auth error must go to its own banner, never this one")
     }
 }

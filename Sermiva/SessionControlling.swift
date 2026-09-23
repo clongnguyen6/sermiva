@@ -33,6 +33,12 @@ protocol SessionControlling: ObservableObject {
     /// session - never in demo, and cleared again the moment that session
     /// attempt ends (including a failed connect). See docs/soniox-routing.md.
     var showsTranslationUnavailableBanner: Bool { get }
+    /// True only while the most recent connection attempt (the very first
+    /// connect of a session, never a mid-session reconnect - that has its
+    /// own "Mất mạng" banner) failed for a non-auth (network-class) reason -
+    /// never in demo. Cleared only once a LATER "Bắt đầu" actually succeeds
+    /// (review round 4, finding 5).
+    var showsNetworkErrorBanner: Bool { get }
     /// A fresh stream every call (fatalError rule 4), of final `me`-language
     /// segments waiting for on-device translation.
     func makeTranslationRequests() -> AsyncStream<(id: Int, source: String)>
