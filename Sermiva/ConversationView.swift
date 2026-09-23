@@ -164,8 +164,32 @@ struct ConversationView<Controller: SessionControlling>: View {
 
     @ScaledMetric(relativeTo: .body) private var bannerTextSize: CGFloat = 14
 
+    /// Review round 3, finding 5: the prototype's own `bannerStyle`
+    /// (`design/claude-handoff/Sermiva.dc.html` `~1226`) gives EVERY banner
+    /// - danger/warn/net/info alike - the same padding (`10 10 10 14`, an
+    /// extra 4 pt on the leading edge), margin (`4 16 6`) and inter-item gap
+    /// (10); only the background (and, upstream of this modifier, the icon/
+    /// text colour) depends on the variant. A single shared modifier is what
+    /// keeps that in sync across all four banners below, rather than four
+    /// independently-hand-copied constants that can drift.
+    private struct BannerStyle: ViewModifier {
+        let background: Color
+        func body(content: Content) -> some View {
+            content
+                .padding(.leading, 14)
+                .padding(.top, 10)
+                .padding(.trailing, 10)
+                .padding(.bottom, 10)
+                .background(background)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .padding(.horizontal, 16)
+                .padding(.top, 4)
+                .padding(.bottom, 6)
+        }
+    }
+
     private var micDeniedBanner: some View {
-        HStack {
+        HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle")
                 .foregroundStyle(Tokens.danger)
             Text("Sermiva chưa được cấp quyền micro.")
@@ -180,11 +204,7 @@ struct ConversationView<Controller: SessionControlling>: View {
             .font(.system(size: bannerTextSize, weight: .semibold))
             .foregroundStyle(Tokens.danger)
         }
-        .padding(10)
-        .background(Tokens.surface2)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .modifier(BannerStyle(background: Tokens.surface2))
     }
 
     /// HANDOFF.md section 2.2's "lỗi xác thực (→ Mở Cài đặt)" banner.
@@ -195,7 +215,7 @@ struct ConversationView<Controller: SessionControlling>: View {
     /// docs/soniox-routing.md). The message reuses `SetupView`'s own
     /// existing "Khóa không hợp lệ" copy rather than inventing new text.
     private var authErrorBanner: some View {
-        HStack {
+        HStack(spacing: 10) {
             Image(systemName: "exclamationmark.triangle")
                 .foregroundStyle(Tokens.danger)
             Text("Khóa không hợp lệ.")
@@ -208,18 +228,14 @@ struct ConversationView<Controller: SessionControlling>: View {
             .font(.system(size: bannerTextSize, weight: .semibold))
             .foregroundStyle(Tokens.danger)
         }
-        .padding(10)
-        .background(Tokens.surface2)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .modifier(BannerStyle(background: Tokens.surface2))
     }
 
     /// HANDOFF.md section 2.2's "mất mạng (spinner, 'nội dung được giữ')"
     /// banner, verbatim: a spinner plus that exact quoted text - no new
     /// copy invented beyond what the handoff already specifies.
     private var networkLostBanner: some View {
-        HStack {
+        HStack(spacing: 10) {
             ProgressView()
                 .tint(Tokens.warn)
             Text("Mất mạng. Nội dung được giữ.")
@@ -227,25 +243,20 @@ struct ConversationView<Controller: SessionControlling>: View {
                 .foregroundStyle(Tokens.text2)
             Spacer()
         }
-        .padding(10)
-        .background(Tokens.surface2)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .modifier(BannerStyle(background: Tokens.surface2))
     }
 
     /// The banner shown from a live session's start-of-session availability
     /// check (`.installed` fails) through the rest of that session, per
     /// docs/soniox-routing.md. This is HANDOFF 2.2's "info" banner variant,
     /// not the danger/warn style the other three above use - the prototype
-    /// (`design/claude-handoff/Sermiva.dc.html`'s `bannerStyle`, `isBannerInfo`
-    /// branch) gives it `surface` (not `surface2`) background, `text2`
-    /// (not `text3`) icon/text colour, and padding `10 10 10 14` (an extra
-    /// 4 pt on the leading edge) rather than the other banners' uniform 10.
+    /// gives it `surface` (not `surface2`) background and `text2` (not
+    /// `text3`) icon/text colour; the geometry itself (padding/margin/gap)
+    /// is identical to every other banner - see `BannerStyle` above.
     /// `controller.showsTranslationUnavailableBanner` is always `false` in
     /// demo, so this never shows there.
     private var translationUnavailableBanner: some View {
-        HStack {
+        HStack(spacing: 10) {
             Image(systemName: "info.circle")
                 .foregroundStyle(Tokens.text2)
             Text("Lời của Bạn sẽ không được dịch sang tiếng Anh trên máy này.")
@@ -253,14 +264,7 @@ struct ConversationView<Controller: SessionControlling>: View {
                 .foregroundStyle(Tokens.text2)
             Spacer()
         }
-        .padding(.leading, 14)
-        .padding(.top, 10)
-        .padding(.bottom, 10)
-        .padding(.trailing, 10)
-        .background(Tokens.surface)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
+        .modifier(BannerStyle(background: Tokens.surface))
     }
 
     // MARK: - Content
