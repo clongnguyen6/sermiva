@@ -1427,6 +1427,7 @@ final class LifecycleWorld {
         }
         if phase != .active {
             let finalizedAfterEnd = phase == .ended && !finalSegmentIdsAtEnd.contains(segment.id)
+            if finalizedAfterEnd { reached("translationCallAfterEnd") }
             if !(Self.translatesSegmentsFinalizedAfterEnd && finalizedAfterEnd) {
                 violate("(i) translation", "a translate call started for segment \(segment.id) while \(phase.rawValue)")
             }
