@@ -478,7 +478,9 @@ final class LifecycleFakeSocket: SonioxSocketConnecting {
     private(set) var finalizeRequested = false
     var answeredFinalize = false
     private(set) var keepaliveTimes: [Double] = []
-    var checkedKeepaliveCount = 0
+    /// Lets the oracle judge each keepalive at the moment it is sent - a
+    /// keepalive and another timer can fall due at the same instant.
+    var onKeepalive: (() -> Void)?
 
     init(id: Int, userSession: Int, clock: LifecycleVirtualClock) {
         self.id = id
@@ -514,6 +516,7 @@ final class LifecycleFakeSocket: SonioxSocketConnecting {
             return
         }
         keepaliveTimes.append(clock.now)
+        onKeepalive?()
     }
 
     func sendFinalize() {
@@ -829,9 +832,18 @@ final class LifecycleWorld {
         case .idle, .ended, .authError:
             violate("(a) connections", "connection #\(socket.id) was opened while \(phase.rawValue)")
         }
+        socket.onKeepalive = { [unowned self, unowned socket] in self.keepaliveSent(on: socket) }
         sockets.append(socket)
         expectedReceived[socket.id] = []
         return socket
+    }
+
+    /// (k) a keepalive only ever goes out while the session is paused.
+    private func keepaliveSent(on socket: LifecycleFakeSocket) {
+        guard phase == .active, paused, socket.userSession == userSession else {
+            violate("(k) keepalive", "keepalive sent to connection #\(socket.id) at t=\(fmt(clock.now))s while \(phase.rawValue)\(paused ? "" : ", not paused")")
+            return
+        }
     }
 
     private func makeMonitor() -> NetworkPathMonitoring {
@@ -1424,15 +1436,6 @@ final class LifecycleWorld {
     }
 
     private func checkKeepalive() -> LifecycleViolation? {
-        for socket in sockets {
-            for time in socket.keepaliveTimes.dropFirst(socket.checkedKeepaliveCount) {
-                let pausedAtThatTime = phase == .active && paused && time >= pausedSince - 1e-9
-                if !pausedAtThatTime {
-                    return LifecycleViolation(key: "(k) keepalive", message: "keepalive sent to connection #\(socket.id) at t=\(fmt(time))s while \(phase.rawValue)\(paused ? "" : ", not paused")")
-                }
-            }
-            socket.checkedKeepaliveCount = socket.keepaliveTimes.count
-        }
         guard phase == .active, paused, let socket = sockets.first(where: { $0.userSession == userSession && $0.isEstablished }),
               let establishedAt = socket.establishedAt else { return nil }
         let since = max(pausedSince, establishedAt, socket.keepaliveTimes.last ?? -.infinity)
