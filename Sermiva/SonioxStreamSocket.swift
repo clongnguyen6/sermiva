@@ -34,24 +34,50 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
     /// afterward.
     nonisolated(unsafe) var streamLabel: String = "?"
 
-    /// Review round 4, finding 1 (live evidence): the Console log showed
-    /// every `SonioxTranslationStatusShape` line duplicated, <1 ms apart,
-    /// right after a reconnect - proof that TWO real `SonioxStreamSocket`
-    /// instances were independently connected and receiving the same live
-    /// audio at once, with the orphaned one never closed (so the session
-    /// was probably billed twice). This logs every socket open/close with a
-    /// running total, so a live session's Console log can be scanned for
-    /// that total ever exceeding 1 - the app-level generation bookkeeping
-    /// alone (`SonioxLiveSession`) cannot prove this from outside a real
-    /// network. No key, text, or URL - counts and the M/T-style label only.
-    private static let lifecycleLogger = Logger(subsystem: "com.clongnguyen6.sermiva", category: "SonioxConnectionLifecycle")
-    /// `nonisolated(unsafe)`: mutated from both `connect()` (MainActor) and
-    /// `close()` (nonisolated, reachable from `deinit`) - matches `task`'s
-    /// own reasoning. In practice every real call site in this app runs on
-    /// the main actor; nothing here claims otherwise for `deinit`, which is
-    /// why this is a plain running total, not a strict correctness-critical
-    /// value - it is a diagnostic aid, not billing logic.
-    nonisolated(unsafe) private static var openConnectionCount = 0
+    /// A unique id for THIS socket object (not this connection attempt -
+    /// each object is used for exactly one attempt anyway, but the id
+    /// exists to answer a different question than `streamLabel`/generation
+    /// numbers already do: whether the same object logged something twice,
+    /// or two genuinely different objects each logged once). Review round
+    /// 5, finding A: the previous round's evidence (every
+    /// `SonioxTranslationStatusShape` line duplicated, <1 ms apart, right
+    /// after a reconnect) still has no confirmed mechanism - a reviewer
+    /// showed the prior "the orphaned socket kept running" theory cannot
+    /// hold, since an abandoned object with only `[weak self]`-captured
+    /// completion handlers should simply deallocate and go silent, whether
+    /// or not its underlying task ever actually cancels. This id is what
+    /// would let the OWNER's next live session tell, directly from the
+    /// Console, whether the duplicate lines came from one object or two.
+    let socketId = LifecycleIds.socket.next()
+
+    /// The REAL count of sockets whose underlying task has not yet reported
+    /// completion - incremented when a task is created (`connect()`, on the
+    /// main actor) and decremented ONLY by `urlSession(_:task:didCompleteWithError:)`
+    /// below (the delegate's own authoritative "this task is actually done"
+    /// signal, nonisolated - URLSession does not guarantee which queue it
+    /// runs on). Review round 5, finding A (owner instruction): the
+    /// previous round counted from `close()` instead, which only proves the
+    /// app ASKED to close a socket, never that the underlying task actually
+    /// stopped - exactly the gap a reviewer identified in the two-socket
+    /// investigation. `NSLock`-guarded rather than a bare
+    /// `nonisolated(unsafe)` var, since this is now genuinely written from
+    /// two execution contexts with no actor serializing them against each
+    /// other (the main actor and URLSession's own delegate queue).
+    // `NSLock` is itself `Sendable` and immutable here, so `nonisolated`
+    // alone (no `unsafe`) is enough to make this STATIC member (unlike an
+    // instance member, static members of a `@MainActor` type default to
+    // main-actor isolation regardless of their value's own Sendability)
+    // reachable from the nonisolated delegate callback below.
+    nonisolated private static let openTaskCountLock = NSLock()
+    nonisolated(unsafe) private static var openTaskCount = 0
+
+    @discardableResult
+    nonisolated private static func adjustOpenTaskCount(by delta: Int) -> Int {
+        openTaskCountLock.lock()
+        defer { openTaskCountLock.unlock() }
+        openTaskCount += delta
+        return openTaskCount
+    }
 
     /// docs/soniox-routing.md's Unknowns table: `translation_status` has
     /// never been read directly off the wire - `"none"` is inferred from
@@ -70,14 +96,14 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
         let label = streamLabel
         if !seenTranslationStatusValues.contains(raw) {
             seenTranslationStatusValues.insert(raw)
-            Self.diagnosticLogger.log("stream \(label, privacy: .public) saw a new translation_status value: \(raw, privacy: .public)")
+            Self.diagnosticLogger.log("socket #\(self.socketId, privacy: .public) stream \(label, privacy: .public) saw a new translation_status value: \(raw, privacy: .public)")
         }
         if wire.text == "<end>" || wire.text == "<fin>" {
-            Self.diagnosticLogger.log("stream \(label, privacy: .public) marker \(wire.text, privacy: .public) carried translation_status: \(raw, privacy: .public)")
+            Self.diagnosticLogger.log("socket #\(self.socketId, privacy: .public) stream \(label, privacy: .public) marker \(wire.text, privacy: .public) carried translation_status: \(raw, privacy: .public)")
         }
     }
 
-    private let urlSession: URLSession
+    private var urlSession: URLSession!
     /// `nonisolated(unsafe)` so `close()` can run from a nonisolated
     /// context - specifically `SonioxLiveSession.deinit`, which needs to
     /// guarantee this socket's underlying task is cancelled even when
@@ -87,16 +113,23 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
     /// methods.
     nonisolated(unsafe) private var task: URLSessionWebSocketTask?
 
-    init(urlSession: URLSession = URLSession(configuration: .default)) {
-        self.urlSession = urlSession
+    /// `self` is now the `URLSession`'s own delegate (see
+    /// `URLSessionTaskDelegate` conformance below), so `urlSession` cannot
+    /// be built until after `super.init()` - nothing else in this app ever
+    /// constructs this class with an injected `URLSession` (AGENTS.md
+    /// forbids testing through this adapter at all), so there is no
+    /// injectable parameter to preserve here.
+    override init() {
+        super.init()
+        urlSession = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
     }
 
     func connect(apiKey: String, languageHints: [String], targetLanguage: String) {
         let config = SonioxStreamConfig(apiKey: apiKey, languageHints: languageHints, translation: .init(targetLanguage: targetLanguage))
         let task = urlSession.webSocketTask(with: Self.endpoint)
         self.task = task
-        Self.openConnectionCount += 1
-        Self.lifecycleLogger.log("stream \(self.streamLabel, privacy: .public) connection opened - \(Self.openConnectionCount, privacy: .public) open right now")
+        let openNow = Self.adjustOpenTaskCount(by: 1)
+        lifecycleLogger.log("socket #\(self.socketId, privacy: .public) [\(self.streamLabel, privacy: .public)] task created (connect attempt) - \(openNow, privacy: .public) real tasks open now")
         task.resume()
         guard let configData = try? JSONEncoder().encode(config), let configText = String(data: configData, encoding: .utf8) else {
             onEvent?(.closed(nil))
@@ -150,15 +183,20 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
     /// now - calling cancel twice on the same task is documented safe.
     /// Guarded on `task != nil` so a second `close()` call (this app's own
     /// `handleDrop`/`end` sequence, plus `deinit`'s own belt-and-suspenders
-    /// call, can both reach the same socket) never double-decrements or
-    /// double-logs the open count.
+    /// call, can both reach the same socket) never double-logs this line.
+    /// Review round 5, finding A (owner instruction): this deliberately
+    /// does NOT touch the real open-task count any more - it only proves
+    /// the app ASKED the task to stop, never that it actually did. Compare
+    /// this line's socket id, live, against the "task ACTUALLY completed"
+    /// line the `URLSessionTaskDelegate` callback below logs - a gap or
+    /// mismatch between the two is exactly what would confirm or rule out
+    /// this cancel-reliability theory.
     nonisolated func close() {
         guard task != nil else { return }
         task?.cancel(with: .normalClosure, reason: nil)
         task?.cancel()
         task = nil
-        Self.openConnectionCount -= 1
-        Self.lifecycleLogger.log("stream \(self.streamLabel, privacy: .public) connection closed - \(Self.openConnectionCount, privacy: .public) open right now")
+        lifecycleLogger.log("socket #\(self.socketId, privacy: .public) [\(self.streamLabel, privacy: .public)] close() called by the app")
     }
 
     private func sendControlFrame(type: String) {
@@ -208,5 +246,19 @@ final class SonioxStreamSocket: NSObject, SonioxSocketConnecting {
         // `SonioxTokenWire`/`SonioxStreamResponse` either.
         let tokens = (response.tokens ?? []).map { $0.appToken }
         onEvent?(.response(SonioxSocketResponse(tokens: tokens, finalAudioProcMs: response.finalAudioProcMs ?? 0)))
+    }
+}
+
+extension SonioxStreamSocket: URLSessionTaskDelegate {
+    /// The delegate's own authoritative "this task is actually done" signal
+    /// - review round 5, finding A (owner instruction): count real open
+    /// connections from here, never from `close()` (see its own doc
+    /// comment). Not guaranteed to run on the main actor (URLSession does
+    /// not document which queue calls this), so `nonisolated` - only touches
+    /// `socketId`/`streamLabel` (already safe from any context) and the
+    /// lock-guarded static counter.
+    nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let openNow = Self.adjustOpenTaskCount(by: -1)
+        lifecycleLogger.log("socket #\(self.socketId, privacy: .public) [\(self.streamLabel, privacy: .public)] task ACTUALLY completed - \(openNow, privacy: .public) real tasks open now")
     }
 }

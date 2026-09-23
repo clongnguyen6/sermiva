@@ -660,13 +660,17 @@ final class SonioxLiveSessionTests: XCTestCase {
         factory.createdSockets[0].simulateResponse(tokens: [
             SonioxToken(text: "Xin ch", isFinal: false, startMs: nil, endMs: nil, speaker: "1", language: nil, translationStatus: .original),
         ])
-        session.ingestAudio(Data(repeating: 9, count: 32_000))
+        let chunk = Data(repeating: 9, count: 32_000)
+        session.ingestAudio(chunk)
 
         factory.createdSockets[0].simulateClosed()
         XCTAssertTrue(lastSegments.isEmpty, "sanity: the never-finalized segment was never shown, per finding 6 - nothing exists yet to duplicate")
         scheduler.drainOnce()
         factory.createdSockets[1].simulateConfigSent()
-        XCTAssertFalse(factory.createdSockets[1].sentAudioChunks.isEmpty, "sanity: the never-finalized audio must actually have been resent to the new socket")
+        // Review round 5 (B section): exact equality, not just "not empty" -
+        // the never-finalized chunk must be resent EXACTLY once, never
+        // twice (which would re-recognize it twice) and never skipped.
+        XCTAssertEqual(factory.createdSockets[1].sentAudioChunks, [chunk], "the never-finalized audio must be resent exactly once - never twice, never skipped")
 
         // The new socket re-recognizes the resent audio and finalizes it.
         factory.createdSockets[1].simulateResponse(tokens: [
@@ -728,5 +732,73 @@ final class SonioxLiveSessionTests: XCTestCase {
 
         XCTAssertTrue(ended)
         XCTAssertGreaterThan(pathMonitors.createdMonitors.last?.cancelCount ?? 0, 0, "ending the session must cancel the path monitor too, not just the socket")
+    }
+
+    /// Review round 5, finding C6 (blocking): a path event must never abort
+    /// an attempt already in flight (a socket created, mid-handshake,
+    /// waiting for its own `.configSent` or failure) - only preempt a
+    /// genuine "waiting for backoff, nothing in flight yet" gap. The
+    /// reviewer's own reproduction: one backoff attempt plus two path
+    /// events created four sockets.
+    func test_pathAvailableDuringAnInFlightAttemptDoesNotAbortIt() {
+        let (session, factory, _, pathMonitors) = makeSessionWithPathMonitor()
+        startAndEstablish(session, factory: factory)
+
+        factory.createdSockets[0].simulateClosed() // drop; backoff scheduled, no socket yet
+        pathMonitors.createdMonitors.last?.simulatePathAvailable() // preempts the wait
+        XCTAssertEqual(factory.createdSockets.count, 2, "sanity: the first path event opened the replacement socket")
+
+        // A second path event arrives while socket #2 is STILL mid-handshake.
+        pathMonitors.createdMonitors.last?.simulatePathAvailable()
+
+        XCTAssertEqual(factory.createdSockets.count, 2, "a path event must never abort an attempt already in flight")
+        XCTAssertFalse(factory.createdSockets[1].isClosed, "the in-flight attempt itself must not be aborted")
+    }
+
+    // MARK: - Review round 5, finding B1 (blocking): `end()`'s delayed
+    // close must only ever close the socket it was scheduled for - never
+    // whatever `self.socket` happens to be by the time it fires.
+
+    func test_endsDelayedCloseNeverClosesANewerSessionsSocketStartedDuringTheWait() {
+        let (session, factory, scheduler) = makeSession()
+        startAndEstablish(session, factory: factory)
+
+        var ended = false
+        session.end { ended = true }
+        // "Phien moi" starts a brand-new session before the 1.5 s grace
+        // window fires.
+        var started = false
+        session.start(config: config) { ok in started = ok }
+        factory.createdSockets[1].simulateConfigSent()
+        XCTAssertTrue(started, "sanity: the new session's own socket connected")
+
+        scheduler.drainAll() // the FIRST end()'s delayed close now fires
+
+        XCTAssertTrue(ended)
+        XCTAssertTrue(factory.createdSockets[0].isClosed, "the old session's own socket must still be closed")
+        XCTAssertFalse(factory.createdSockets[1].isClosed, "a delayed close scheduled by the PREVIOUS session must never reach the NEW session's socket")
+    }
+
+    // MARK: - Review round 5, finding B2 (blocking): `final_audio_proc_ms`
+    // is cumulative for the whole connection, not a delta since the last
+    // response - trimming must track how much has already been consumed.
+
+    func test_trimFinalizedAudioUsesCumulativeFinalAudioProcMsAcrossMultipleResponses() {
+        let (session, factory, scheduler) = makeSession()
+        startAndEstablish(session, factory: factory)
+
+        let chunk1 = Data(repeating: 1, count: 32_000) // 1s
+        let chunk2 = Data(repeating: 2, count: 32_000) // 1s
+        session.ingestAudio(chunk1)
+        factory.createdSockets[0].simulateResponse(finalAudioProcMs: 500) // 16,000 bytes cumulative
+        session.ingestAudio(chunk2)
+        factory.createdSockets[0].simulateResponse(finalAudioProcMs: 1000) // 32,000 bytes cumulative total
+
+        factory.createdSockets[0].simulateClosed()
+        scheduler.drainOnce()
+        factory.createdSockets[1].simulateConfigSent()
+
+        // All of chunk1 (32,000 bytes) is now finalized; only chunk2 is not.
+        XCTAssertEqual(factory.createdSockets[1].sentAudioChunks, [chunk2], "cumulative final_audio_proc_ms must not be re-applied as if it were a per-response delta - doing so over-trims and drops audio that was never actually finalized")
     }
 }

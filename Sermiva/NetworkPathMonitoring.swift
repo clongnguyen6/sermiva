@@ -31,12 +31,11 @@ protocol NetworkPathMonitoring: AnyObject {
 final class RealNetworkPathMonitor: NetworkPathMonitoring {
     var onPathAvailable: (() -> Void)?
 
-    // `nonisolated(unsafe)`: `NWPathMonitor.cancel()` is documented
-    // thread-safe, and this needs to be callable from `cancel()`'s own
-    // nonisolated context (see the protocol's doc comment) - every other
-    // access to `monitor` still only ever happens from this class's own
-    // MainActor-isolated `start()`.
-    nonisolated(unsafe) private let monitor = NWPathMonitor()
+    // `NWPathMonitor` is itself `Sendable` (and `cancel()` is documented
+    // thread-safe), so a plain `let` is already safe to read from
+    // `cancel()`'s own nonisolated context (see the protocol's doc comment)
+    // with no `nonisolated(unsafe)` escape hatch needed.
+    private let monitor = NWPathMonitor()
     private let queue = DispatchQueue(label: "com.clongnguyen6.sermiva.networkpathmonitor")
 
     func start() {
