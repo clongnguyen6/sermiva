@@ -642,8 +642,8 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     }
 
     /// HANDOFF section 6: "retry backoff". Doubles from `reconnectBaseDelay`
-    /// up to `reconnectMaxDelay`, resetting once a connection is
-    /// established again.
+    /// up to `reconnectMaxDelay`, resetting only once a connection has stayed
+    /// established for `healthyConnectionSeconds` (see `reconnectAttempt`).
     private func scheduleReconnectAttempt() {
         let delay = min(reconnectMaxDelay, reconnectBaseDelay * pow(2, Double(reconnectAttempt)))
         reconnectAttempt += 1

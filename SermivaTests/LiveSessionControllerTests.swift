@@ -631,4 +631,43 @@ final class LiveSessionControllerTests: XCTestCase {
         scheduler.drainAll()
         XCTAssertFalse(controller.canEnd, "and stay unreachable once genuinely ended")
     }
+
+    // MARK: - Review of 5dcef10, nit (b): the previous session is let go of
+    // at the tap, before the (asynchronous, possibly slow) permission answer.
+
+    func test_batDauAndPhienMoiDiscardThePreviousSessionBeforeRequestingMicPermission() {
+        let session = FakeSonioxLiveSession()
+        let permission = DiscardOrderRecordingPermission(session: session)
+        let controller = LiveSessionController(
+            apiKey: "sx_test_key_not_real",
+            micPermission: permission,
+            audioCapture: FakeAudioCapture(),
+            liveSession: session,
+            translationAvailability: FakeMeToTargetAvailabilityChecker(),
+            scheduler: ManualScheduler()
+        )
+
+        controller.primaryButtonTapped() // Bắt đầu
+        controller.endSession()
+        controller.primaryButtonTapped() // Phiên mới
+
+        XCTAssertEqual(permission.discardCountsSeenAtEachRequest, [1, 2], "each tap must discard the previous session before the permission request, not after it answers")
+    }
+}
+
+/// Records how many times the session had been told to discard its
+/// previous session at the moment each permission request arrives, then
+/// grants it.
+private final class DiscardOrderRecordingPermission: MicPermissionProviding {
+    private let session: FakeSonioxLiveSession
+    private(set) var discardCountsSeenAtEachRequest: [Int] = []
+
+    init(session: FakeSonioxLiveSession) {
+        self.session = session
+    }
+
+    @MainActor func requestPermission(_ completion: @escaping @MainActor (Bool) -> Void) {
+        discardCountsSeenAtEachRequest.append(session.discardPreviousSessionCount)
+        completion(true)
+    }
 }
