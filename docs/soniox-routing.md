@@ -614,6 +614,23 @@ segments, never anything else.
   in the owner's filtered Console log, not on screen; the screen stayed correct throughout. Its cause
   is not established - see "Connection accounting" above.
 
+**Third mock live session (2026-09-24, 16:52-16:58, build 5dcef10, iPhone "Long"):**
+
+- With airplane mode on, the initial-connect network banner "Lỗi mạng, thử lại sau" appeared (status
+  "Sẵn sàng", dock "Mic tắt").
+- All 17 scripted sentences appeared, except the parts Soniox did not recognise in the two
+  overlapping turns. No duplicate segments, no empty segments, and no misattributed translations.
+- Lifecycle log: at most one real task was open at any time. Every socket that was closed showed
+  "task ACTUALLY completed", "URLSession invalidated" and "object deinit". No diagnostic line was
+  duplicated. Kết thúc closed the last socket, leaving 0 open.
+- The log has a gap from 16:57:36 to 16:57:58 while airplane mode was on, probably because Console.app
+  receives the device log over the network. Attempts #3 and #4 were not observed.
+- Two-socket bug, the owner's words verbatim: "đã sửa trong code và qua review; chưa quan sát trọn một
+  lần nối lại vì log hở từ 16:57:36 tới 16:57:58". Not closed.
+- The resend of unfinalized audio was not specifically exercised: the last pre-drop sentence was
+  finalized 2 s before the drop.
+- Pause billing: still not measured.
+
 **Still not yet measured, for the next session:**
 
 - Pause billing - read from the Soniox Console (whichever usage unit it displays) before and after a
