@@ -146,18 +146,16 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// other session is dropped here, so a late result can never land on a
     /// later session's same-numbered segment, whatever the queue still holds.
     private var translationRequests: [Int: (sessionEpoch: Int, segmentId: Int)] = [:]
-    /// Documented choice (c), awaiting the owner's decision: a `me` segment
-    /// that only the `<fin>` answer after Kết thúc finalizes is not sent to
-    /// on-device translation. Changing this constant to `true` is the whole
-    /// change for the recommended alternative - nothing else depends on it:
-    /// such a segment is then enqueued while the connection closes and
+    /// Choice (c), decided by the owner on 2026-09-24: yes. A `me` segment
+    /// that only the `<fin>` answer after Kết thúc finalizes is still sent to
+    /// on-device translation: it is enqueued while the connection closes and
     /// translated after Kết thúc (its result lands on the ended transcript;
     /// "Đang dịch…" never shows, since the screen is not running). The tap
     /// of Bắt đầu or Phiên mới abandons whatever is still queued or in
     /// flight (`discardPreviousSession`, before the permission answer or
     /// capture), and the session-epoch guard above drops any late result.
     /// The invariant test reads this constant and holds with either value.
-    static let translatesSegmentsFinalizedAfterEnd = false
+    static let translatesSegmentsFinalizedAfterEnd = true
     /// Set by `LiveSessionController` via `setTranslationAvailable` once its
     /// own per-session availability check resolves. `false` by default and
     /// reset at every `start()` - fail closed until explicitly confirmed, so
@@ -712,7 +710,7 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
     /// obey before ever calling `translate`.
     ///
     /// A segment finalized after Kết thúc (by the `<fin>` answer, while the
-    /// connection closes) is not enqueued - see
+    /// connection closes) is still enqueued - see
     /// `translatesSegmentsFinalizedAfterEnd`.
     private func enqueueMeTranslation(segmentId: Int, source: String) {
         guard isTranslationAvailable else { return }

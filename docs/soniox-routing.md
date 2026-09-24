@@ -384,10 +384,9 @@ the structure that carries them is now:
   undercut the end grace wait's whole purpose. With no established connection there is nothing to
   finalize, and an attempt still in flight is closed at once. M-direct translations still in progress
   are abandoned when the connection closes rather than at Kết thúc, since the `<fin>` answer may still
-  complete them. On-device translation is abandoned at Kết thúc exactly as before, and a `me` segment
-  that only the `<fin>` answer finalizes is not enqueued at all - a request enqueued after the
-  abandonment could otherwise outlive the session and land on a same-numbered segment after
-  "Phiên mới". Such a segment shows no English line (it no longer stays a draft).
+  complete them. On-device translation still queued or in flight is abandoned at Kết thúc exactly as
+  before. A `me` segment that only the `<fin>` answer finalizes is still enqueued and translated
+  after Kết thúc (choice (c), decided below), so it gets its English line.
 - **Auth wins until the session has fully closed.** A rejected key reported by any socket the session
   opened, including one already superseded, moves the screen to `.authError` - also during the end
   grace wait, and during the close window after Kết thúc, where round 5 ignored it (the screen kept
@@ -470,16 +469,17 @@ counter), the real service, the adapters, or real audio hardware.
 
 **Choices awaiting the owner** (each is what the invariant test asserts): the grace wait also
 applies to a paused session whose connection is down; auth arriving in the close window after Kết
-thúc moves `.ended` to `.authError`; choice (c) - a `me` segment finalized only by the `<fin>` answer
-after Kết thúc gets no on-device translation. Choice (c) is one constant,
-`SonioxLiveSession.translatesSegmentsFinalizedAfterEnd` (currently `false`), and changing it is the
-whole change - nothing else needs to move. With `true`, such a segment is enqueued while the
-connection closes and translated after Kết thúc; the result lands on the ended transcript, and
+thúc moves `.ended` to `.authError`.
+
+**Choice (c), decided by the owner on 2026-09-24: yes.** A `me` segment finalized only by the `<fin>`
+answer after Kết thúc is still translated into English. It is one constant,
+`SonioxLiveSession.translatesSegmentsFinalizedAfterEnd`, now `true`: such a segment is enqueued while
+the connection closes and translated after Kết thúc; the result lands on the ended transcript, and
 "Đang dịch…" never shows, since the screen is not running. The tap of Bắt đầu or Phiên mới abandons
 whatever is still queued or in flight (`discardPreviousSession`), and the session-epoch guard drops
-any late result. The invariant test reads the constant; the full `SermivaTests` suite and a
-5,000-seed fuzz were run with it set to `true` locally and passed (see the handoff of the review of
-46e9ca0).
+any late result. The invariant test reads the constant. Evidence that `true` holds every invariant:
+the full `SermivaTests` suite plus 5,000- and 10,000-seed fuzz runs with the switch `true` passed,
+reproduced by an independent review.
 
 **Device-only follow-up, pre-existing and unproven** (not fixed; the invariant test does not model
 it): `RealAudioCapture` does not observe `AVAudioEngineConfigurationChange`. If the engine stops for
