@@ -13,8 +13,8 @@ Dẫn chiếu các quy định đã có, không chép lại. Nếu có xung đ�
 ## Trạng thái
 
 - Owner: Long.
-- Version: 1.
-- Ngày rà soát: 2026-09-21.
+- Version: 2.
+- Ngày rà soát: 2026-09-24.
 - Readers: Lead; Supervisor khi được giao nhiệm vụ.
 
 ## Đặc điểm và mức nghi thức
@@ -60,10 +60,13 @@ Luật bền vững:
 - Architect và Reviewer khác họ nhà cung cấp; báo cáo niêm phong gửi riêng cho Lead, không đọc của nhau. Lead hội tụ và ra phán quyết.
 - Reviewer là seat mới, không tham gia viết phần được review, không fork ngữ cảnh kết luận của Lead. Brief nêu điều cần kiểm chứng, không mớm kết luận.
 - Brief giao outcome, phạm vi, ràng buộc và bằng chứng; Peer tự chọn cách làm.
+- Sau hai vòng REOPEN trên cùng một việc, vòng kế tiếp dùng seat Engineer mới, brief mang theo trạng thái
+  nhánh. Nếu lỗi mới vẫn cùng loại, seat đó chạy Opus 5.5 thay cho Sonnet 5. Lead ghi rõ việc đổi seat và
+  đổi model trong báo cáo.
 
 Không tự thêm Architect hoặc Reviewer cho một outcome chỉ vì nó là outcome đầu tiên.
 
-Lựa chọn model tại ngày 2026-09-21: Lead = `claude-lead` / Opus 5; Engineer = `claude-peer` / Sonnet 5; Architect định tuyến Soniox (chỉ đọc) = `claude-peer` / Fable 5.1; Reviewer = `codex-peer` / Sol medium.
+Lựa chọn model tại ngày 2026-09-24: Lead = `claude-lead` / Opus 5.5; Engineer = `claude-peer` / Sonnet 5, nâng lên Opus 5.5 theo luật trên; Architect (chỉ đọc) = `claude-peer` / Fable 5.1; Reviewer = `codex-peer` / Sol medium, dự phòng khi hết quota theo mục Review bắt buộc.
 Đổi model không làm mất luật độc lập phía trên. Quota và vận hành seat theo quy định cấp phòng.
 
 ## Review bắt buộc
@@ -73,7 +76,11 @@ Luôn có Reviewer độc lập cho:
 - Đường nhập khóa và Keychain; AVAudioSession và chống vọng.
 - Mục Verify của AGENTS.md hoặc điều ứng dụng khẳng định là đã kiểm.
 
-Outcome đầu tiên cần Reviewer cho phần cập nhật Verify đi kèm project Xcode đầu tiên và mọi phần chạm các bề mặt trên; không bắt review toàn bộ outcome.
+Khi `codex-peer` hết quota: review bằng một seat Reviewer `claude-peer` / Opus 5.5 mới, chưa tham gia vòng
+nào trước đó của cùng việc, và ghi rõ ngoại lệ cùng họ nhà cung cấp trong báo cáo. Khi quota trở lại, một
+seat Sol soát hẹp những luật rủi ro nhất trên main sau khi merge; lượt đó không chặn merge, có phát hiện thì
+sửa bằng commit mới.
+
 Thay đổi thuần bố cục không đổi ý nghĩa tín hiệu không tự động cần review. Phát hiện bề mặt nhạy cảm giữa chừng thì dừng phần đó và điều phối lại trước nghiệm thu.
 
 ## Quyền viết và workspace
@@ -92,8 +99,9 @@ Lead phải:
 3. Tự chạy lại các kiểm tra thuộc phạm vi có thể thực hiện, giữ lệnh và output thật.
 4. Với check mới hoặc được sửa, có lần quan sát check thất bại vì đúng nguyên nhân cần bắt; test xanh tự nó chưa chứng minh check có tác dụng.
 
+Không nhận lời kể của Engineer rằng một test đã bắt được lỗi; chỉ nhận output của lần đỏ.
+
 Áp dụng bảng bốn bậc và giới hạn chứng minh trong AGENTS.md; báo bậc đã đạt, bằng chứng, phần bỏ qua và lý do. Không chạy lại thao tác cần owner cho phép chỉ để đủ thủ tục.
-Chưa có build nên không đặt lệnh build giả định. Candidate tạo project đầu tiên phải kèm cập nhật Verify theo AGENTS.md; yêu cầu Reviewer nằm ở mục Review bắt buộc.
 Fixture state machine và segment theo AGENTS.md và `demo-data.json`. Bằng chứng UI cần quan sát trên Simulator được nêu tên, đối chiếu HANDOFF.md; test trạng thái không chứng minh bố cục.
 `finished`, `idle`, exit code 0 và “tests pass” chỉ là tín hiệu bắt đầu nghiệm thu.
 Lead báo ngắn: phán quyết, candidate, bằng chứng, giới hạn, việc cần owner quyết định; nêu lý do nhận hoặc bác finding.
