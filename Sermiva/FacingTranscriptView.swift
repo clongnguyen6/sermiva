@@ -124,16 +124,25 @@ struct FacingTranscriptView: View {
             // shrinks in landscape, where the notch moves to the side.
             let isLandscape = geo.size.width > geo.size.height
             VStack(spacing: 0) {
+                // The identifier lands on `FacingPane`'s own `ScrollView` -
+                // exactly the padding-constrained region a long sentence
+                // scrolls within, which is what SermivaUITests asserts the
+                // exact 54/22/34 pt insets and the no-overlap boundaries
+                // against (`facingTopWrapper`/`facingBottomWrapper`).
                 FacingPane(content: topContent, identifierPrefix: "facingTop")
                     .rotationEffect(.degrees(180))
                     .padding(.top, 54)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("facingTopWrapper")
 
                 middleStrip
 
                 FacingPane(content: bottomContent, identifierPrefix: "facingBottom")
                     .padding(.bottom, isLandscape ? 22 : 34)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .accessibilityElement(children: .contain)
+                    .accessibilityIdentifier("facingBottomWrapper")
             }
         }
         .ignoresSafeArea()
@@ -217,6 +226,8 @@ struct FacingTranscriptView: View {
         .background(Tokens.surface)
         .overlay(Rectangle().fill(Tokens.sep).frame(height: 0.5), alignment: .top)
         .overlay(Rectangle().fill(Tokens.sep).frame(height: 0.5), alignment: .bottom)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("facingMiddleStrip")
     }
 }
 

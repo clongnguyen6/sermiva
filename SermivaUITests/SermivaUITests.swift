@@ -137,4 +137,57 @@ final class SermivaUITests: XCTestCase {
         XCTAssertEqual(startButton.label, "Tiếp tục", "exiting Facing must not change the session's own paused state")
         XCTAssertTrue(app.otherElements["currentSegment"].waitForExistence(timeout: 5), "Phụ đề's own current-segment card must be back")
     }
+
+    /// HANDOFF.md section 3's landscape insets (`22` pt bottom, vs `34` pt
+    /// portrait - the top stays `54` pt either way) and its "dải giữa không
+    /// bị đè" (the middle strip must never be overlapped), proven
+    /// numerically rather than visually: `facingTopWrapper`/
+    /// `facingBottomWrapper` are `FacingPane`'s own `ScrollView` - the exact
+    /// region a long sentence scrolls within - so their measured edges are
+    /// the real padding boundary, not an approximation. `XCUIDevice`'s own
+    /// screenshot API renders landscape content incorrectly in this
+    /// environment (see docs/display-style-picker.md); this test's
+    /// assertions come from `XCUIElement.frame`, which - confirmed against
+    /// `xcrun simctl io screenshot`'s real framebuffer capture - reports
+    /// landscape geometry correctly regardless.
+    func test_facingLandscapeRegionsRespectInsetsWithNoOverlap() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["demoButton"].tap()
+        let startButton = app.buttons["primaryButton"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 10))
+        startButton.tap()
+        XCTAssertTrue(app.staticTexts["Would you like anything to eat?"].waitForExistence(timeout: 15))
+        startButton.tap()
+        app.buttons["displayStyleButton"].tap()
+        app.buttons["displayStyleCard_facing"].tap()
+        XCTAssertTrue(app.staticTexts["facingTopBig"].waitForExistence(timeout: 5))
+
+        XCUIDevice.shared.orientation = .landscapeLeft
+        defer { XCUIDevice.shared.orientation = .portrait }
+
+        let topWrapper = app.scrollViews["facingTopWrapper"]
+        XCTAssertTrue(topWrapper.waitForExistence(timeout: 5), "the top pane must still exist once rotated to landscape")
+        let strip = app.otherElements["facingMiddleStrip"]
+        XCTAssertTrue(strip.waitForExistence(timeout: 5), "the middle strip must still exist once rotated to landscape")
+        let bottomWrapper = app.scrollViews["facingBottomWrapper"]
+        XCTAssertTrue(bottomWrapper.waitForExistence(timeout: 5), "the bottom pane must still exist once rotated to landscape")
+
+        let screen = app.windows.firstMatch.frame
+        let top = topWrapper.frame
+        let mid = strip.frame
+        let bottom = bottomWrapper.frame
+
+        XCTAssertEqual(top.minY - screen.minY, 54, accuracy: 1, "the top pane must start exactly 54 pt below the true top edge in landscape")
+        XCTAssertEqual(screen.maxY - bottom.maxY, 22, accuracy: 1, "the bottom pane must end exactly 22 pt above the true bottom edge in landscape - not portrait's 34 pt")
+
+        // No overlap: each region's edge must exactly meet the next, never past it.
+        XCTAssertEqual(top.maxY, mid.minY, accuracy: 1, "the top pane must not overlap the middle strip")
+        XCTAssertEqual(mid.maxY, bottom.minY, accuracy: 1, "the middle strip must not overlap the bottom pane")
+
+        // Full width, no unexpected horizontal inset on either pane or the strip.
+        XCTAssertEqual(top.width, screen.width, accuracy: 1)
+        XCTAssertEqual(mid.width, screen.width, accuracy: 1)
+        XCTAssertEqual(bottom.width, screen.width, accuracy: 1)
+    }
 }

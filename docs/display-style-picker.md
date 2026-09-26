@@ -55,16 +55,30 @@ since it was a genuine visual break found while testing this outcome's own new b
 auditing every existing icon button against the same extreme setting is follow-up work, named
 here rather than done, per scope discipline.
 
-# What could not be verified: a true landscape screenshot
+# Correction: landscape renders correctly - only `app.screenshot()` was wrong
 
-Rotating the Simulator via `XCUIDevice.shared.orientation` (live rotation, background/
-reactivate, and a cold launch already in landscape were all tried) reproducibly renders the
-app's content as a portrait-sized, 90°-rotated block pinned to one side of the landscape
-canvas, with the rest of the screen black - on `SetupView`, a screen this outcome never
-touched, as much as on `FacingTranscriptView`. This points to a Simulator/Xcode rendering
-limitation in this environment (Xcode 27 / iOS 26.5 runtime), not a bug in either screen's own
-code - `Info.plist` correctly declares `UISupportedInterfaceOrientations` including both
-landscape values. Facing's landscape behaviour (the `22` vs `34` pt bottom inset switch) was
-verified by reading `FacingTranscriptView`'s own `GeometryReader`-driven `isLandscape`
-computation, not by an actual rotated screenshot - the owner should confirm on a real device
-or once this Simulator/Xcode limitation lifts.
+An earlier version of this note claimed a Simulator/Xcode rendering limitation made landscape
+unreachable. That was wrong, and the owner correctly rejected it as an unverified hypothesis.
+The actual finding, pinned down by trying a screenshot path that does not go through XCUITest
+at all:
+
+- `app.screenshot()` (`XCUIScreenshot`, taken from the test process) reliably renders rotated
+  content as a portrait-sized, 90°-rotated block pinned to one corner of the landscape canvas,
+  the rest black - reproduced on `SetupView` too, a screen this outcome never touched, so it is
+  specific to that API in this environment (Xcode 27 / iOS 26.5), not to this feature.
+- `xcrun simctl io <UDID> screenshot` - the actual CoreSimulator framebuffer, captured
+  independently of XCUITest - renders the exact same running app, in the exact same rotated
+  state, correctly: full-width landscape, the top pane genuinely upside-down, the middle strip
+  never overlapped. This environment has no `Simulator.app` GUI bundle installed (only the
+  `simctl`/`xcodebuild` command-line tooling and the CoreSimulator daemon), so `Device > Rotate`
+  via the Simulator app's own menu was not available to cross-check further, but the framebuffer
+  result already settles which side owns the earlier bug.
+- `XCUIElement.frame` (the accessibility geometry XCUITest itself reports, independent of the
+  `app.screenshot()` bug above) matches the framebuffer capture exactly: measured with
+  `SermivaUITests.test_facingLandscapeRegionsRespectInsetsWithNoOverlap`, the top pane starts
+  54 pt below the true top edge, the bottom pane ends 22 pt above the true bottom edge (not
+  portrait's 34 pt), and each region's edge exactly meets the next with zero gap or overlap -
+  all in landscape, all numerically, independent of any screenshot mechanism.
+
+Screenshots for the handback were captured via `xcrun simctl io <UDID> screenshot` instead of
+the UI test's own `app.screenshot()` for this reason.
