@@ -174,4 +174,22 @@ final class FacingTranscriptViewTests: XCTestCase {
         let content = FacingPaneContent.make(readerLanguage: "ja", me: "vi", target: "en", latest: nil)
         XCTAssertEqual(content.readerLabel, "Đọc JA", "no Japanese entry in LanguageNames yet, so it must fall back to the existing uppercase-code rule, not invent a new label")
     }
+
+    // MARK: - Top inset (review round 5: the double-inset-above-a-banner fix)
+
+    /// No banner: unchanged from before this fix - the real device safe
+    /// area applies normally, floored by HANDOFF's own minimum.
+    func test_topInsetWithNoBannerUsesTheRealSafeAreaFlooredByHandoff() {
+        XCTAssertEqual(FacingTranscriptView.topInset(handoffMinimum: 54, realSafeAreaTop: 62, hasBannerAbove: false), 62, "portrait: the real 62 pt notch clearance exceeds HANDOFF's 54 pt floor, so it wins")
+        XCTAssertEqual(FacingTranscriptView.topInset(handoffMinimum: 54, realSafeAreaTop: 0, hasBannerAbove: false), 54, "landscape: the real top inset is 0 here, so HANDOFF's own 54 pt floor wins")
+    }
+
+    /// A banner is showing above this view: it already sits below the real
+    /// device safe area (it is a normal, non-`ignoresSafeArea()` view), so
+    /// re-adding the real safe-area top inset here would double it - only
+    /// HANDOFF's own minimum design padding applies, in both orientations.
+    func test_topInsetWithABannerNeverAddsTheRealSafeAreaAgain() {
+        XCTAssertEqual(FacingTranscriptView.topInset(handoffMinimum: 54, realSafeAreaTop: 62, hasBannerAbove: true), 54, "portrait: the banner already cleared the real 62 pt notch - adding it again would double-inset")
+        XCTAssertEqual(FacingTranscriptView.topInset(handoffMinimum: 54, realSafeAreaTop: 0, hasBannerAbove: true), 54, "landscape: unaffected either way, since the real top inset was already 0")
+    }
 }

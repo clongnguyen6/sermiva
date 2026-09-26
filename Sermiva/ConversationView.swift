@@ -112,12 +112,25 @@ struct ConversationView<Controller: SessionControlling>: View {
 
     // MARK: - Facing ("Đối diện")
 
+    /// Mirrors the same five conditions the banner `if`/`else if` chain
+    /// above checks - whichever one is currently showing, `facingTranscript`
+    /// needs to know a banner (of some kind) sits above it; see
+    /// `FacingTranscriptView.topInset(...)` for why.
+    private var isBannerShowing: Bool {
+        controller.state == .micDenied
+            || controller.state == .authError
+            || controller.state == .reconnecting
+            || controller.showsNetworkErrorBanner
+            || controller.showsTranslationUnavailableBanner
+    }
+
     private var facingTranscript: some View {
         FacingTranscriptView(
             displaySegments: controller.displaySegments,
             meLanguage: controller.meLanguage,
             targetLanguage: controller.targetLanguage,
             isDemo: controller.isDemo,
+            isBannerShowing: isBannerShowing,
             swapped: $facingSwapped,
             micDockText: micDockText,
             micDotColor: micDotColor,

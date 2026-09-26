@@ -123,3 +123,33 @@ Portrait's real top (62) exceeds HANDOFF's 54, which is exactly the case AGENTS.
 for: a long upside-down sentence scrolling in the top pane clips to this pane's own `ScrollView`
 bounds, which start at the applied (62, not 54) inset - confirmed both by the numeric UI test and
 by looking at `facing-long-portrait.png`'s top edge directly.
+
+# Fix: a banner above Facing must not double the top inset
+
+`ConversationView`'s banner block (mic denied, auth error, network lost/error, translation
+unavailable) sits in the same `VStack` as `facingTranscript`, unconditionally of `displayStyle` -
+so any of those banners can render directly above `FacingTranscriptView` exactly as they do above
+`content`. Before this fix, `FacingTranscriptView` always computed its own top inset from the
+real device safe area (`windowSafeAreaInsets`, read straight from the key window, position-
+independent) as if its own top edge were adjacent to the true screen top - true when no banner
+shows, but wrong once one does: the banner itself already clears the real safe area (it is a
+normal view, not `ignoresSafeArea()`), so `FacingTranscriptView`'s own top edge sits below it,
+no longer adjacent to the notch/Dynamic Island - reserving the real safe-area inset again there
+doubled it, pushing the top reading region down by the banner's own height plus a redundant
+~62 pt (portrait) for a notch the banner had already cleared.
+
+Fixed by threading `isBannerShowing` (`ConversationView`, mirroring the same five conditions the
+banner block itself checks) into `FacingTranscriptView`, and factoring the top-inset arithmetic
+into `FacingTranscriptView.topInset(handoffMinimum:realSafeAreaTop:hasBannerAbove:)` - pure and
+directly unit-tested (`FacingTranscriptViewTests`) without a view or a real window: `max(54, 0)`
+when a banner is showing (HANDOFF's own minimum design padding only - the real safe-area
+component drops out, since the banner already provided it), `max(54, realSafeAreaTop)` otherwise,
+unchanged from before. Landscape's real top inset was already 0 (the Island sits on the side, not
+the top, in landscape - see the table above), so landscape was never actually double-inset and
+this fix is a no-op there; only portrait's real 62 pt was ever being double-counted.
+
+Out of scope for this fix, deferred to a later outcome: **a banner shown while in Facing renders
+unrotated, so it is readable only from the bottom reader's side** - the person the top region's
+own 180° rotation exists to serve would see it upside-down, and the banner visually displaces
+their region to make room for itself. Not moved, not rotated, and its content unchanged here per
+the owner's own scope for this fix; recorded as a known limitation for whoever picks this up.

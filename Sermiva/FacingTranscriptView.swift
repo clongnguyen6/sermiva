@@ -104,6 +104,11 @@ struct FacingTranscriptView: View {
     /// badge lives - so the middle strip shows it here instead while this
     /// is true.
     let isDemo: Bool
+    /// Whether `ConversationView` is currently showing one of its banners
+    /// (mic denied, auth error, network lost/error, translation
+    /// unavailable) directly above this view - see `topInset(...)` below
+    /// for why this view's own top inset needs to know.
+    let isBannerShowing: Bool
     @Binding var swapped: Bool
     let micDockText: String
     let micDotColor: Color
@@ -143,6 +148,21 @@ struct FacingTranscriptView: View {
             .first?.safeAreaInsets ?? .zero
     }
 
+    /// Pure, directly unit-testable without a view or a real window - see
+    /// `FacingTranscriptViewTests`. `hasBannerAbove`: when one of
+    /// `ConversationView`'s banners is showing directly above this view (in
+    /// its own `VStack`), this view's top edge is no longer adjacent to the
+    /// true screen top - the banner itself, sitting there instead, already
+    /// clears the real device safe area (Dynamic Island/notch), so adding
+    /// `realSafeAreaTop` again here would double-inset: the real device
+    /// clearance the banner already provides, stacked underneath a banner
+    /// that itself needs no such clearance (it already respects the safe
+    /// area like any other normal, non-`ignoresSafeArea()` view). HANDOFF's
+    /// own `handoffMinimum` design padding still applies either way.
+    static func topInset(handoffMinimum: CGFloat, realSafeAreaTop: CGFloat, hasBannerAbove: Bool) -> CGFloat {
+        max(handoffMinimum, hasBannerAbove ? 0 : realSafeAreaTop)
+    }
+
     var body: some View {
         GeometryReader { geo in
             // Owner's ruling (docs/display-style-picker.md): on this
@@ -150,10 +170,13 @@ struct FacingTranscriptView: View {
             // max(HANDOFF's number for that edge, the device's real safe
             // area for that edge). HANDOFF gives no number for leading/
             // trailing, so those use the real inset directly. Applies to
-            // both reading regions and the middle strip.
+            // both reading regions and the middle strip. Only the top edge
+            // is ever displaced by a banner (leading/trailing/bottom stay
+            // adjacent to their own real screen edges regardless), so only
+            // it uses `topInset(...)` above.
             let isLandscape = geo.size.width > geo.size.height
             let safe = windowSafeAreaInsets
-            let topInset = max(54, safe.top)
+            let topInset = Self.topInset(handoffMinimum: 54, realSafeAreaTop: safe.top, hasBannerAbove: isBannerShowing)
             let bottomInset = max(isLandscape ? 22 : 34, safe.bottom)
             VStack(spacing: 0) {
                 // The identifier lands on `FacingPane`'s own `ScrollView` -
