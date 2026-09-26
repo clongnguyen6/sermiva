@@ -109,14 +109,31 @@ final class FacingTranscriptViewTests: XCTestCase {
     }
 
     /// A `me` segment whose on-device translation is permanently unavailable
-    /// (`targetAbandoned`): the target reader gets no spinner (nothing is
-    /// genuinely running) and no invented translation - only the real
-    /// source, same as the third-language fallback above.
-    func test_meSegmentWithAbandonedTranslationShowsNoSpinnerToTheTargetReader() {
+    /// (`targetAbandoned`): per docs/display-style-picker.md's ruling, the
+    /// target reader's big line falls back to the segment's own real,
+    /// untranslated source text rather than staying blank - never an
+    /// invented translation, and no spinner (nothing is genuinely running).
+    func test_meSegmentWithAbandonedTranslationShowsSourceTextNotBlankToTheTargetReader() {
         let display = display(segment(lang: "vi", source: "Xin chào", target: nil, translationInProgress: false, targetAbandoned: true))
         let content = FacingPaneContent.make(readerLanguage: "en", me: "vi", target: "en", latest: display)
-        XCTAssertNil(content.big)
+        XCTAssertEqual(content.big, "Xin chào", "no target text will ever arrive for this segment - the real source text must show instead of leaving the big line blank")
+        XCTAssertNil(content.small, "the only other field that exists (the abandoned target, which is nil) is already the big line here")
         XCTAssertFalse(content.isTranslatingBig, "translation has been given up on for this segment - it is not genuinely running")
+    }
+
+    /// `isPartial` drives the "Đang nhận dạng" tag `FacingPane` renders next
+    /// to the reader label - it must track the segment's own
+    /// `showsRecognizingTag` (a still-running partial), not a constant, in
+    /// both directions: true while genuinely partial, false again once the
+    /// segment goes final.
+    func test_isPartialTracksTheSegmentsOwnRecognizingTagInBothDirections() {
+        let partialDisplay = display(segment(lang: "vi", source: "Xin", isFinal: false))
+        let partialContent = FacingPaneContent.make(readerLanguage: "vi", me: "vi", target: "en", latest: partialDisplay)
+        XCTAssertTrue(partialContent.isPartial, "a still-running partial must show the recognizing tag")
+
+        let finalDisplay = display(segment(lang: "vi", source: "Xin chào", isFinal: true))
+        let finalContent = FacingPaneContent.make(readerLanguage: "vi", me: "vi", target: "en", latest: finalDisplay)
+        XCTAssertFalse(finalContent.isPartial, "a final segment must not keep showing the recognizing tag")
     }
 
     func test_readerLabelForAThirdLanguageUsesTheExistingLanguageNameFallback() {

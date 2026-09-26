@@ -117,6 +117,7 @@ struct ConversationView<Controller: SessionControlling>: View {
             displaySegments: controller.displaySegments,
             meLanguage: controller.meLanguage,
             targetLanguage: controller.targetLanguage,
+            isDemo: controller.isDemo,
             swapped: $facingSwapped,
             micDockText: micDockText,
             micDotColor: micDotColor,
@@ -136,7 +137,6 @@ struct ConversationView<Controller: SessionControlling>: View {
     // MARK: - Top bar
 
     @ScaledMetric(relativeTo: .body) private var headerSize: CGFloat = 15
-    @ScaledMetric(relativeTo: .body) private var demoBadgeSize: CGFloat = 11
     @ScaledMetric(relativeTo: .body) private var statusTextSize: CGFloat = 12.5
 
     private var topBar: some View {
@@ -146,13 +146,7 @@ struct ConversationView<Controller: SessionControlling>: View {
                     .font(.system(size: headerSize, weight: .medium))
                     .foregroundStyle(Tokens.text)
                 if controller.isDemo {
-                    Text("DEMO")
-                        .font(.system(size: demoBadgeSize, weight: .bold))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Tokens.warn.opacity(0.18))
-                        .foregroundStyle(Tokens.warn)
-                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                    DemoBadge()
                 }
                 Spacer()
                 Button(action: {}) {
@@ -499,6 +493,27 @@ struct ConversationView<Controller: SessionControlling>: View {
 extension ConversationView where Controller == DemoSessionController {
     init(events: [DemoEvent], isDemo: Bool, languageConfig: LiveLanguageConfig = .default) {
         self.init(controller: DemoSessionController(events: events, isDemo: isDemo, languageConfig: languageConfig))
+    }
+}
+
+/// HANDOFF.md section 2.2's "huy hiệu DEMO" - the one marker that keeps a
+/// demo session from being mistaken for a live one (AGENTS.md: "Demo and
+/// live stay visibly separated"). A single shared view so `topBar` and
+/// `FacingTranscriptView`'s middle strip render the exact same component and
+/// string rather than two independently hand-copied copies that can drift.
+struct DemoBadge: View {
+    @ScaledMetric(relativeTo: .body) private var demoBadgeSize: CGFloat = 11
+
+    var body: some View {
+        Text("DEMO")
+            .font(.system(size: demoBadgeSize, weight: .bold))
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Tokens.warn.opacity(0.18))
+            .foregroundStyle(Tokens.warn)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }
 

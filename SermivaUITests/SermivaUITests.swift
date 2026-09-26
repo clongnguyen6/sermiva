@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 
 /// One smoke test on the real app, no hooks or shortcuts in product code:
 /// open the app, enter demo, reach the listening state, see the first
@@ -174,7 +175,22 @@ final class SermivaUITests: XCTestCase {
     /// are asserted as a floor, and leading/trailing (where HANDOFF has no
     /// floor at all) as an exact real-inset containment check covering both
     /// panes' content and every middle-strip control.
+    /// Review round 3, finding 5: checks BOTH rotation directions - the
+    /// Island's landscape clearance reports identically on either physical
+    /// side (see `landscapeRealSafeArea`'s own doc), but that symmetry is
+    /// exactly the kind of claim a test must confirm empirically rather than
+    /// assume, so `landscapeLeft` and `landscapeRight` are both driven
+    /// through the same real device here rather than only one of them.
     func test_facingLandscapeRegionsRespectInsetsWithNoOverlap() throws {
+        // Device orientation is Simulator-global, not per-test-run state -
+        // a previous test (in this file or another) rotating and not
+        // reaching its own `defer` (e.g. `continueAfterFailure = false`
+        // aborting mid-assertion) can leave the Simulator rotated before
+        // this test's own `app.launch()` below. Starting from a known
+        // portrait orientation here, before anything else, is what makes
+        // this test's own two rotations below deterministic regardless of
+        // what ran before it.
+        XCUIDevice.shared.orientation = .portrait
         let app = XCUIApplication()
         app.launch()
         app.buttons["demoButton"].tap()
@@ -187,15 +203,21 @@ final class SermivaUITests: XCTestCase {
         app.buttons["displayStyleCard_facing"].tap()
         XCTAssertTrue(app.staticTexts["facingTopBig"].waitForExistence(timeout: 5))
 
-        XCUIDevice.shared.orientation = .landscapeLeft
         defer { XCUIDevice.shared.orientation = .portrait }
 
+        for orientation in [UIDeviceOrientation.landscapeLeft, .landscapeRight] {
+            XCUIDevice.shared.orientation = orientation
+            assertFacingLandscapeInsets(app: app, orientation: orientation)
+        }
+    }
+
+    private func assertFacingLandscapeInsets(app: XCUIApplication, orientation: UIDeviceOrientation, line: UInt = #line) {
         let topWrapper = app.scrollViews["facingTopWrapper"]
-        XCTAssertTrue(topWrapper.waitForExistence(timeout: 5), "the top pane must still exist once rotated to landscape")
+        XCTAssertTrue(topWrapper.waitForExistence(timeout: 5), "[\(orientation)] the top pane must still exist once rotated to landscape", line: line)
         let strip = app.otherElements["facingMiddleStrip"]
-        XCTAssertTrue(strip.waitForExistence(timeout: 5), "the middle strip must still exist once rotated to landscape")
+        XCTAssertTrue(strip.waitForExistence(timeout: 5), "[\(orientation)] the middle strip must still exist once rotated to landscape", line: line)
         let bottomWrapper = app.scrollViews["facingBottomWrapper"]
-        XCTAssertTrue(bottomWrapper.waitForExistence(timeout: 5), "the bottom pane must still exist once rotated to landscape")
+        XCTAssertTrue(bottomWrapper.waitForExistence(timeout: 5), "[\(orientation)] the bottom pane must still exist once rotated to landscape", line: line)
 
         let screen = app.windows.firstMatch.frame
         let top = topWrapper.frame
@@ -206,12 +228,12 @@ final class SermivaUITests: XCTestCase {
         // real device inset (0 top / 20 bottom here) is smaller than
         // HANDOFF's own 54/22 on this device, so the applied clearance must
         // still be at least HANDOFF's own number.
-        XCTAssertGreaterThanOrEqual(top.minY - screen.minY, 54 - 0.5, "the top pane must never start less than HANDOFF's own 54 pt below the true top edge")
-        XCTAssertGreaterThanOrEqual(screen.maxY - bottom.maxY, 22 - 0.5, "the bottom pane must never end less than HANDOFF's own 22 pt above the true bottom edge in landscape")
+        XCTAssertGreaterThanOrEqual(top.minY - screen.minY, 54 - 0.5, "[\(orientation)] the top pane must never start less than HANDOFF's own 54 pt below the true top edge", line: line)
+        XCTAssertGreaterThanOrEqual(screen.maxY - bottom.maxY, 22 - 0.5, "[\(orientation)] the bottom pane must never end less than HANDOFF's own 22 pt above the true bottom edge in landscape", line: line)
 
         // No overlap: each region's edge must exactly meet the next, never past it.
-        XCTAssertEqual(top.maxY, mid.minY, accuracy: 1, "the top pane must not overlap the middle strip")
-        XCTAssertEqual(mid.maxY, bottom.minY, accuracy: 1, "the middle strip must not overlap the bottom pane")
+        XCTAssertEqual(top.maxY, mid.minY, accuracy: 1, "[\(orientation)] the top pane must not overlap the middle strip", line: line)
+        XCTAssertEqual(mid.maxY, bottom.minY, accuracy: 1, "[\(orientation)] the middle strip must not overlap the bottom pane", line: line)
 
         // Leading/trailing: no HANDOFF floor exists, so every piece of
         // region content and every strip control must sit fully inside the
@@ -225,18 +247,34 @@ final class SermivaUITests: XCTestCase {
         let safeMinX = screen.minX + Self.landscapeRealSafeArea.leadingOrTrailing
         let safeMaxX = screen.maxX - Self.landscapeRealSafeArea.leadingOrTrailing
 
-        func assertInsideSafeArea(_ identifier: String, line: UInt = #line) {
+        // Review round 3, finding 5: a missing element must fail the check,
+        // not be silently skipped - `guard element.exists else { return }`
+        // here previously let `facingSwapButton` being hidden from
+        // accessibility pass this test vacuously.
+        func assertInsideSafeArea(_ identifier: String, assertLine: UInt = #line) {
             let element = app.descendants(matching: .any)[identifier]
-            guard element.exists else { return }
+            XCTAssertTrue(element.exists, "[\(orientation)] \(identifier) must exist to be checked against the safe area", line: assertLine)
             let frame = element.frame
-            XCTAssertGreaterThanOrEqual(frame.minX, safeMinX - 1, "\(identifier) must not start left of the real safe area", line: line)
-            XCTAssertLessThanOrEqual(frame.maxX, safeMaxX + 1, "\(identifier) must not end right of the real safe area", line: line)
+            XCTAssertGreaterThanOrEqual(frame.minX, safeMinX - 1, "[\(orientation)] \(identifier) must not start left of the real safe area", line: assertLine)
+            XCTAssertLessThanOrEqual(frame.maxX, safeMaxX + 1, "[\(orientation)] \(identifier) must not end right of the real safe area", line: assertLine)
         }
 
+        // `facingTopBig`/`facingBottomBig` are deliberately not checked
+        // here: `FacingPaneContent.make` only ever gives ONE of the two
+        // readers an immediate big line for a given segment - the other
+        // needs its translation to land, which `cafe_vi_en`'s own real
+        // pacing (a fixed 0.9 s between events, a 1.4 s translation delay)
+        // means the NEXT event always preempts before that happens, for
+        // every segment except the fixture's very last. Which reader is
+        // still waiting keeps changing every 0.9 s, so asserting either
+        // identifier here would be asserting fixture timing, not layout -
+        // and both Big and Small share the exact same
+        // `.padding(.horizontal, 22)` container as `ReaderLabel` (see
+        // `FacingPane`), so `ReaderLabel` - which renders unconditionally,
+        // with or without a segment - already proves the same horizontal
+        // inset this axis exists to check.
         assertInsideSafeArea("facingTopReaderLabel")
-        assertInsideSafeArea("facingTopBig")
         assertInsideSafeArea("facingBottomReaderLabel")
-        assertInsideSafeArea("facingBottomBig")
         assertInsideSafeArea("facingPrimaryButton")
         assertInsideSafeArea("facingSwapButton")
         assertInsideSafeArea("facingExitButton")

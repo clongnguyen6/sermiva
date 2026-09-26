@@ -55,6 +55,15 @@ struct FacingPaneContent: Equatable {
             // when readerLanguage is that fixed destination.
             let translationDestination = lang == me ? target : me
             if translationDestination == readerLanguage {
+                // `segment.targetAbandoned`: the translation is permanently
+                // unavailable, not merely pending - per
+                // docs/display-style-picker.md's ruling, the big line falls
+                // back to the segment's own untranslated source text rather
+                // than staying blank, with no supplementary line (the only
+                // other field, `sourceText`, is already the big line here).
+                if segment.targetAbandoned {
+                    return FacingPaneContent(readerLabel: readerLabel, hasSegment: true, speakerText: speakerText, speakerColorRole: speakerColorRole, isPartial: isPartial, big: latest.sourceText, isTranslatingBig: false, small: nil)
+                }
                 return FacingPaneContent(readerLabel: readerLabel, hasSegment: true, speakerText: speakerText, speakerColorRole: speakerColorRole, isPartial: isPartial, big: latest.targetText, isTranslatingBig: latest.showsTranslatingPlaceholder, small: latest.sourceText)
             }
         }
@@ -94,6 +103,11 @@ struct FacingTranscriptView: View {
     let displaySegments: [SegmentDisplay]
     let meLanguage: String
     let targetLanguage: String
+    /// AGENTS.md: "Demo and live stay visibly separated." Facing hides
+    /// `ConversationView`'s own top bar - the only other place the `DEMO`
+    /// badge lives - so the middle strip shows it here instead while this
+    /// is true.
+    let isDemo: Bool
     @Binding var swapped: Bool
     let micDockText: String
     let micDotColor: Color
@@ -177,25 +191,39 @@ struct FacingTranscriptView: View {
 
     @ScaledMetric(relativeTo: .body) private var micTextSize: CGFloat = 12
     @ScaledMetric(relativeTo: .body) private var stripLabelSize: CGFloat = 14
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var showsPauseIcon: Bool { primaryLabel == "Tạm dừng" }
 
-    private func middleStrip(leadingInset: CGFloat, trailingInset: CGFloat) -> some View {
+    /// Mic dot/icon/status text (and, in demo, the `DEMO` badge - see
+    /// `isDemo`): the strip's one flexible-width element. No `lineLimit` -
+    /// review round 3, finding 2: at the largest accessibility text size
+    /// this used to hard-truncate to "Mic…" instead of wrapping, the one
+    /// state text in the strip that must never be unreadable. Wrapping to
+    /// more lines instead is what "the strip may grow in height if needed"
+    /// (same finding) is for.
+    private var micStatusRow: some View {
         HStack(spacing: 6) {
-            HStack(spacing: 6) {
-                Circle().fill(micDotColor).frame(width: 8, height: 8)
-                Image(systemName: micIconName)
-                    .font(.system(size: micTextSize))
-                    .foregroundStyle(Tokens.text2)
-                    .accessibilityHidden(true)
-                Text(micDockText)
-                    .font(.system(size: micTextSize, weight: .semibold))
-                    .foregroundStyle(Tokens.text2)
-                    .lineLimit(1)
+            if isDemo {
+                DemoBadge()
             }
-            .frame(minHeight: 44)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Circle().fill(micDotColor).frame(width: 8, height: 8)
+            Image(systemName: micIconName)
+                .font(.system(size: micTextSize))
+                .foregroundStyle(Tokens.text2)
+                .accessibilityHidden(true)
+            Text(micDockText)
+                .font(.system(size: micTextSize, weight: .semibold))
+                .foregroundStyle(Tokens.text2)
+        }
+        .frame(minHeight: 44)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 
+    /// Tạm dừng/Tiếp tục · Đổi bên · ✕ - grouped so the accessibility-size
+    /// layout below can give this its own row, separate from `micStatusRow`.
+    private var controlsRow: some View {
+        HStack(spacing: 6) {
             Button(action: onPrimary) {
                 HStack(spacing: 6) {
                     if isConnecting {
@@ -247,6 +275,39 @@ struct FacingTranscriptView: View {
             .accessibilityLabel("Thoát Sân khấu")
             .accessibilityIdentifier("facingExitButton")
         }
+    }
+
+    private func middleStrip(leadingInset: CGFloat, trailingInset: CGFloat) -> some View {
+        Group {
+            // Review round 3, finding 2: at an accessibility text size, the
+            // single-row layout below squeezes `micStatusRow` down to almost
+            // no width, which is what forced the old hard truncation. A
+            // stacked layout gives it the full row width instead, at the
+            // cost of the strip growing taller - the same tradeoff finding 2
+            // calls for. `isDemo` also forces it even at the default text
+            // size: `DemoBadge` (finding 1) added enough width to
+            // `micStatusRow` that the single-row layout squeezed IT too,
+            // wrapping "DEMO" into two lines - found by looking at a real
+            // screenshot, not by inspection.
+            if dynamicTypeSize.isAccessibilitySize || isDemo {
+                // Without this, the VStack sizes itself to its widest
+                // non-flexible child (`controlsRow`) and only offers
+                // `micStatusRow` THAT width, not the strip's actual full
+                // width - squeezing `DemoBadge` enough to wrap "DEMO" into
+                // two lines even here, found the same way as the comment
+                // above.
+                VStack(alignment: .leading, spacing: 8) {
+                    micStatusRow
+                    controlsRow
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack(spacing: 6) {
+                    micStatusRow
+                    controlsRow
+                }
+            }
+        }
         // The strip's own 10 pt is design breathing room, not a safe-area
         // clearance claim (unlike the panes' 54/22/34, it never stood in
         // for the real inset) - so the real safe area (e.g. the Dynamic
@@ -255,7 +316,7 @@ struct FacingTranscriptView: View {
         // their wrapper's own safe-area padding and `FacingPane`'s internal
         // 22 pt content padding. `.background` below applies to this same
         // (now wider-padded) row, which still spans the full width offered
-        // to it: the flexible mic-status `HStack` above absorbs the extra
+        // to it: the flexible mic-status row above absorbs the extra
         // padding, so the row's own total width - and therefore its
         // background - never shrinks in from the true screen edge.
         .padding(.leading, 10 + leadingInset)
