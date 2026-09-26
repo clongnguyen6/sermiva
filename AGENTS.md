@@ -29,17 +29,16 @@ time:
 | Claim | What proves it |
 |---|---|
 | compiles | the `build` step |
-| runs | `SermivaUITests`: the real committed app, no product-code hooks, only accessibility identifiers; checks the first and a later fixture segment in Phụ đề; enters Đối diện through the "Hiển thị" sheet, checks the top region renders rotated 180°, and confirms ✕ returns to Phụ đề with the session's paused state and transcript intact; separately rotates to BOTH landscape directions and, in each, numerically checks both Đối diện regions' reader-label row and every middle-strip control against HANDOFF's 54/22 pt floor and the device's real safe area (whichever is larger wins - see docs/display-style-picker.md) with zero gap or overlap, failing (not skipping) if any checked element is missing (`app.screenshot()` itself renders landscape content incorrectly in this environment - `XCUIElement.frame` does not); its screenshots land in the test's result bundle |
-| behaves | `SermivaTests`: state machine, segment assembly, the connection lifecycle (a seeded invariant fuzz over fake sockets and a virtual clock; `TEST_RUNNER_SERMIVA_FUZZ_SEEDS` in xcodebuild's environment scales it, not as an argument), the on-device translation queue (through a fake, never real Apple Translation), Keychain, and Đối diện's per-region text selection (`FacingTranscriptViewTests`) - nothing beyond what those cover; it launches the app as its `TEST_HOST`, which is not UI automation - nothing in it drives or looks at the UI |
+| runs | `SermivaUITests`: the real committed app, accessibility identifiers only, covering Phụ đề's first segments and Đối diện's rotation/exit/both-landscape insets numerically - not transcript text bounds; see the tests' own comments for how |
+| behaves | `SermivaTests`: state machine, segment assembly, connection lifecycle, the on-device translation queue, Keychain, and Đối diện's per-region text selection, all through fakes, not real Soniox/Apple Translation and not UI automation; see each test's own comment for how |
 | works live | a real Soniox key on a real device, named, and what you heard - never proven by this script; the owner runs that session; Apple Translation never runs in the Simulator either, so it too can only ever reach this rung |
 
-This does not cover Settings, the three display styles that do not exist yet (Bong bóng, Sân
-khấu, Kịch bản), per-segment language ID, `me`/`guest`/`target` routing, or real audio hardware
-(echo, barge-in, overlapping speech, loudspeaker case) - all `[thật]` in the handoff, and unit
-tests of app-owned logic do not prove what the real service does.
-On the Simulator these also look indistinguishable from correct, since nothing here exercises real
-hardware. Soniox's stream shape is untested behind a thin adapter, so do not write tests through it -
-a test around an unconfirmed contract forces a compatibility layer that never goes away.
+This does not cover Settings, the three display styles that do not exist yet (Bong bóng, Sân khấu, Kịch
+bản), per-segment language ID, `me`/`guest`/`target` routing, or real audio hardware (echo, barge-in,
+overlapping speech, loudspeaker case) - all `[thật]` in the handoff, and unit tests of app-owned logic
+do not prove what the real service does - indistinguishable from correct on the Simulator, since
+nothing here exercises real hardware. Soniox's stream shape is untested behind a thin adapter, so do
+not write tests through it - an unconfirmed contract forces a compatibility layer that never goes away.
 
 Do not delete the committed scheme at `Sermiva.xcodeproj/xcshareddata/xcschemes/Sermiva.xcscheme`:
 its `parallelizable = "NO"` keeps runs on the named device; without it, `xcodebuild` auto-generates
