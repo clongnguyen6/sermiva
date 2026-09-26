@@ -191,7 +191,6 @@ struct FacingTranscriptView: View {
 
     @ScaledMetric(relativeTo: .body) private var micTextSize: CGFloat = 12
     @ScaledMetric(relativeTo: .body) private var stripLabelSize: CGFloat = 14
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var showsPauseIcon: Bool { primaryLabel == "Tạm dừng" }
 
@@ -199,9 +198,11 @@ struct FacingTranscriptView: View {
     /// `isDemo`): the strip's one flexible-width element. No `lineLimit` -
     /// review round 3, finding 2: at the largest accessibility text size
     /// this used to hard-truncate to "Mic…" instead of wrapping, the one
-    /// state text in the strip that must never be unreadable. Wrapping to
-    /// more lines instead is what "the strip may grow in height if needed"
-    /// (same finding) is for.
+    /// state text in the strip that must never be unreadable. No `lineLimit`
+    /// is also what makes `ViewThatFits` (below) measure this row's real,
+    /// unwrapped width when deciding whether the one-row layout still fits -
+    /// wrapping to more lines in the stacked layout instead is what "the
+    /// strip may grow in height if needed" (same finding) is for.
     private var micStatusRow: some View {
         HStack(spacing: 6) {
             if isDemo {
@@ -278,34 +279,32 @@ struct FacingTranscriptView: View {
     }
 
     private func middleStrip(leadingInset: CGFloat, trailingInset: CGFloat) -> some View {
-        Group {
-            // Review round 3, finding 2: at an accessibility text size, the
-            // single-row layout below squeezes `micStatusRow` down to almost
-            // no width, which is what forced the old hard truncation. A
-            // stacked layout gives it the full row width instead, at the
-            // cost of the strip growing taller - the same tradeoff finding 2
-            // calls for. `isDemo` also forces it even at the default text
-            // size: `DemoBadge` (finding 1) added enough width to
-            // `micStatusRow` that the single-row layout squeezed IT too,
-            // wrapping "DEMO" into two lines - found by looking at a real
-            // screenshot, not by inspection.
-            if dynamicTypeSize.isAccessibilitySize || isDemo {
-                // Without this, the VStack sizes itself to its widest
-                // non-flexible child (`controlsRow`) and only offers
-                // `micStatusRow` THAT width, not the strip's actual full
-                // width - squeezing `DemoBadge` enough to wrap "DEMO" into
-                // two lines even here, found the same way as the comment
-                // above.
-                VStack(alignment: .leading, spacing: 8) {
-                    micStatusRow
-                    controlsRow
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                HStack(spacing: 6) {
-                    micStatusRow
-                    controlsRow
-                }
+        // Review round 4: picking the layout off `isDemo` or an
+        // accessibility-size flag was itself the bug - at DEFAULT text size
+        // with `isDemo` true it forced two rows even in landscape, where one
+        // row has ~870 pt to work with and uses under half of it, costing
+        // the two reading regions real height for no reason. `ViewThatFits`
+        // instead measures each candidate's own real (unwrapped, since
+        // neither row's `Text` sets `lineLimit`) width against what the
+        // strip actually has, so the same one-row-if-it-fits rule holds for
+        // any text size, orientation, and DEMO badge state, not just the
+        // ones this review happened to check.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 6) {
+                micStatusRow
+                controlsRow
+            }
+            // Stacked fallback, once the row above genuinely does not fit.
+            // `controlsRow` is trailing-aligned here - in the one-row
+            // layout above, `micStatusRow`'s own `.frame(maxWidth: .infinity)`
+            // already pushes `controlsRow` to the strip's trailing edge, so
+            // anchoring it there again (instead of leaving it left-aligned
+            // with a large empty band beside it) keeps the two layouts
+            // looking like the same design at two heights, not two designs.
+            VStack(alignment: .leading, spacing: 8) {
+                micStatusRow
+                controlsRow
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
         // The strip's own 10 pt is design breathing room, not a safe-area
