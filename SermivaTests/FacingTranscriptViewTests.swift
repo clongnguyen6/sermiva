@@ -98,17 +98,17 @@ final class FacingTranscriptViewTests: XCTestCase {
     }
 
     /// Language not yet identified: neither reader can be told which
-    /// direction a translation would even go. Owner's ruling
-    /// (docs/display-style-picker.md): the me/Vietnamese reader's side of
-    /// this case is explicitly unchanged (raw source stays the big line),
-    /// but the target/English reader has no confirmed English-language text
-    /// here, so its big line stays empty and the raw source moves to small.
-    func test_unidentifiedLanguageShowsSourceBigToMeReaderAndSourceSmallToTargetReader() {
+    /// direction a translation would even go, so no text confirmed to be in
+    /// either reader's own language exists. Owner's ruling
+    /// (docs/display-style-picker.md), one rule for both readers, no
+    /// exceptions: both big lines stay empty and both small lines show the
+    /// real source instead.
+    func test_unidentifiedLanguageShowsEmptyBigAndSourceSmallToBothReaders() {
         let display = display(segment(lang: nil, source: "..."), isActivityRunning: true)
         let meSide = FacingPaneContent.make(readerLanguage: "vi", me: "vi", target: "en", latest: display)
         let targetSide = FacingPaneContent.make(readerLanguage: "en", me: "vi", target: "en", latest: display)
-        XCTAssertEqual(meSide.big, "...", "the me reader's side of this case is unchanged by the owner's ruling")
-        XCTAssertNil(meSide.small)
+        XCTAssertNil(meSide.big, "no text confirmed to be in the me reader's own language exists for this segment")
+        XCTAssertEqual(meSide.small, "...", "the real, un-invented source belongs in the small line instead")
         XCTAssertNil(targetSide.big, "no text confirmed to be in the target reader's own language exists for this segment")
         XCTAssertEqual(targetSide.small, "...", "the real, un-invented source belongs in the small line instead")
     }
@@ -126,6 +126,33 @@ final class FacingTranscriptViewTests: XCTestCase {
         XCTAssertNil(content.big, "no target-language text will ever arrive for this segment - the big line must stay empty, not show the untranslated Vietnamese source")
         XCTAssertEqual(content.small, "Xin chào", "the real, un-invented source belongs in the small line instead")
         XCTAssertFalse(content.isTranslatingBig, "translation has been given up on for this segment - it is not genuinely running")
+    }
+
+    /// The same rule, the other direction: a guest (non-`me`) segment whose
+    /// translation into `me` is permanently unavailable. Owner's ruling
+    /// applies with no exceptions - the me/Vietnamese reader's big line
+    /// stays empty too (never the untranslated guest-language source), and
+    /// the source moves to the small line, with no spinner.
+    func test_guestSegmentWithAbandonedTranslationShowsEmptyBigAndSourceSmallToTheMeReader() {
+        let display = display(segment(lang: "en", source: "Hello", target: nil, translationInProgress: false, targetAbandoned: true))
+        let content = FacingPaneContent.make(readerLanguage: "vi", me: "vi", target: "en", latest: display)
+        XCTAssertNil(content.big, "no me-language text will ever arrive for this segment - the big line must stay empty, not show the untranslated English source")
+        XCTAssertEqual(content.small, "Hello", "the real, un-invented source belongs in the small line instead")
+        XCTAssertFalse(content.isTranslatingBig, "translation has been given up on for this segment - it is not genuinely running")
+    }
+
+    /// A reader can still see that something is happening even when both
+    /// big lines are empty (language not yet identified): the "Đang nhận
+    /// dạng" tag is driven by `isPartial` alone, independent of `big`/
+    /// `small`, so it must keep showing while the segment is still partial.
+    func test_isPartialStillShowsWhenBothBigLinesAreEmpty() {
+        let display = display(segment(lang: nil, source: "...", isFinal: false))
+        let meSide = FacingPaneContent.make(readerLanguage: "vi", me: "vi", target: "en", latest: display)
+        let targetSide = FacingPaneContent.make(readerLanguage: "en", me: "vi", target: "en", latest: display)
+        XCTAssertNil(meSide.big)
+        XCTAssertNil(targetSide.big)
+        XCTAssertTrue(meSide.isPartial, "a reader must still see that recognition is under way even with nothing to show yet")
+        XCTAssertTrue(targetSide.isPartial)
     }
 
     /// `isPartial` drives the "Đang nhận dạng" tag `FacingPane` renders next

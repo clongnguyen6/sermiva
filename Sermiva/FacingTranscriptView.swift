@@ -32,63 +32,50 @@ struct FacingPaneContent: Equatable {
         let speakerColorRole = SpeakerLabel.colorRole(for: segment.speaker)
         let isPartial = latest.showsRecognizingTag
 
-        // `lang == nil` means diarization has not identified a language for
-        // this segment yet - not "definitely some other language". Routing
-        // a translation destination off that unknown would be a guess, so
-        // it is handled by the same no-invent fallback as a genuine
-        // third-language guest below, never folded into the `me`/`target`
-        // comparison.
-        if let lang = segment.lang {
-            if lang == readerLanguage {
-                // This reader's own language: the original text already
-                // reads fine for them, at full size; their counterpart's
-                // language, if it has arrived, is the small supplementary
-                // line.
-                return FacingPaneContent(readerLabel: readerLabel, hasSegment: true, speakerText: speakerText, speakerColorRole: speakerColorRole, isPartial: isPartial, big: latest.sourceText, isTranslatingBig: false, small: latest.targetText)
-            }
+        // Owner's ruling (docs/display-style-picker.md), one rule for both
+        // readers, no exceptions: a region's big line only ever holds text
+        // confirmed to be in that region's own reader's language; if none
+        // exists, it stays empty. The segment's real source text always
+        // goes in the small line instead - never invented, and never the
+        // big line unless it happens to already be in this reader's own
+        // language (the branch just below).
+        if segment.lang == readerLanguage {
+            // This reader's own language: the original text already reads
+            // fine for them, at full size; their counterpart's language, if
+            // it has arrived, is the small supplementary line.
+            return FacingPaneContent(readerLabel: readerLabel, hasSegment: true, speakerText: speakerText, speakerColorRole: speakerColorRole, isPartial: isPartial, big: latest.sourceText, isTranslatingBig: false, small: latest.targetText)
+        }
 
-            // docs/soniox-routing.md: a `me`-language segment's translation
-            // lands in `target`; every other segment's lands in `me`,
-            // regardless of its actual language - that one fixed direction
-            // is the only translation this app ever requests. A translation
-            // usable as this reader's big line only exists - now or ever -
-            // when readerLanguage is that fixed destination.
-            let translationDestination = lang == me ? target : me
-            if translationDestination == readerLanguage {
-                // `segment.targetAbandoned`: the translation is permanently
-                // unavailable, not merely pending. Owner's ruling
-                // (docs/display-style-picker.md): a region's big line only
-                // ever holds text in that region's own reader's language;
-                // the target/English reader has none here and never will,
-                // so it stays empty and the source moves to the small line.
-                // The me/Vietnamese reader's own version of this branch
-                // (a guest segment whose translation into `me` was
-                // abandoned) is explicitly unchanged by that ruling.
-                if segment.targetAbandoned {
-                    if readerLanguage == target {
-                        return FacingPaneContent(readerLabel: readerLabel, hasSegment: true, speakerText: speakerText, speakerColorRole: speakerColorRole, isPartial: isPartial, big: nil, isTranslatingBig: false, small: latest.sourceText)
-                    }
-                    return FacingPaneContent(readerLabel: readerLabel, hasSegment: true, speakerText: speakerText, speakerColorRole: speakerColorRole, isPartial: isPartial, big: latest.sourceText, isTranslatingBig: false, small: nil)
-                }
+        // docs/soniox-routing.md: a `me`-language segment's translation
+        // lands in `target`; every other segment's lands in `me`, regardless
+        // of its actual language - that one fixed direction is the only
+        // translation this app ever requests. A translation usable as this
+        // reader's big line only exists - now or ever - when readerLanguage
+        // is that fixed destination. `lang == nil` means diarization has not
+        // identified a language yet - not "definitely some other language" -
+        // so it can never match this destination check and falls through to
+        // the shared "nothing confirmed" case below, same as a genuine
+        // third-language guest whose fixed destination isn't this reader.
+        if let lang = segment.lang, (lang == me ? target : me) == readerLanguage {
+            // `segment.targetAbandoned`: the translation is permanently
+            // unavailable, not merely pending - falls through to the same
+            // empty-big/source-small shape as the shared case below, since
+            // no text confirmed to be in this reader's language exists or
+            // ever will for this segment either.
+            if !segment.targetAbandoned {
                 return FacingPaneContent(readerLabel: readerLabel, hasSegment: true, speakerText: speakerText, speakerColorRole: speakerColorRole, isPartial: isPartial, big: latest.targetText, isTranslatingBig: latest.showsTranslatingPlaceholder, small: latest.sourceText)
             }
         }
 
-        // Neither branch above applies: the segment's language is not yet
-        // identified, or the guest is speaking a third language that is
-        // neither `me` nor `target`. No translation into readerLanguage has
-        // ever been requested for this segment and none ever will be.
-        // Owner's ruling (docs/display-style-picker.md): the big line only
-        // ever holds text in this reader's own language, so for the
-        // target/English reader - who has no such text here - it stays
-        // empty and the source (real, un-invented, but not confirmed to be
-        // in this reader's language) moves to the small line instead. The
-        // me/Vietnamese reader's own version of this branch is explicitly
-        // unchanged by that ruling.
-        if readerLanguage == target {
-            return FacingPaneContent(readerLabel: readerLabel, hasSegment: true, speakerText: speakerText, speakerColorRole: speakerColorRole, isPartial: isPartial, big: nil, isTranslatingBig: false, small: latest.sourceText)
-        }
-        return FacingPaneContent(readerLabel: readerLabel, hasSegment: true, speakerText: speakerText, speakerColorRole: speakerColorRole, isPartial: isPartial, big: latest.sourceText, isTranslatingBig: false, small: nil)
+        // Nothing confirmed to be in this reader's own language exists for
+        // this segment, and per the fixed routing above, none ever will:
+        // the language is not yet identified, the guest is speaking a third
+        // language, or this reader's own translation was abandoned. Big
+        // stays empty; the real source (un-invented, but not confirmed to
+        // be in this reader's language) moves to the small line; no
+        // spinner - nothing is or ever will be genuinely running toward
+        // filling this big line.
+        return FacingPaneContent(readerLabel: readerLabel, hasSegment: true, speakerText: speakerText, speakerColorRole: speakerColorRole, isPartial: isPartial, big: nil, isTranslatingBig: false, small: latest.sourceText)
     }
 
     /// `t.facing.readVi` / `t.facing.readEn` / `t.facing.reads + langName`,

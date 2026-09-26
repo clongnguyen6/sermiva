@@ -24,24 +24,28 @@ conversation (`me`, `target`, and a guest speaking neither) or a language not ye
 by diarization therefore has no correct-language translation for one of the two regions - not
 "not yet", but never, for that segment.
 
-Owner's ruling, binding: a region's big line only ever holds text confirmed to be in that
-region's own reader's language; if none exists, the big line stays empty rather than showing
-text in some other language. The segment's own real source text always goes in the small line
-instead when the big line is empty this way - never invented, and never the big line, since it
-is not confirmed to be in this reader's language either. The me/Vietnamese reader's side of
-both affected cases is explicitly unchanged by this ruling (kept as the source text on the big
-line, small line empty) - only the target/English reader's side changes. `FacingPaneContent.make`
-(`Sermiva/FacingTranscriptView.swift`) resolves each case as follows:
+Owner's ruling, binding, one rule for both readers with no exceptions: a region's big line only
+ever holds text confirmed to be in that region's own reader's language; if none exists, the big
+line stays empty rather than showing text in some other language. The segment's own real source
+text always goes in the small line instead when the big line is empty this way - never invented,
+and never the big line, since it is not confirmed to be in this reader's language either. An
+earlier version of this ruling exempted the me/Vietnamese reader's side of the last two rows
+below - that exemption was based on an inaccurate summary and does not stand; the rule is
+symmetric. `FacingPaneContent.make` (`Sermiva/FacingTranscriptView.swift`) resolves each case as
+follows:
 
 | Segment's language vs. this reader | Big line | Small line | Spinner |
 |---|---|---|---|
 | Same as this reader | the segment's own source text | the segment's translation, once it exists | never |
 | `me`, reader is `target` | the segment's `target`-language translation | the segment's source text | while genuinely translating (`SegmentDisplay.showsTranslatingPlaceholder`) |
 | Anything else, reader is `me` | the segment's `me`-language translation | the segment's source text | while genuinely translating |
-| Not yet identified, reader is `me` | the segment's own source text, untranslated | nothing | never |
-| A third language, or not yet identified, reader is `target` | empty - no text is confirmed to be in English | the segment's own source text, untranslated | never - no translation into this reader's language is ever requested for this segment |
-| `me`, translation permanently unavailable (`targetAbandoned`), reader is `target` | empty - no text is confirmed to be in English, and none ever will be | the segment's own source text, untranslated | never |
-| Anything else, translation permanently unavailable (`targetAbandoned`), reader is `me` | the segment's own source text, untranslated | nothing | never |
+| Not yet identified (either reader) | empty - no text is confirmed to be in this reader's language yet | the segment's own source text, untranslated | never |
+| A third language, reader is `target` | empty - no text is confirmed to be in English | the segment's own source text, untranslated | never - no translation into this reader's language is ever requested for this segment |
+| Routing destination matches this reader, translation permanently unavailable (`targetAbandoned`) | empty - no text is confirmed to be in this reader's language, and none ever will be | the segment's own source text, untranslated | never |
+
+The "Đang nhận dạng" tag (`isPartial` in `FacingPaneContent`) is independent of all of the
+above - it is driven by the segment's own `showsRecognizingTag` alone, so a reader can still see
+that recognition is under way even in the rows above where both big lines are empty.
 
 # Note: Facing's own icon buttons are explicitly sized, unlike the rest of the dock
 
