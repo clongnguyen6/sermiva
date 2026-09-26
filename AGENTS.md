@@ -29,13 +29,14 @@ time:
 | Claim | What proves it |
 |---|---|
 | compiles | the `build` step |
-| runs | `SermivaUITests`: the real committed app, no product-code hooks, only accessibility identifiers; checks the first and a later fixture segment; its screenshots land in the test's result bundle |
-| behaves | `SermivaTests`: state machine, segment assembly, the connection lifecycle (a seeded invariant fuzz over fake sockets and a virtual clock; `TEST_RUNNER_SERMIVA_FUZZ_SEEDS` in xcodebuild's environment scales it, not as an argument), the on-device translation queue (through a fake, never real Apple Translation), and Keychain, nothing beyond what those cover; it launches the app as its `TEST_HOST`, which is not UI automation - nothing in it drives or looks at the UI |
+| runs | `SermivaUITests`: the real committed app, no product-code hooks, only accessibility identifiers; checks the first and a later fixture segment in Phụ đề; enters Đối diện through the "Hiển thị" sheet, checks the top region renders rotated 180°, and confirms ✕ returns to Phụ đề with the session's paused state and transcript intact; its screenshots land in the test's result bundle |
+| behaves | `SermivaTests`: state machine, segment assembly, the connection lifecycle (a seeded invariant fuzz over fake sockets and a virtual clock; `TEST_RUNNER_SERMIVA_FUZZ_SEEDS` in xcodebuild's environment scales it, not as an argument), the on-device translation queue (through a fake, never real Apple Translation), Keychain, and Đối diện's per-region text selection (`FacingTranscriptViewTests`) - nothing beyond what those cover; it launches the app as its `TEST_HOST`, which is not UI automation - nothing in it drives or looks at the UI |
 | works live | a real Soniox key on a real device, named, and what you heard - never proven by this script; the owner runs that session; Apple Translation never runs in the Simulator either, so it too can only ever reach this rung |
 
-This does not cover Settings, other display styles, per-segment language ID, `me`/`guest`/`target`
-routing, or real audio hardware (echo, barge-in, overlapping speech, loudspeaker case) - all
-`[thật]` in the handoff, and unit tests of app-owned logic do not prove what the real service does.
+This does not cover Settings, the three display styles that do not exist yet (Bong bóng, Sân
+khấu, Kịch bản), per-segment language ID, `me`/`guest`/`target` routing, or real audio hardware
+(echo, barge-in, overlapping speech, loudspeaker case) - all `[thật]` in the handoff, and unit
+tests of app-owned logic do not prove what the real service does.
 On the Simulator these also look indistinguishable from correct, since nothing here exercises real
 hardware. Soniox's stream shape is untested behind a thin adapter, so do not write tests through it -
 a test around an unconfirmed contract forces a compatibility layer that never goes away.

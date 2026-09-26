@@ -223,8 +223,10 @@ private struct CurrentStatusTag: View {
 
 /// The one and only "Dang dich..." placeholder: a small fixed-size row in
 /// the body, below the source text, shown once (never duplicated in the
-/// header too) while a final segment has no target yet.
-private struct TranslatingPlaceholder: View {
+/// header too) while a final segment has no target yet. Not private:
+/// `FacingTranscriptView` reuses it verbatim for its own cross-language
+/// pane, rather than a second copy of the same spinner + text.
+struct TranslatingPlaceholder: View {
     let fontSize: CGFloat
 
     var body: some View {
@@ -237,7 +239,9 @@ private struct TranslatingPlaceholder: View {
     }
 }
 
-private struct PulsingDot: View {
+/// Not private: `FacingTranscriptView` reuses this exact dot for its own
+/// "Đang nhận dạng" tag, rather than a second copy of the same animation.
+struct PulsingDot: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let color: Color
     @State private var dim = false

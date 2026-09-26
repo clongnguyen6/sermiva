@@ -11,6 +11,15 @@ import UIKit
 struct ConversationView<Controller: SessionControlling>: View {
     @StateObject private var controller: Controller
     @State private var showEndSheet = false
+    /// HANDOFF.md section 3: purely a view-level choice, so switching it
+    /// never touches `controller` - the session, its segments and its mic
+    /// stay exactly as they were (criterion 1).
+    @State private var displayStyle: DisplayStyle = .captions
+    @State private var showDisplayStyleSheet = false
+    /// "Đổi bên": which physical side of the phone currently shows `me`'s
+    /// language vs `target`'s - view-level only, same reasoning as
+    /// `displayStyle` above.
+    @State private var facingSwapped = false
     /// The auth-error banner's "Nhập lại khóa" action. `nil` in demo, which
     /// never reaches `.authError`. Owner-approved temporary deviation from
     /// HANDOFF section 2.2's "→ Mở Cài đặt": Settings does not exist in
@@ -28,7 +37,9 @@ struct ConversationView<Controller: SessionControlling>: View {
         ZStack {
             Tokens.bg.ignoresSafeArea()
             VStack(spacing: 0) {
-                topBar
+                if displayStyle != .facing {
+                    topBar
+                }
                 if controller.state == .micDenied {
                     micDeniedBanner
                 } else if controller.state == .authError {
@@ -40,8 +51,12 @@ struct ConversationView<Controller: SessionControlling>: View {
                 } else if controller.showsTranslationUnavailableBanner {
                     translationUnavailableBanner
                 }
-                content
-                bottomDock
+                if displayStyle == .facing {
+                    facingTranscript
+                } else {
+                    content
+                    bottomDock
+                }
             }
         }
         // Fatal-error rule 3: attached to the root ZStack, which lives for
@@ -90,6 +105,32 @@ struct ConversationView<Controller: SessionControlling>: View {
                 onCancel: { showEndSheet = false }
             )
         }
+        .sheet(isPresented: $showDisplayStyleSheet) {
+            DisplayStylePickerSheet(selected: $displayStyle, onClose: { showDisplayStyleSheet = false })
+        }
+    }
+
+    // MARK: - Facing ("Đối diện")
+
+    private var facingTranscript: some View {
+        FacingTranscriptView(
+            displaySegments: controller.displaySegments,
+            meLanguage: controller.meLanguage,
+            targetLanguage: controller.targetLanguage,
+            swapped: $facingSwapped,
+            micDockText: micDockText,
+            micDotColor: micDotColor,
+            micIconName: controller.micIconName,
+            primaryLabel: primaryLabel,
+            primaryDisabled: primaryDisabled,
+            primaryIsOk: primaryIsOk,
+            isConnecting: controller.state == .connecting || controller.state == .requestingMic,
+            onPrimary: controller.primaryButtonTapped,
+            // HANDOFF section 3: "✕ chỉ thoát Sân khấu, không kết thúc
+            // phiên" - with only two styles implemented, exiting Facing
+            // always returns to Phụ đề, its only other style.
+            onExit: { displayStyle = .captions }
+        )
     }
 
     // MARK: - Top bar
@@ -412,7 +453,8 @@ struct ConversationView<Controller: SessionControlling>: View {
 
             HStack(spacing: 8) {
                 LabeledRoundButton(systemImage: "textformat.size", label: "Cỡ chữ", action: {})
-                LabeledRoundButton(systemImage: "rectangle.3.group", label: "Hiển thị", action: {})
+                LabeledRoundButton(systemImage: "rectangle.3.group", label: "Hiển thị", action: { showDisplayStyleSheet = true })
+                    .accessibilityIdentifier("displayStyleButton")
 
                 Spacer()
 

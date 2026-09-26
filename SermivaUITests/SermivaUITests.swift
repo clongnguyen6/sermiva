@@ -73,4 +73,68 @@ final class SermivaUITests: XCTestCase {
         laterAttachment.lifetime = .keepAlways
         add(laterAttachment)
     }
+
+    /// HANDOFF.md section 3's "Đối diện" style, entered through the dock's
+    /// "Hiển thị" sheet: the top region renders rotated 180°, and ✕ returns
+    /// to Phụ đề without touching the running session (criterion 1). Pauses
+    /// the demo first - real fixture content reaching the screen, then
+    /// frozen in place - so the rotation check below reads a fixed segment
+    /// rather than racing the demo's own advancing playback.
+    func test_facingEntersRotatedAndExitReturnsToCaptionsWithSessionIntact() throws {
+        let app = XCUIApplication()
+        app.launch()
+
+        app.buttons["demoButton"].tap()
+        let startButton = app.buttons["primaryButton"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 10))
+        startButton.tap()
+
+        // Segment 2 (lang "en") is the fixture's first segment already in
+        // the "target" reader's own language - its source text is real
+        // content available the instant it arrives, unlike a translation,
+        // which can still be pending. Waiting for it (not just segment 1)
+        // is what makes the geometry check below meaningful: the rotated
+        // top pane's big line is guaranteed non-empty real text, not an
+        // empty container that would trivially "pass".
+        let segment2Text = app.staticTexts["Would you like anything to eat?"]
+        XCTAssertTrue(segment2Text.waitForExistence(timeout: 15), "the second fixture segment's own source text must reach the screen before pausing")
+
+        startButton.tap()
+        XCTAssertEqual(startButton.label, "Tiếp tục", "pausing must actually reach the paused state before Facing freezes it")
+
+        app.buttons["displayStyleButton"].tap()
+        let facingCard = app.buttons["displayStyleCard_facing"]
+        XCTAssertTrue(facingCard.waitForExistence(timeout: 5), "the style sheet must offer Đối diện")
+        facingCard.tap()
+
+        // Default (not swapped): the top pane reads "target" (English) -
+        // the segment above is already in English, so its own source text
+        // is what the top pane's big line shows, unrotated content proven
+        // by the same string reaching the screen again under a new
+        // identifier.
+        let topBig = app.staticTexts["facingTopBig"]
+        XCTAssertTrue(topBig.waitForExistence(timeout: 5), "the top pane must show the latest segment's text")
+        XCTAssertEqual(topBig.label, "Would you like anything to eat?")
+
+        let topLabel = app.descendants(matching: .any)["facingTopReaderLabel"]
+        XCTAssertTrue(topLabel.waitForExistence(timeout: 5))
+
+        // The one real, view-level proof of a 180° rotation available to
+        // XCUITest: in source order the reader-label row sits ABOVE the big
+        // text, so on an unrotated pane its frame's minY is smaller. Once
+        // the whole pane is rotated 180°, that same row renders BELOW the
+        // big text instead - minY becomes the LARGER one. No product-code
+        // hook, no accessibility shortcut - just the real on-screen layout
+        // XCUITest already reports for both elements.
+        XCTAssertGreaterThan(topLabel.frame.minY, topBig.frame.minY, "the top pane's reader label must render BELOW its own big text once rotated 180° - if this fails, the top pane is not actually rotated")
+
+        app.buttons["facingExitButton"].tap()
+
+        // Back in Phụ đề: the same paused session, not reset - the primary
+        // button must still say Tiếp tục (still paused), and the same real
+        // fixture content from before entering Facing must still be there.
+        XCTAssertTrue(app.staticTexts["Would you like anything to eat?"].waitForExistence(timeout: 5), "exiting Facing must not lose the transcript")
+        XCTAssertEqual(startButton.label, "Tiếp tục", "exiting Facing must not change the session's own paused state")
+        XCTAssertTrue(app.otherElements["currentSegment"].waitForExistence(timeout: 5), "Phụ đề's own current-segment card must be back")
+    }
 }

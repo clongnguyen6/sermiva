@@ -14,6 +14,12 @@ protocol SessionControlling: ObservableObject {
     var elapsed: TimeInterval { get }
     var isDemo: Bool { get }
     var headerText: String { get }
+    /// The fixed `me`/`target` language codes this session runs with -
+    /// HANDOFF.md section 3's "Đối diện" style reads these to decide which
+    /// physical side of the phone shows which language, per segment. Never
+    /// used to guess a speaker's identity - only to route existing text.
+    var meLanguage: String { get }
+    var targetLanguage: String { get }
     var micDockText: String { get }
     var micDotColorRole: SessionPresentation.MicDotColorRole { get }
     var micIconName: String { get }

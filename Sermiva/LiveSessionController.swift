@@ -155,6 +155,9 @@ final class LiveSessionController: ObservableObject, SessionControlling {
         SessionPresentation.languageHeaderText(config: languageConfig)
     }
 
+    var meLanguage: String { languageConfig.me }
+    var targetLanguage: String { languageConfig.target }
+
     var micDockText: String {
         SessionPresentation.micDockText(isMicCapturing: isMicCapturing, state: state, isDemo: isDemo)
     }

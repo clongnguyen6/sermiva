@@ -70,6 +70,9 @@ final class DemoSessionController: ObservableObject, SessionControlling {
         SessionPresentation.languageHeaderText(config: languageConfig)
     }
 
+    var meLanguage: String { languageConfig.me }
+    var targetLanguage: String { languageConfig.target }
+
     /// `nil` unconditionally - demo never reaches Apple Translation, so
     /// `ConversationView`'s `.translationTask` closure never runs here
     /// (fatalError rule 3).
