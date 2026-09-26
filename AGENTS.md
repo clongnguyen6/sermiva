@@ -29,7 +29,7 @@ additionally builds and installs (never launches) on the owner's iPhone "Long" b
 |---|---|
 | compiles | the `build` step |
 | runs | `SermivaUITests`: the real committed app, no product-code hooks, covering Phụ đề's first segments and Đối diện's rotation/exit/both-landscape insets numerically - not transcript text bounds; see the tests' own comments for how |
-| behaves | `SermivaTests`: state machine, segment assembly, connection lifecycle, the on-device translation queue, and Đối diện's per-region text selection through fakes, plus real Keychain round trips, never real Soniox/Apple Translation, and not UI automation; see each test's own comment for how |
+| behaves | `SermivaTests`: state machine, segment assembly, connection lifecycle, the on-device translation queue, and Đối diện's per-region text selection through fakes, real Keychain round trips, and a real hosted `FacingTranscriptView`'s own on-screen layout - never real Soniox/Apple Translation, and not UI automation; see each test's own comment for how |
 | works live | a real Soniox key on a real device, named, and what you heard - never proven by this script; the owner runs that session; Apple Translation never runs in the Simulator either, so it too can only ever reach this rung |
 
 This does not cover Settings, the three display styles that do not exist yet (Bong bóng, Sân

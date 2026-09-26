@@ -29,9 +29,9 @@ import XCTest
 /// on shared Core Animation layers inside one `_UIHostingView`, not as
 /// separate `UIView`s - only a `ScrollView` needs a real `UIScrollView` for
 /// gesture handling, so it alone becomes an inspectable subview. That
-/// subview's own `frame.minY` - confirmed by direct measurement to equal
-/// the real safe area plus the banner height in the correct case - is what
-/// this test reads instead.
+/// subview's own `frame.minY` is what this test reads instead - see the
+/// test's own doc comment for how the expected value is computed without
+/// assuming a particular Simulator orientation.
 final class FacingTranscriptViewLayoutTests: XCTestCase {
     private struct Harness: View {
         let bannerHeight: CGFloat
@@ -91,22 +91,35 @@ final class FacingTranscriptViewLayoutTests: XCTestCase {
         controller.view.removeFromSuperview()
     }
 
-    /// A real, short (20 pt) banner above `FacingTranscriptView` already
-    /// puts this view's own top edge (the pinned iPhone 17's real portrait
-    /// safe area, 62 pt, plus the 20 pt banner = 82 pt) past the 62 pt
-    /// desired position (`max(54, 62)`) - the correct call site must add
-    /// ZERO further padding, landing the top pane's own `ScrollView` at
-    /// 82 pt. The old, mutated formula (`max(54, safe.top)`, ignorant of
-    /// where the banner actually put this view) adds 62 pt regardless,
-    /// landing it at 144 pt instead - a 62 pt, unmistakable difference this
-    /// test is sized to catch under that exact mutation.
+    /// Must never skip: an `XCTSkipIf` gated on the Simulator's current
+    /// orientation (e.g. "only meaningful in portrait, where the real safe
+    /// area is nonzero") let a Simulator left in landscape by an earlier
+    /// run turn a genuinely broken call site into a green skip instead of a
+    /// failure - review round 8 reproduced exactly that. The expected
+    /// position is instead computed from the same two real, measured
+    /// values `topInset(...)` itself takes - the real safe area
+    /// (`window.safeAreaInsets.top`) and where the banner actually put this
+    /// view (`realSafeTop + bannerHeight`, since the harness `VStack`
+    /// places the banner right at the real safe-area boundary) - so it is
+    /// correct, and distinct from the mutated formula's result, in
+    /// whatever orientation the Simulator happens to be in:
+    /// `max(desiredTopY, wrapperMinY)`, where `desiredTopY = max(54,
+    /// realSafeTop)`. A 20 pt banner keeps the two formulas' results at
+    /// least 20 pt apart even in landscape (where the real top inset is 0,
+    /// so a banner shorter than HANDOFF's 54 pt floor still leaves a real,
+    /// nonzero gap the correct formula closes and the mutated one does
+    /// not) - see docs/display-style-picker.md's measured real-inset table
+    /// for why portrait (62 pt) and landscape (0 pt) are the only two
+    /// cases that matter here.
     func test_topPaneLandsDirectlyBelowARealBannerNotDoubleInset() throws {
         let bannerHeight: CGFloat = 20
         let (window, controller) = try host(Harness(bannerHeight: bannerHeight))
         defer { unhost(controller) }
 
         let realSafeTop = window.safeAreaInsets.top
-        try XCTSkipIf(realSafeTop <= 0, "this run reports no real top safe area to distinguish correct from double-inset behaviour against - expected on the pinned iPhone 17 Simulator in portrait (AGENTS.md's UDID)")
+        let desiredTopY = max(54, realSafeTop)
+        let wrapperMinY = realSafeTop + bannerHeight
+        let expectedMinY = max(desiredTopY, wrapperMinY)
 
         // `FacingTranscriptView` renders exactly two `ScrollView`s (the top
         // and bottom reading panes, in that source order) as the only real
@@ -116,7 +129,6 @@ final class FacingTranscriptViewLayoutTests: XCTestCase {
         // directly reflects the real, currently-applied top inset.
         let topPane = try XCTUnwrap(controller.view.subviews.first, "FacingTranscriptView must render its top pane's ScrollView as a real subview once hosted and laid out")
 
-        let expectedMinY = realSafeTop + bannerHeight
-        XCTAssertEqual(topPane.frame.minY, expectedMinY, accuracy: 2, "the top pane must land directly below the real banner (\(bannerHeight) pt) plus the real safe area (\(realSafeTop) pt) it already sits below, with no further padding")
+        XCTAssertEqual(topPane.frame.minY, expectedMinY, accuracy: 2, "the top pane must land at max(max(54, real top inset), real top inset + banner height) = \(expectedMinY) - never further padding stacked on top of where the banner already put it")
     }
 }
