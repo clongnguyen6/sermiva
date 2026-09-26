@@ -138,15 +138,29 @@ no longer adjacent to the notch/Dynamic Island - reserving the real safe-area in
 doubled it, pushing the top reading region down by the banner's own height plus a redundant
 ~62 pt (portrait) for a notch the banner had already cleared.
 
-Fixed by threading `isBannerShowing` (`ConversationView`, mirroring the same five conditions the
-banner block itself checks) into `FacingTranscriptView`, and factoring the top-inset arithmetic
-into `FacingTranscriptView.topInset(handoffMinimum:realSafeAreaTop:hasBannerAbove:)` - pure and
-directly unit-tested (`FacingTranscriptViewTests`) without a view or a real window: `max(54, 0)`
-when a banner is showing (HANDOFF's own minimum design padding only - the real safe-area
-component drops out, since the banner already provided it), `max(54, realSafeAreaTop)` otherwise,
-unchanged from before. Landscape's real top inset was already 0 (the Island sits on the side, not
-the top, in landscape - see the table above), so landscape was never actually double-inset and
-this fix is a no-op there; only portrait's real 62 pt was ever being double-counted.
+First fixed by threading an `isBannerShowing` flag (`ConversationView`, mirroring the same five
+conditions the banner block itself checks) into `FacingTranscriptView`. That fix was wrong and
+was replaced before it shipped further: when a banner showed in portrait, it still added HANDOFF's
+54 pt floor below the banner on top of the real 62 pt safe area the banner already sits below -
+the same double-inset bug, just 54 pt of it instead of 62. A flag mirroring the banner conditions
+also silently drifts the moment a sixth banner is added elsewhere without this flag's list being
+updated to match.
+
+Fixed properly by deriving the inset from the wrapper's own actual on-screen position instead of
+from any flag: `FacingTranscriptView.topInset(desiredTopY:wrapperGlobalMinY:)` - pure and directly
+unit-tested (`FacingTranscriptViewTests`) without a view or a real window - takes `desiredTopY`
+(`max(54, the real safe-area top)`, the absolute position from the true screen top the content
+must start at) and `wrapperGlobalMinY` (`geo.frame(in: .global).minY`, where this view's own
+wrapper actually already starts on screen right now), and returns `max(0, desiredTopY -
+wrapperGlobalMinY)`. With no banner, `.ignoresSafeArea()` bleeds the wrapper up to the true screen
+top (`wrapperGlobalMinY == 0`), so the full gap becomes padding, unchanged from before either fix.
+With a banner, the wrapper's frame no longer touches the true top edge, so `.ignoresSafeArea()` has
+nothing left to bleed into there and the wrapper starts exactly where `ConversationView`'s own
+safe-area-respecting `VStack` places it - real safe area plus the banner's actual height, whatever
+that happens to be - and this fix pads only the (possibly zero, possibly still positive, e.g. for
+a short banner) remainder, never a fixed guess. Landscape's real top inset was already 0 (the
+Island sits on the side, not the top, in landscape - see the table above), so landscape was never
+actually double-inset by either version of this fix.
 
 Out of scope for this fix, deferred to a later outcome: **a banner shown while in Facing renders
 unrotated, so it is readable only from the bottom reader's side** - the person the top region's

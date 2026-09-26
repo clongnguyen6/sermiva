@@ -104,11 +104,6 @@ struct FacingTranscriptView: View {
     /// badge lives - so the middle strip shows it here instead while this
     /// is true.
     let isDemo: Bool
-    /// Whether `ConversationView` is currently showing one of its banners
-    /// (mic denied, auth error, network lost/error, translation
-    /// unavailable) directly above this view - see `topInset(...)` below
-    /// for why this view's own top inset needs to know.
-    let isBannerShowing: Bool
     @Binding var swapped: Bool
     let micDockText: String
     let micDotColor: Color
@@ -149,18 +144,21 @@ struct FacingTranscriptView: View {
     }
 
     /// Pure, directly unit-testable without a view or a real window - see
-    /// `FacingTranscriptViewTests`. `hasBannerAbove`: when one of
-    /// `ConversationView`'s banners is showing directly above this view (in
-    /// its own `VStack`), this view's top edge is no longer adjacent to the
-    /// true screen top - the banner itself, sitting there instead, already
-    /// clears the real device safe area (Dynamic Island/notch), so adding
-    /// `realSafeAreaTop` again here would double-inset: the real device
-    /// clearance the banner already provides, stacked underneath a banner
-    /// that itself needs no such clearance (it already respects the safe
-    /// area like any other normal, non-`ignoresSafeArea()` view). HANDOFF's
-    /// own `handoffMinimum` design padding still applies either way.
-    static func topInset(handoffMinimum: CGFloat, realSafeAreaTop: CGFloat, hasBannerAbove: Bool) -> CGFloat {
-        max(handoffMinimum, hasBannerAbove ? 0 : realSafeAreaTop)
+    /// `FacingTranscriptViewTests`. `desiredTopY`: the absolute position,
+    /// measured from the true screen top, the top pane's content must
+    /// start at - `max(54, the device's real safe-area top)`.
+    /// `wrapperGlobalMinY`: where this view's own wrapper actually already
+    /// starts on screen right now (`geo.frame(in: .global).minY` below) -
+    /// read from the real layout rather than re-derived from whether a
+    /// banner happens to be showing, so this can never drift out of sync
+    /// with `ConversationView`'s own banner conditions (a banner already
+    /// pushes this view down when one shows, being a normal,
+    /// safe-area-respecting view itself). If the wrapper is already at or
+    /// past `desiredTopY` - a banner already cleared it, possibly by more
+    /// than `desiredTopY` itself - no further padding is added; otherwise
+    /// the remaining gap is closed exactly, never doubled.
+    static func topInset(desiredTopY: CGFloat, wrapperGlobalMinY: CGFloat) -> CGFloat {
+        max(0, desiredTopY - wrapperGlobalMinY)
     }
 
     var body: some View {
@@ -176,7 +174,7 @@ struct FacingTranscriptView: View {
             // it uses `topInset(...)` above.
             let isLandscape = geo.size.width > geo.size.height
             let safe = windowSafeAreaInsets
-            let topInset = Self.topInset(handoffMinimum: 54, realSafeAreaTop: safe.top, hasBannerAbove: isBannerShowing)
+            let topInset = Self.topInset(desiredTopY: max(54, safe.top), wrapperGlobalMinY: geo.frame(in: .global).minY)
             let bottomInset = max(isLandscape ? 22 : 34, safe.bottom)
             VStack(spacing: 0) {
                 // The identifier lands on `FacingPane`'s own `ScrollView` -

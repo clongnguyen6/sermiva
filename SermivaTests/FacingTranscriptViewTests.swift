@@ -175,21 +175,36 @@ final class FacingTranscriptViewTests: XCTestCase {
         XCTAssertEqual(content.readerLabel, "Đọc JA", "no Japanese entry in LanguageNames yet, so it must fall back to the existing uppercase-code rule, not invent a new label")
     }
 
-    // MARK: - Top inset (review round 5: the double-inset-above-a-banner fix)
+    // MARK: - Top inset (review round 6: derived from the wrapper's actual
+    // on-screen position, not from mirroring the banner conditions)
 
-    /// No banner: unchanged from before this fix - the real device safe
-    /// area applies normally, floored by HANDOFF's own minimum.
-    func test_topInsetWithNoBannerUsesTheRealSafeAreaFlooredByHandoff() {
-        XCTAssertEqual(FacingTranscriptView.topInset(handoffMinimum: 54, realSafeAreaTop: 62, hasBannerAbove: false), 62, "portrait: the real 62 pt notch clearance exceeds HANDOFF's 54 pt floor, so it wins")
-        XCTAssertEqual(FacingTranscriptView.topInset(handoffMinimum: 54, realSafeAreaTop: 0, hasBannerAbove: false), 54, "landscape: the real top inset is 0 here, so HANDOFF's own 54 pt floor wins")
+    /// No banner: the wrapper's own `.ignoresSafeArea()` already bled it up
+    /// to the true screen top (`wrapperGlobalMinY == 0`), so the full gap to
+    /// `desiredTopY` becomes padding - unchanged from before this fix.
+    func test_topInsetWithNoBannerPadsTheFullGapFromTheTrueScreenTop() {
+        XCTAssertEqual(FacingTranscriptView.topInset(desiredTopY: 62, wrapperGlobalMinY: 0), 62, "portrait: the real 62 pt notch clearance exceeds HANDOFF's 54 pt floor, so desiredTopY is 62")
+        XCTAssertEqual(FacingTranscriptView.topInset(desiredTopY: 54, wrapperGlobalMinY: 0), 54, "landscape: the real top inset is 0 here, so desiredTopY is HANDOFF's own 54 pt floor")
     }
 
-    /// A banner is showing above this view: it already sits below the real
-    /// device safe area (it is a normal, non-`ignoresSafeArea()` view), so
-    /// re-adding the real safe-area top inset here would double it - only
-    /// HANDOFF's own minimum design padding applies, in both orientations.
-    func test_topInsetWithABannerNeverAddsTheRealSafeAreaAgain() {
-        XCTAssertEqual(FacingTranscriptView.topInset(handoffMinimum: 54, realSafeAreaTop: 62, hasBannerAbove: true), 54, "portrait: the banner already cleared the real 62 pt notch - adding it again would double-inset")
-        XCTAssertEqual(FacingTranscriptView.topInset(handoffMinimum: 54, realSafeAreaTop: 0, hasBannerAbove: true), 54, "landscape: unaffected either way, since the real top inset was already 0")
+    /// A banner already pushed the wrapper down past `desiredTopY` (its own
+    /// height alone exceeds what's needed): no further padding - the
+    /// regression this test exists for is adding `desiredTopY` again on
+    /// top of where the banner already put this view, doubling it instead
+    /// of recognizing the gap is already closed.
+    func test_topInsetWhenTheWrapperIsAlreadyPastDesiredTopYAddsNothing() {
+        XCTAssertEqual(FacingTranscriptView.topInset(desiredTopY: 62, wrapperGlobalMinY: 122), 0, "portrait: 62 (real safe area) + 60 (a plausible banner height) already exceeds the 62 pt desired position")
+        XCTAssertEqual(FacingTranscriptView.topInset(desiredTopY: 54, wrapperGlobalMinY: 60), 0, "landscape: a 60 pt banner alone already exceeds the 54 pt floor, even with 0 real top inset")
+    }
+
+    /// A banner shorter than `desiredTopY` still leaves a real gap to close
+    /// - the fix must not overcorrect into never padding at all once any
+    /// banner is present.
+    func test_topInsetWithAShortBannerStillClosesTheRemainingGap() {
+        XCTAssertEqual(FacingTranscriptView.topInset(desiredTopY: 54, wrapperGlobalMinY: 10), 44, "a 10 pt tall banner alone does not reach HANDOFF's 54 pt floor - the remaining 44 pt must still be padded")
+    }
+
+    /// Exactly at the boundary: no gap, and no negative padding either.
+    func test_topInsetAtExactlyDesiredTopYAddsNothing() {
+        XCTAssertEqual(FacingTranscriptView.topInset(desiredTopY: 62, wrapperGlobalMinY: 62), 0)
     }
 }
