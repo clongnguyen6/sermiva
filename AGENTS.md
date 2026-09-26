@@ -19,26 +19,26 @@ step was skipped, say which one and why. Nothing runs automatically; run it by h
 ./scripts/verify.sh
 ```
 
-Boots iPhone 17 by UDID (`2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD`), not name, from repo root; builds
-and tests on the Simulator only. Exit is non-zero for: build failure, test failure, a clone
-signature, the Simulator stuck "Shutting Down", or UDID missing/not Booted (not asserted a clone).
-`--device` additionally builds and installs (never launches) on the owner's iPhone "Long" by UDID
-(`00008101-000138D801F8001E`), under development signing. State which rung your claim is on, every
-time:
+Boots iPhone 17 by UDID (`2D7326E3-8BFB-482C-ADB5-A449BD3E0CFD`), not name, from repo root; builds and
+tests on the Simulator only. Exit is non-zero for: build failure, test failure, a clone signature, the
+Simulator stuck "Shutting Down", or UDID missing/not Booted (not asserted a clone). `--device`
+additionally builds and installs (never launches) on the owner's iPhone "Long" by UDID
+(`00008101-000138D801F8001E`), under development signing. State which rung your claim is on, every time:
 
 | Claim | What proves it |
 |---|---|
 | compiles | the `build` step |
-| runs | `SermivaUITests`: the real committed app, accessibility identifiers only, covering Phụ đề's first segments and Đối diện's rotation/exit/both-landscape insets numerically - not transcript text bounds; see the tests' own comments for how |
-| behaves | `SermivaTests`: state machine, segment assembly, connection lifecycle, the on-device translation queue, Keychain, and Đối diện's per-region text selection, all through fakes, not real Soniox/Apple Translation and not UI automation; see each test's own comment for how |
+| runs | `SermivaUITests`: the real committed app, no product-code hooks, covering Phụ đề's first segments and Đối diện's rotation/exit/both-landscape insets numerically - not transcript text bounds; see the tests' own comments for how |
+| behaves | `SermivaTests`: state machine, segment assembly, connection lifecycle, the on-device translation queue, and Đối diện's per-region text selection through fakes, plus real Keychain round trips, never real Soniox/Apple Translation, and not UI automation; see each test's own comment for how |
 | works live | a real Soniox key on a real device, named, and what you heard - never proven by this script; the owner runs that session; Apple Translation never runs in the Simulator either, so it too can only ever reach this rung |
 
-This does not cover Settings, the three display styles that do not exist yet (Bong bóng, Sân khấu, Kịch
-bản), per-segment language ID, `me`/`guest`/`target` routing, or real audio hardware (echo, barge-in,
-overlapping speech, loudspeaker case) - all `[thật]` in the handoff, and unit tests of app-owned logic
-do not prove what the real service does - indistinguishable from correct on the Simulator, since
-nothing here exercises real hardware. Soniox's stream shape is untested behind a thin adapter, so do
-not write tests through it - an unconfirmed contract forces a compatibility layer that never goes away.
+This does not cover Settings, the three display styles that do not exist yet (Bong bóng, Sân
+khấu, Kịch bản), per-segment language ID, `me`/`guest`/`target` routing, or real audio hardware
+(echo, barge-in, overlapping speech, loudspeaker case) - all `[thật]` in the handoff, and unit
+tests of app-owned logic do not prove what the real service does.
+On the Simulator these also look indistinguishable from correct, since nothing here exercises real
+hardware. Soniox's stream shape is untested behind a thin adapter, so do not write tests through it -
+a test around an unconfirmed contract forces a compatibility layer that never goes away.
 
 Do not delete the committed scheme at `Sermiva.xcodeproj/xcshareddata/xcschemes/Sermiva.xcscheme`:
 its `parallelizable = "NO"` keeps runs on the named device; without it, `xcodebuild` auto-generates
