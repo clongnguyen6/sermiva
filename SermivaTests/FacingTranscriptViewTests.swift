@@ -75,13 +75,15 @@ final class FacingTranscriptViewTests: XCTestCase {
     /// `target`: no translation into the target reader's language has ever
     /// been requested, and the one `target` field that exists is in `me`'s
     /// language - showing it here would silently mislabel it as English.
-    /// Per AGENTS.md, show the real source instead, and nothing invented as
-    /// the supplementary line.
-    func test_guestSpeaksAThirdLanguageShowsRawSourceToTheTargetReaderNeverTheMeTranslation() {
+    /// Owner's ruling (docs/display-style-picker.md): the big line only ever
+    /// holds text in this reader's own language, so with none here it stays
+    /// empty; the real source (not confirmed to be in English, so never the
+    /// big line) moves to the small line instead, with no spinner.
+    func test_guestSpeaksAThirdLanguageShowsRawSourceInSmallNotBigToTheTargetReader() {
         let display = display(segment(lang: "ja", source: "こんにちは", target: "Xin chào"))
         let content = FacingPaneContent.make(readerLanguage: "en", me: "vi", target: "en", latest: display)
-        XCTAssertEqual(content.big, "こんにちは", "the real content, not the vi-language translation mislabeled as English")
-        XCTAssertNil(content.small, "the only other field that exists (the vi translation) is in neither reader's language")
+        XCTAssertNil(content.big, "no text in the target reader's own language exists for this segment - the big line must stay empty, not show the vi-language translation mislabeled as English nor the raw source")
+        XCTAssertEqual(content.small, "こんにちは", "the real content, not invented, belongs in the small line")
         XCTAssertFalse(content.isTranslatingBig, "no translation into English is ever requested for this segment - showing a spinner would claim activity that will never run")
     }
 
@@ -96,28 +98,33 @@ final class FacingTranscriptViewTests: XCTestCase {
     }
 
     /// Language not yet identified: neither reader can be told which
-    /// direction a translation would even go, so both fall back to the raw
-    /// (possibly still-partial) source text, with no supplementary line.
-    func test_unidentifiedLanguageShowsRawSourceToBothReaders() {
+    /// direction a translation would even go. Owner's ruling
+    /// (docs/display-style-picker.md): the me/Vietnamese reader's side of
+    /// this case is explicitly unchanged (raw source stays the big line),
+    /// but the target/English reader has no confirmed English-language text
+    /// here, so its big line stays empty and the raw source moves to small.
+    func test_unidentifiedLanguageShowsSourceBigToMeReaderAndSourceSmallToTargetReader() {
         let display = display(segment(lang: nil, source: "..."), isActivityRunning: true)
         let meSide = FacingPaneContent.make(readerLanguage: "vi", me: "vi", target: "en", latest: display)
         let targetSide = FacingPaneContent.make(readerLanguage: "en", me: "vi", target: "en", latest: display)
-        XCTAssertEqual(meSide.big, "...")
-        XCTAssertEqual(targetSide.big, "...")
+        XCTAssertEqual(meSide.big, "...", "the me reader's side of this case is unchanged by the owner's ruling")
         XCTAssertNil(meSide.small)
-        XCTAssertNil(targetSide.small)
+        XCTAssertNil(targetSide.big, "no text confirmed to be in the target reader's own language exists for this segment")
+        XCTAssertEqual(targetSide.small, "...", "the real, un-invented source belongs in the small line instead")
     }
 
     /// A `me` segment whose on-device translation is permanently unavailable
-    /// (`targetAbandoned`): per docs/display-style-picker.md's ruling, the
-    /// target reader's big line falls back to the segment's own real,
-    /// untranslated source text rather than staying blank - never an
-    /// invented translation, and no spinner (nothing is genuinely running).
-    func test_meSegmentWithAbandonedTranslationShowsSourceTextNotBlankToTheTargetReader() {
+    /// (`targetAbandoned`). Owner's ruling (docs/display-style-picker.md): a
+    /// region's big line only ever holds text in that region's own reader's
+    /// language - the target/English reader has none here and never will,
+    /// so it stays empty (never the untranslated Vietnamese source) and the
+    /// source moves to the small line, with no spinner (nothing is
+    /// genuinely running).
+    func test_meSegmentWithAbandonedTranslationShowsEmptyBigAndSourceSmallToTheTargetReader() {
         let display = display(segment(lang: "vi", source: "Xin chào", target: nil, translationInProgress: false, targetAbandoned: true))
         let content = FacingPaneContent.make(readerLanguage: "en", me: "vi", target: "en", latest: display)
-        XCTAssertEqual(content.big, "Xin chào", "no target text will ever arrive for this segment - the real source text must show instead of leaving the big line blank")
-        XCTAssertNil(content.small, "the only other field that exists (the abandoned target, which is nil) is already the big line here")
+        XCTAssertNil(content.big, "no target-language text will ever arrive for this segment - the big line must stay empty, not show the untranslated Vietnamese source")
+        XCTAssertEqual(content.small, "Xin chào", "the real, un-invented source belongs in the small line instead")
         XCTAssertFalse(content.isTranslatingBig, "translation has been given up on for this segment - it is not genuinely running")
     }
 

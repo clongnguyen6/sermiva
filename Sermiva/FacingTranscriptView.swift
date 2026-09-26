@@ -56,12 +56,18 @@ struct FacingPaneContent: Equatable {
             let translationDestination = lang == me ? target : me
             if translationDestination == readerLanguage {
                 // `segment.targetAbandoned`: the translation is permanently
-                // unavailable, not merely pending - per
-                // docs/display-style-picker.md's ruling, the big line falls
-                // back to the segment's own untranslated source text rather
-                // than staying blank, with no supplementary line (the only
-                // other field, `sourceText`, is already the big line here).
+                // unavailable, not merely pending. Owner's ruling
+                // (docs/display-style-picker.md): a region's big line only
+                // ever holds text in that region's own reader's language;
+                // the target/English reader has none here and never will,
+                // so it stays empty and the source moves to the small line.
+                // The me/Vietnamese reader's own version of this branch
+                // (a guest segment whose translation into `me` was
+                // abandoned) is explicitly unchanged by that ruling.
                 if segment.targetAbandoned {
+                    if readerLanguage == target {
+                        return FacingPaneContent(readerLabel: readerLabel, hasSegment: true, speakerText: speakerText, speakerColorRole: speakerColorRole, isPartial: isPartial, big: nil, isTranslatingBig: false, small: latest.sourceText)
+                    }
                     return FacingPaneContent(readerLabel: readerLabel, hasSegment: true, speakerText: speakerText, speakerColorRole: speakerColorRole, isPartial: isPartial, big: latest.sourceText, isTranslatingBig: false, small: nil)
                 }
                 return FacingPaneContent(readerLabel: readerLabel, hasSegment: true, speakerText: speakerText, speakerColorRole: speakerColorRole, isPartial: isPartial, big: latest.targetText, isTranslatingBig: latest.showsTranslatingPlaceholder, small: latest.sourceText)
@@ -71,14 +77,17 @@ struct FacingPaneContent: Equatable {
         // Neither branch above applies: the segment's language is not yet
         // identified, or the guest is speaking a third language that is
         // neither `me` nor `target`. No translation into readerLanguage has
-        // ever been requested for this segment and none ever will be -
-        // showing one here would be inventing text, and reusing the single
-        // `target` field (which, by the branch above, is in some OTHER
-        // language) would silently mislabel it as this reader's own. Per
-        // AGENTS.md, show only what genuinely exists: the segment's real
-        // words, verbatim, with no supplementary line (the only other field
-        // that exists is in neither this reader's language nor the
-        // segment's own).
+        // ever been requested for this segment and none ever will be.
+        // Owner's ruling (docs/display-style-picker.md): the big line only
+        // ever holds text in this reader's own language, so for the
+        // target/English reader - who has no such text here - it stays
+        // empty and the source (real, un-invented, but not confirmed to be
+        // in this reader's language) moves to the small line instead. The
+        // me/Vietnamese reader's own version of this branch is explicitly
+        // unchanged by that ruling.
+        if readerLanguage == target {
+            return FacingPaneContent(readerLabel: readerLabel, hasSegment: true, speakerText: speakerText, speakerColorRole: speakerColorRole, isPartial: isPartial, big: nil, isTranslatingBig: false, small: latest.sourceText)
+        }
         return FacingPaneContent(readerLabel: readerLabel, hasSegment: true, speakerText: speakerText, speakerColorRole: speakerColorRole, isPartial: isPartial, big: latest.sourceText, isTranslatingBig: false, small: nil)
     }
 
