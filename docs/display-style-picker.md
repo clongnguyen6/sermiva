@@ -75,10 +75,45 @@ at all:
   result already settles which side owns the earlier bug.
 - `XCUIElement.frame` (the accessibility geometry XCUITest itself reports, independent of the
   `app.screenshot()` bug above) matches the framebuffer capture exactly: measured with
-  `SermivaUITests.test_facingLandscapeRegionsRespectInsetsWithNoOverlap`, the top pane starts
-  54 pt below the true top edge, the bottom pane ends 22 pt above the true bottom edge (not
-  portrait's 34 pt), and each region's edge exactly meets the next with zero gap or overlap -
-  all in landscape, all numerically, independent of any screenshot mechanism.
+  `SermivaUITests.test_facingLandscapeRegionsRespectInsetsWithNoOverlap`, each region's edge
+  exactly meets the next with zero gap or overlap, all in landscape, all numerically, independent
+  of any screenshot mechanism. (The exact top/bottom/leading/trailing numbers that test checks
+  against changed after the real-safe-area fix below - see that section for the actual measured
+  values.)
 
 Screenshots for the handback were captured via `xcrun simctl io <UDID> screenshot` instead of
 the UI test's own `app.screenshot()` for this reason.
+
+# Ruling: real safe-area insets, not HANDOFF's prototype measurement alone
+
+Looking at `facing-long-landscape.png` above (before this fix) showed "ĐỌC TIẾNG VIỆT" and the
+mic dot sitting under iPhone 17's Dynamic Island / rounded corner in landscape - HANDOFF's
+54/22/34 pt numbers come from the prototype's own fixed device frame, not this device's real
+safe area, and AGENTS.md requires the real one. Owner's ruling, binding for this outcome: on the
+non-rotated wrapper, each edge's inset is `max(HANDOFF's number for that edge, the device's real
+safe-area inset for that edge)`; leading/trailing, which HANDOFF gives no number for, use the
+real inset directly. Applies to both reading regions and the middle strip (whose background may
+still run edge to edge; only its controls and text follow the inset).
+
+`FacingTranscriptView.windowSafeAreaInsets` reads this from the key window directly
+(`UIApplication.shared...windows.first(where: \.isKeyWindow)?.safeAreaInsets`), not through
+`GeometryReader`'s own `safeAreaInsets` - confirmed empirically that the latter reports all
+zeros here, because `ConversationView`'s own safe-area-respecting `VStack` (the parent this view
+sits inside) has already excluded the safe area from what it offers this view before this view's
+own `.ignoresSafeArea()` ever runs.
+
+Measured once via that same read, on the pinned iPhone 17 Simulator (AGENTS.md's UDID):
+
+| Orientation | Real top | Real bottom | Real leading | Real trailing | Applied top | Applied bottom | Applied leading | Applied trailing |
+|---|---|---|---|---|---|---|---|---|
+| Portrait | 62 | 34 | 0 | 0 | max(54,62)=**62** | max(34,34)=**34** | 0 | 0 |
+| Landscape (either direction) | 0 | 20 | 62 | 62 | max(54,0)=**54** | max(22,20)=**22** | **62** | **62** |
+
+Landscape reports the Island's clearance symmetrically on both the leading and trailing edge
+regardless of which physical side it is actually on (Apple's own convention for Dynamic Island
+devices) - confirmed by measuring both `landscapeLeft` and `landscapeRight` and finding identical
+numbers, which is also why the screenshots below look the same in both rotation directions.
+Portrait's real top (62) exceeds HANDOFF's 54, which is exactly the case AGENTS.md's rule exists
+for: a long upside-down sentence scrolling in the top pane clips to this pane's own `ScrollView`
+bounds, which start at the applied (62, not 54) inset - confirmed both by the numeric UI test and
+by looking at `facing-long-portrait.png`'s top edge directly.

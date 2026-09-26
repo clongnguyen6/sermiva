@@ -150,6 +150,30 @@ final class SermivaUITests: XCTestCase {
     /// assertions come from `XCUIElement.frame`, which - confirmed against
     /// `xcrun simctl io screenshot`'s real framebuffer capture - reports
     /// landscape geometry correctly regardless.
+    /// Measured once via a direct UIKit read of the key window's own
+    /// `safeAreaInsets` on the pinned iPhone 17 Simulator (see AGENTS.md for
+    /// the UDID) - not asserted from theory. Landscape reports the Dynamic
+    /// Island's clearance SYMMETRICALLY on both the leading and trailing
+    /// edge (Apple's own convention for Island devices, regardless of which
+    /// physical side the island actually sits on), which is why
+    /// `landscapeLeft` and `landscapeRight` need only one constant each.
+    /// HANDOFF.md gives no leading/trailing number at all, so - per the
+    /// owner's ruling in docs/display-style-picker.md - this real value is
+    /// what "no content lies outside the safe area" is measured against.
+    private static let landscapeRealSafeArea = (top: CGFloat(0), bottom: CGFloat(20), leadingOrTrailing: CGFloat(62))
+
+    /// HANDOFF.md section 3's landscape insets (top stays `54` pt, same as
+    /// portrait; bottom is `22` pt, not portrait's `34`) and its "dải giữa
+    /// không bị đè" (the middle strip must never be overlapped) - proven
+    /// numerically rather than visually, since `app.screenshot()` renders
+    /// landscape content incorrectly in this environment (see
+    /// docs/display-style-picker.md; `xcrun simctl io screenshot` and
+    /// `XCUIElement.frame`, used here, both report it correctly). Per the
+    /// owner's ruling, an edge's real inset can only ever WIDEN the applied
+    /// clearance past HANDOFF's own number, never narrow it - so top/bottom
+    /// are asserted as a floor, and leading/trailing (where HANDOFF has no
+    /// floor at all) as an exact real-inset containment check covering both
+    /// panes' content and every middle-strip control.
     func test_facingLandscapeRegionsRespectInsetsWithNoOverlap() throws {
         let app = XCUIApplication()
         app.launch()
@@ -178,16 +202,43 @@ final class SermivaUITests: XCTestCase {
         let mid = strip.frame
         let bottom = bottomWrapper.frame
 
-        XCTAssertEqual(top.minY - screen.minY, 54, accuracy: 1, "the top pane must start exactly 54 pt below the true top edge in landscape")
-        XCTAssertEqual(screen.maxY - bottom.maxY, 22, accuracy: 1, "the bottom pane must end exactly 22 pt above the true bottom edge in landscape - not portrait's 34 pt")
+        // Top/bottom: HANDOFF's numbers are a floor, never a ceiling - the
+        // real device inset (0 top / 20 bottom here) is smaller than
+        // HANDOFF's own 54/22 on this device, so the applied clearance must
+        // still be at least HANDOFF's own number.
+        XCTAssertGreaterThanOrEqual(top.minY - screen.minY, 54 - 0.5, "the top pane must never start less than HANDOFF's own 54 pt below the true top edge")
+        XCTAssertGreaterThanOrEqual(screen.maxY - bottom.maxY, 22 - 0.5, "the bottom pane must never end less than HANDOFF's own 22 pt above the true bottom edge in landscape")
 
         // No overlap: each region's edge must exactly meet the next, never past it.
         XCTAssertEqual(top.maxY, mid.minY, accuracy: 1, "the top pane must not overlap the middle strip")
         XCTAssertEqual(mid.maxY, bottom.minY, accuracy: 1, "the middle strip must not overlap the bottom pane")
 
-        // Full width, no unexpected horizontal inset on either pane or the strip.
-        XCTAssertEqual(top.width, screen.width, accuracy: 1)
-        XCTAssertEqual(mid.width, screen.width, accuracy: 1)
-        XCTAssertEqual(bottom.width, screen.width, accuracy: 1)
+        // Leading/trailing: no HANDOFF floor exists, so every piece of
+        // region content and every strip control must sit fully inside the
+        // real safe area - never merely inside the full screen width, which
+        // the Dynamic Island's landscape side clearance already extends
+        // past. `facingTopWrapper`/`facingBottomWrapper` are not used for
+        // this axis: measured directly, the non-rotated bottom wrapper's
+        // own accessibility frame reports the outer, unpadded slot's full
+        // width, not its actually-inset content - confirmed by checking its
+        // own content elements below, which are not subject to that quirk.
+        let safeMinX = screen.minX + Self.landscapeRealSafeArea.leadingOrTrailing
+        let safeMaxX = screen.maxX - Self.landscapeRealSafeArea.leadingOrTrailing
+
+        func assertInsideSafeArea(_ identifier: String, line: UInt = #line) {
+            let element = app.descendants(matching: .any)[identifier]
+            guard element.exists else { return }
+            let frame = element.frame
+            XCTAssertGreaterThanOrEqual(frame.minX, safeMinX - 1, "\(identifier) must not start left of the real safe area", line: line)
+            XCTAssertLessThanOrEqual(frame.maxX, safeMaxX + 1, "\(identifier) must not end right of the real safe area", line: line)
+        }
+
+        assertInsideSafeArea("facingTopReaderLabel")
+        assertInsideSafeArea("facingTopBig")
+        assertInsideSafeArea("facingBottomReaderLabel")
+        assertInsideSafeArea("facingBottomBig")
+        assertInsideSafeArea("facingPrimaryButton")
+        assertInsideSafeArea("facingSwapButton")
+        assertInsideSafeArea("facingExitButton")
     }
 }

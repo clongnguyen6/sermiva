@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// Pure per-pane content decision for HANDOFF.md section 3's "Đối diện"
 /// style: which text each reader sees for the single latest segment. No
@@ -116,30 +117,55 @@ struct FacingTranscriptView: View {
         FacingPaneContent.make(readerLanguage: bottomLanguage, me: meLanguage, target: targetLanguage, latest: latest)
     }
 
+    /// The real device safe area, read straight from the key window rather
+    /// than through `GeometryReader`'s own `safeAreaInsets` - by the time
+    /// this view's `.ignoresSafeArea()` (below) takes effect, a `GeometryReader`
+    /// nested inside it reports all zeros here (confirmed empirically: this
+    /// view sits inside `ConversationView`'s own safe-area-respecting
+    /// `VStack`, which has already excluded the safe area from what it
+    /// offers this view before `.ignoresSafeArea()` ever runs). HANDOFF's
+    /// 54/22/34 pt numbers are a prototype measurement, not a real device's
+    /// own insets (AGENTS.md's real-safe-area-insets rule) - see
+    /// docs/display-style-picker.md for the owner's ruling combining them.
+    private var windowSafeAreaInsets: UIEdgeInsets {
+        UIApplication.shared.connectedScenes
+            .compactMap { ($0 as? UIWindowScene)?.windows.first(where: \.isKeyWindow) }
+            .first?.safeAreaInsets ?? .zero
+    }
+
     var body: some View {
         GeometryReader { geo in
-            // HANDOFF section 3: fixed insets on the non-rotated wrapper -
-            // top stays 54 pt in both orientations (the device frame's own
-            // status bar/island sits at the top either way); the bottom
-            // shrinks in landscape, where the notch moves to the side.
+            // Owner's ruling (docs/display-style-picker.md): on this
+            // non-rotated wrapper, each edge's inset is
+            // max(HANDOFF's number for that edge, the device's real safe
+            // area for that edge). HANDOFF gives no number for leading/
+            // trailing, so those use the real inset directly. Applies to
+            // both reading regions and the middle strip.
             let isLandscape = geo.size.width > geo.size.height
+            let safe = windowSafeAreaInsets
+            let topInset = max(54, safe.top)
+            let bottomInset = max(isLandscape ? 22 : 34, safe.bottom)
             VStack(spacing: 0) {
                 // The identifier lands on `FacingPane`'s own `ScrollView` -
                 // exactly the padding-constrained region a long sentence
                 // scrolls within, which is what SermivaUITests asserts the
-                // exact 54/22/34 pt insets and the no-overlap boundaries
-                // against (`facingTopWrapper`/`facingBottomWrapper`).
+                // exact insets and the no-overlap boundaries against
+                // (`facingTopWrapper`/`facingBottomWrapper`).
                 FacingPane(content: topContent, identifierPrefix: "facingTop")
                     .rotationEffect(.degrees(180))
-                    .padding(.top, 54)
+                    .padding(.top, topInset)
+                    .padding(.leading, safe.left)
+                    .padding(.trailing, safe.right)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("facingTopWrapper")
 
-                middleStrip
+                middleStrip(leadingInset: safe.left, trailingInset: safe.right)
 
                 FacingPane(content: bottomContent, identifierPrefix: "facingBottom")
-                    .padding(.bottom, isLandscape ? 22 : 34)
+                    .padding(.bottom, bottomInset)
+                    .padding(.leading, safe.left)
+                    .padding(.trailing, safe.right)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .accessibilityElement(children: .contain)
                     .accessibilityIdentifier("facingBottomWrapper")
@@ -154,7 +180,7 @@ struct FacingTranscriptView: View {
 
     private var showsPauseIcon: Bool { primaryLabel == "Tạm dừng" }
 
-    private var middleStrip: some View {
+    private func middleStrip(leadingInset: CGFloat, trailingInset: CGFloat) -> some View {
         HStack(spacing: 6) {
             HStack(spacing: 6) {
                 Circle().fill(micDotColor).frame(width: 8, height: 8)
@@ -221,7 +247,19 @@ struct FacingTranscriptView: View {
             .accessibilityLabel("Thoát Sân khấu")
             .accessibilityIdentifier("facingExitButton")
         }
-        .padding(.horizontal, 10)
+        // The strip's own 10 pt is design breathing room, not a safe-area
+        // clearance claim (unlike the panes' 54/22/34, it never stood in
+        // for the real inset) - so the real safe area (e.g. the Dynamic
+        // Island's landscape side clearance) stacks additively on top of
+        // it here, the same additive relationship the panes have between
+        // their wrapper's own safe-area padding and `FacingPane`'s internal
+        // 22 pt content padding. `.background` below applies to this same
+        // (now wider-padded) row, which still spans the full width offered
+        // to it: the flexible mic-status `HStack` above absorbs the extra
+        // padding, so the row's own total width - and therefore its
+        // background - never shrinks in from the true screen edge.
+        .padding(.leading, 10 + leadingInset)
+        .padding(.trailing, 10 + trailingInset)
         .padding(.vertical, 6)
         .background(Tokens.surface)
         .overlay(Rectangle().fill(Tokens.sep).frame(height: 0.5), alignment: .top)
