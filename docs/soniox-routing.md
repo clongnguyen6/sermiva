@@ -631,11 +631,38 @@ segments, never anything else.
   finalized 2 s before the drop.
 - Pause billing: still not measured.
 
+**Fourth live session (2026-09-27, 15:51-15:57, build bab790b, iPhone "Long"):**
+
+- Three sessions: 15:51:43-15:52:03, 15:52:37-15:54:05 (airplane-mode drops at 15:52:40 and 15:53:01),
+  and 15:56:30-15:57:25 (airplane-mode drop at 15:56:36, reconnected 15:56:46). This time the log,
+  captured with `log collect` from the device, had no gaps - unlike the Console gap in the third
+  session above.
+- Lifecycle: sockets #1-#17 each showed task created, "task ACTUALLY completed", "URLSession
+  invalidated" and "object deinit"; never more than one real task open at a time. Reconnect backoff
+  went ~1 s, 2 s, 4 s, with immediate reconnect on "network path available"; "connection healthy for
+  30 s - backoff reset" fired at 15:53:40 and 15:57:16.
+- Two-socket bug, owner's decision: closed. The `log collect` logs of both sessions covered every
+  reconnect with no gap, and there was never more than one open connection.
+- Đối diện worked live: each side read the latest sentence in its own language - the guest's English
+  "Hello, good morning" gave the Vietnamese region "Xin chào, chào buổi sáng.", and the owner's
+  Vietnamese "Mới mở trên máy bay" gave the English region "Just opened on the plane." via on-device
+  translation. During recognition the big lines stayed empty with the source text in the small line.
+  Đổi bên swapped the regions. ✕ returned to Phụ đề mid-session with all content intact, still "Đang
+  nghe"/"Đã kết nối", and the mic was not restarted. Landscape was checked on the device after the
+  session.
+- With airplane mode on in Facing, the banner "Mất mạng. Nội dung được giữ." showed at the top,
+  unrotated; the top region moved down by exactly the banner's own height, and the strip read "Mic
+  giữ, chờ mạng". The owner confirmed on the device that the banner only reads correctly from one
+  side - left as a decision for a later outcome.
+- Found: the strip's primary pill ("Tạm dừng"/"Phiên mới") wrapped its label onto two lines - fixed in
+  the same branch this was found on. Also found: the last sentence, "Tôi tắt đó.", was finalized by
+  `<end>` at 15:57:23.631, 188 ms before Kết thúc at 15:57:23.819, and never got its English
+  translation - tracked as a separate outcome, not fixed here.
+- Pause billing, owner's decision: not measured, and not worth measuring. The whole day of testing
+  cost $0.005 (Soniox Console, 2026-09-27 UTC).
+
 **Still not yet measured, for the next session:**
 
-- Pause billing - read from the Soniox Console (whichever usage unit it displays) before and after a
-  pause: usage before, pause duration, usage after, and whether the figure moved by roughly the pause
-  duration.
 - Per-sentence vi -> en latency, timed (not just "negligible") over at least five sentences of
   different lengths.
 - The `translation_status` shape log, read off the Console/device log.
