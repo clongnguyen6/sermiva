@@ -249,8 +249,34 @@ struct FacingTranscriptView: View {
                     } else {
                         Image(systemName: showsPauseIcon ? "pause.fill" : "play.fill")
                             .font(.system(size: 13))
+                        // Review round 9: seen live on the owner's device
+                        // (iPhone "Long", portrait, default text size) -
+                        // "Tạm dừng"/"Phiên mới" wrapped to two lines inside
+                        // this pill. `ViewThatFits` picks the one-row
+                        // layout by comparing each candidate's own ideal
+                        // width against the strip's real width - but a
+                        // `Text` with no `lineLimit` reports an ideal width
+                        // for THAT comparison that does not reliably match
+                        // its true single-line width (confirmed empirically
+                        // - the Simulator reproduces the same wrap with
+                        // this label under `isDemo`/listening at default
+                        // text size, no accessibility scaling needed).
+                        // `.lineLimit(1)` alone stops the wrap but only
+                        // trades it for silent truncation ("Tạm…") - ViewThatFits
+                        // still under-measures the row and picks one-row
+                        // regardless. `.fixedSize()` is what actually fixes
+                        // the measurement: it forces this `Text` to report
+                        // its true single-line ideal width to `ViewThatFits`
+                        // itself, so the one-row candidate is only chosen
+                        // when this label genuinely fits at full length -
+                        // confirmed both by the Simulator screenshot no
+                        // longer wrapping/truncating and by
+                        // `SermivaUITests.test_facingPrimaryButtonLabelDoesNotWrapWhileListening`/
+                        // `...AfterSessionEnded`.
                         Text(primaryLabel)
                             .font(.system(size: stripLabelSize, weight: .semibold))
+                            .lineLimit(1)
+                            .fixedSize()
                     }
                 }
                 .frame(minWidth: 44, minHeight: 44)

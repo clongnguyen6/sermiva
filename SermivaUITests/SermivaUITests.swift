@@ -279,4 +279,118 @@ final class SermivaUITests: XCTestCase {
         assertInsideSafeArea("facingSwapButton")
         assertInsideSafeArea("facingExitButton")
     }
+
+    /// Review round 9: the strip's primary pill ("Tạm dừng"/"Phiên mới")
+    /// wrapped its label onto two lines on the owner's real device, portrait,
+    /// default text size. Two other checks were tried and rejected first: a
+    /// hosted `UIHostingController` test (constructing `FacingTranscriptView`
+    /// directly with the same inputs) measured a correct, unwrapped strip
+    /// height even against the unfixed code, and `XCUIElement.frame` on
+    /// `facingPrimaryButton` itself stayed the same ~44 pt height and a
+    /// barely-different width whether wrapped or not - confirmed by pixel-
+    /// measuring the real screenshot below: the wrap happens entirely inside
+    /// the pill's own fixed-size box (`HStack.frame(minHeight: 44)` still
+    /// satisfies its minimum with two compressed lines), so nothing in
+    /// SwiftUI's own layout tree - hosted or real - grows to reflect it.
+    /// The only thing that actually differs is the rendered pixels, so this
+    /// reads them directly from a real screenshot: a single-line label
+    /// leaves one continuous horizontal band of light (near-white) pixels
+    /// across the label area; a wrapped label leaves two, split by a gap.
+    func test_facingPrimaryButtonLabelDoesNotWrapWhileListening() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["demoButton"].tap()
+        let startButton = app.buttons["primaryButton"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 10))
+        startButton.tap()
+        XCTAssertTrue(app.staticTexts["Phiên mô phỏng"].waitForExistence(timeout: 10))
+
+        app.buttons["displayStyleButton"].tap()
+        app.buttons["displayStyleCard_facing"].tap()
+        assertFacingPrimaryButtonDoesNotWrap(app: app, expectedLabel: "Tạm dừng")
+    }
+
+    /// Same bug, the owner's other reported case: "Phiên mới" once the
+    /// session has ended.
+    func test_facingPrimaryButtonLabelDoesNotWrapAfterSessionEnded() throws {
+        let app = XCUIApplication()
+        app.launch()
+        app.buttons["demoButton"].tap()
+        let startButton = app.buttons["primaryButton"]
+        XCTAssertTrue(startButton.waitForExistence(timeout: 10))
+        startButton.tap()
+        XCTAssertTrue(app.staticTexts["Phiên mô phỏng"].waitForExistence(timeout: 10))
+
+        app.buttons["Kết thúc"].tap()
+        let confirmButton = app.buttons["Kết thúc phiên"]
+        XCTAssertTrue(confirmButton.waitForExistence(timeout: 5))
+        confirmButton.tap()
+        XCTAssertEqual(startButton.label, "Phiên mới", "ending the session must reach the Phiên mới state before Facing is entered")
+
+        app.buttons["displayStyleButton"].tap()
+        app.buttons["displayStyleCard_facing"].tap()
+        assertFacingPrimaryButtonDoesNotWrap(app: app, expectedLabel: "Phiên mới")
+    }
+
+    private func assertFacingPrimaryButtonDoesNotWrap(app: XCUIApplication, expectedLabel: String, line: UInt = #line) {
+        let primary = app.buttons["facingPrimaryButton"]
+        XCTAssertTrue(primary.waitForExistence(timeout: 5), "the Facing strip's primary button must exist", line: line)
+        XCTAssertEqual(primary.label, expectedLabel, "must be checking the reported state, not a different one", line: line)
+
+        let screenshot = app.screenshot()
+        let windowWidth = app.windows.firstMatch.frame.width
+        let bands = Self.textLineBandCount(in: screenshot, buttonFrame: primary.frame, windowWidthPoints: windowWidth)
+        XCTAssertEqual(bands, 1, "the primary pill's label (\"\(expectedLabel)\") must render on exactly one line - \(bands) separate horizontal bands of light pixels means it wrapped", line: line)
+    }
+
+    /// Counts distinct horizontal bands of light (near-white, the label's
+    /// own text color against the pill's blue or the strip's white
+    /// background) pixel rows within `buttonFrame`'s label area, read from a
+    /// real screenshot. The button's own leading edge is skipped by
+    /// `leftSkip` below - it holds the pause/play icon, itself a
+    /// light-colored glyph that would otherwise be counted as its own band
+    /// regardless of the label - and each row's threshold is high enough
+    /// (`0.15`) to ignore the capsule's own rounded-corner background
+    /// bleeding into the crop, confirmed empirically against a real
+    /// "Phiên mới" screenshot.
+    private static func textLineBandCount(in screenshot: XCUIScreenshot, buttonFrame: CGRect, windowWidthPoints: CGFloat) -> Int {
+        guard let cgImage = screenshot.image.cgImage else { return -1 }
+        let scale = CGFloat(cgImage.width) / windowWidthPoints
+        // The icon (pause/play, 13 pt) plus its leading padding (14 pt) and
+        // the 6 pt spacing before the label together span about 33 pt,
+        // regardless of which label is showing - a fixed points skip (not a
+        // fraction of the button's own width, which shrinks with a shorter
+        // label) is what reliably clears it for every label.
+        let leftSkip: CGFloat = 36
+        let cropRect = CGRect(
+            x: (buttonFrame.minX + leftSkip) * scale,
+            y: (buttonFrame.minY + 4) * scale,
+            width: (buttonFrame.width - leftSkip - 6) * scale,
+            height: (buttonFrame.height - 8) * scale
+        ).integral
+        guard cropRect.width > 0, cropRect.height > 0, let cropped = cgImage.cropping(to: cropRect) else { return -1 }
+        guard let data = cropped.dataProvider?.data, let ptr = CFDataGetBytePtr(data) else { return -1 }
+        let bytesPerRow = cropped.bytesPerRow
+        let bytesPerPixel = cropped.bitsPerPixel / 8
+
+        var bands = 0
+        var inBand = false
+        for y in 0..<cropped.height {
+            var lightCount = 0
+            for x in 0..<cropped.width {
+                let offset = y * bytesPerRow + x * bytesPerPixel
+                if ptr[offset] > 200, ptr[offset + 1] > 200, ptr[offset + 2] > 200 {
+                    lightCount += 1
+                }
+            }
+            let isTextRow = Double(lightCount) / Double(cropped.width) > 0.15
+            if isTextRow, !inBand {
+                bands += 1
+                inBand = true
+            } else if !isTextRow {
+                inBand = false
+            }
+        }
+        return bands
+    }
 }
