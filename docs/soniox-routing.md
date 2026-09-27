@@ -549,11 +549,13 @@ What each hypothesis would look like when a diagnostic line appears twice:
 **On-device translation is independent of the Soniox socket entirely.** An M reconnect never
 abandons an in-progress `me`-language translation (`SonioxJoinEngine.abandonMDirectTranslationsInProgress`
 only ever touches non-`me` segments) - Apple's Translation framework does not care whether Soniox is
-connected. Only the whole session ending (`end`/`endImmediately`) abandons whatever the on-device
-queue still has queued or in-flight, via `MeTranslationQueue.abandonAll` - the queue's own
-`AsyncStream` and `.translationTask`'s consuming `Task` are NOT torn down then, since they live for
-the whole conversation across "Phiên mới" (fatalError rule 3); only the pending requests are
-abandoned. Translation-request ids are drawn from a counter that never resets across "Phiên mới"
+connected. A plain Kết thúc (`end()`) does not abandon the on-device queue at all any more (see "A
+`me` segment finalized just before Kết thúc" above) - only `discardPreviousSession` (Bắt đầu/Phiên
+mới) and `endImmediately` (a rejected key) still call `MeTranslationQueue.abandonAll`, since neither
+leaves an ended transcript for a result to land on. The queue's own `AsyncStream` and
+`.translationTask`'s consuming `Task` are NOT torn down by any of these, since they live for the whole
+conversation across "Phiên mới" (fatalError rule 3); only the pending requests are abandoned, when
+they are. Translation-request ids are drawn from a counter that never resets across "Phiên mới"
 (unlike Soniox segment ids, which do reset per `SonioxJoinEngine`) - this is what stops a stale,
 still-in-flight translation from a just-ended session ever landing on a same-numbered segment in the
 next one; see `SonioxLiveSessionTests.test_aStaleReportFromAnEndedSessionNeverLandsOnTheNextSessionsSameNumberedSegment`.
@@ -561,6 +563,22 @@ Abandoning removes that id's tracking, but a request already sitting in the queu
 before the abandonment still gets pulled out by a later `for await` - "Two gates, not one" above (and
 `test_endedSessionsQueuedRequestStillSurfacesButMustNeverBeStarted`) is what actually stops it from
 ever reaching `translate`.
+
+**Known limitation, pre-existing (not fixed here):** `abandonAll` only drops the queue's own
+bookkeeping (`pendingIds`/`bufferedBeforeStream`) - it cannot cancel an Apple `translate` call
+already being awaited inside `ConversationView`'s sequential `.translationTask` loop
+(`ConversationView.swift:77`), since that call sits inside a plain `for await`/`await`, not a
+child `Task` this code owns a handle to. "Phiên mới" or an auth-error end therefore does not
+interrupt an in-flight `translate` call - its late result is rejected once it returns (wrong
+request id, or the session epoch guard, per "Translation requests carry their session" above), so
+it can never land on the new session, but the closure itself stays blocked on that one call until
+Apple's framework actually returns or throws, holding up the new session's very first translation
+request behind it. This is not new: `end()` never cancelled an in-flight `translate` call either,
+before or after the fix above - only what happens to its *result* changed. Follow-up work, not
+attempted here: cancelling the call itself would need `TranslationSession.translate` to run in its
+own child `Task`, cancelled explicitly on "Phiên mới"/auth-error - which reopens fatalError rule 5
+("`translate` calls are sequential - at most one is ever awaited at a time... no child `Task`
+spawned per request") and needs its own review before changing.
 
 ## Why option B was stopped
 
