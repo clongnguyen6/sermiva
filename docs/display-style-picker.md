@@ -167,3 +167,22 @@ unrotated, so it is readable only from the bottom reader's side** - the person t
 own 180° rotation exists to serve would see it upside-down, and the banner visually displaces
 their region to make room for itself. Not moved, not rotated, and its content unchanged here per
 the owner's own scope for this fix; recorded as a known limitation for whoever picks this up.
+
+# Debt: the Facing primary-pill wrap test reads pixels, tied to white-on-accent text
+
+`SermivaUITests.test_facingPrimaryButtonLabelDoesNotWrapWhileListening` and
+`...AfterSessionEnded` (`SermivaUITests/SermivaUITests.swift`) prove the pill's label never wraps
+by taking a real screenshot of `facingPrimaryButton` and counting bands of light (near-white)
+pixels across the label area - a single band means one line, two bands split by a gap means the
+label wrapped. This only works because the label is currently white text on the pill's accent
+background in every state this app has today (light mode only; outcome D's remaining styles
+Bong bóng, Sân khấu, Kịch bản do not exist yet).
+
+Outcome D (light/dark mode, plus the remaining display styles) will very likely change this: dark
+mode alone could put light text on a light/neutral pill background, or a differently-styled pill,
+either of which breaks the light-pixel-band assumption without changing whether the label actually
+wraps. Outcome D must fix or replace this test's own detection method (e.g. measuring the
+rendered text layout instead of screen pixels, or re-deriving the light/dark expectation from
+whatever token drives the pill's actual colors that outcome ships) - not disable or delete the
+test, since the underlying bug it catches (review round 9, above) is real and has already
+recurred once.
