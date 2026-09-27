@@ -475,6 +475,11 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         sessionEpoch += 1
         closeSocket()
         stopSessionActivities()
+        // Unlike a plain Kết thúc (`end()`), a new attempt starting means
+        // there is no ended transcript left for a still-running translation
+        // to land on - so this is the one place besides `endImmediately`
+        // that still abandons whatever the queue has left.
+        translationQueue.abandonAll()
         closeScheduleToken += 1
         phase = .inactive
         isTranslationAvailable = false
@@ -489,15 +494,27 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         }
         log("endImmediately() called in phase \(phase)")
         stopSessionActivities()
+        // A rejected key (401/402/403) ends the session outright, same as
+        // `discardPreviousSession` - unlike a plain Kết thúc, there is no
+        // "the owner tapped Kết thúc, so let already-finalized sentences
+        // still get their translation" case being protected here.
+        translationQueue.abandonAll()
         finishClosing()
         completion()
     }
 
-    /// Everything a running session owns except its socket: no reconnect,
-    /// keepalive or path event may act after this, no buffered audio is
-    /// sent anywhere, and on-device translation still queued or in flight
-    /// is abandoned (`MeTranslationQueue.abandonAll` - the queue's own
-    /// stream lives on for the next session, per fatalError rule 3).
+    /// Everything a running session owns except its socket and its
+    /// on-device translation queue: no reconnect, keepalive or path event
+    /// may act after this, and no buffered audio is sent anywhere.
+    ///
+    /// Deliberately does NOT touch `translationQueue` - the owner's outcome
+    /// (2026-09-27 live session): every `me` sentence already finalized and
+    /// still queued or in flight at Kết thúc must still be translated onto
+    /// the ended transcript, exactly like choice (c) already does for one
+    /// the `<fin>` answer finalizes only after Kết thúc. `end()` therefore
+    /// leaves the queue alone; only `discardPreviousSession` and
+    /// `endImmediately` still abandon it, since neither leaves an ended
+    /// transcript for a result to land on.
     private func stopSessionActivities() {
         reconnectScheduleToken += 1
         endPauseKeepalive()
@@ -506,7 +523,6 @@ final class SonioxLiveSession: SonioxLiveSessionProtocol {
         pendingStartCompletion = nil
         clearBufferedAudio()
         clearUnfinalizedSentAudio()
-        translationQueue.abandonAll()
     }
 
     /// The session's connection is gone for good. M-direct translations

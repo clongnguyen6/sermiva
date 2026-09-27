@@ -1426,10 +1426,20 @@ final class LifecycleWorld {
             violate("(i) translation", "a translate call started for segment \(segment.id) although this session's availability check has not reported .installed")
         }
         if phase != .active {
-            let finalizedAfterEnd = phase == .ended && !finalSegmentIdsAtEnd.contains(segment.id)
-            if finalizedAfterEnd { reached("translationCallAfterEnd") }
-            if !(Self.translatesSegmentsFinalizedAfterEnd && finalizedAfterEnd) {
+            guard phase == .ended else {
                 violate("(i) translation", "a translate call started for segment \(segment.id) while \(phase.rawValue)")
+                return
+            }
+            reached("translationCallAfterEnd")
+            // The owner's 2026-09-27 outcome: a segment already finalized
+            // and still queued or in flight AT Kết thúc is unconditionally
+            // still translated afterward - `finalSegmentIdsAtEnd` already
+            // held its id, so nothing more to check here. Only a segment
+            // the `<fin>` answer finalizes ONLY after Kết thúc - not yet in
+            // `finalSegmentIdsAtEnd` - is still gated by choice (c)'s own
+            // flag, `translatesSegmentsFinalizedAfterEnd`.
+            if !finalSegmentIdsAtEnd.contains(segment.id), !Self.translatesSegmentsFinalizedAfterEnd {
+                violate("(i) translation", "a translate call started for segment \(segment.id), finalized only after Kết thúc, although choice (c) is off")
             }
         }
     }

@@ -384,9 +384,13 @@ the structure that carries them is now:
   undercut the end grace wait's whole purpose. With no established connection there is nothing to
   finalize, and an attempt still in flight is closed at once. M-direct translations still in progress
   are abandoned when the connection closes rather than at Kết thúc, since the `<fin>` answer may still
-  complete them. On-device translation still queued or in flight is abandoned at Kết thúc exactly as
-  before. A `me` segment that only the `<fin>` answer finalizes is still enqueued and translated
-  after Kết thúc (choice (c), decided below), so it gets its English line.
+  complete them. On-device translation is different: **`end()` no longer abandons anything itself**
+  (owner's outcome, 2026-09-27 live session, below) - every `me` segment already finalized and still
+  queued or in flight AT Kết thúc keeps running and lands on the ended transcript, exactly like a `me`
+  segment that only the `<fin>` answer finalizes AFTER Kết thúc already did (choice (c), decided
+  below). Only a genuinely new attempt (`discardPreviousSession`, "Bắt đầu"/"Phiên mới") or a rejected
+  key (`endImmediately`) still abandons whatever the queue has left - see "A me segment finalized just
+  before Kết thúc" below.
 - **Auth wins until the session has fully closed.** A rejected key reported by any socket the session
   opened, including one already superseded, moves the screen to `.authError` - also during the end
   grace wait, and during the close window after Kết thúc, where round 5 ignored it (the screen kept
@@ -455,7 +459,10 @@ connection, path monitor, audio, transcript - crosses into the next session; (h)
 runs exactly while a session runs, a reconnect attempt starts exactly when the documented backoff
 says (resetting only after a connection stayed established for 30 s), and a path-available event
 while waiting starts one at once; (i) a translation lands only on the segment it was made for, "Đang dịch…" shows exactly while
-a real call for that segment runs, and no call starts before `.installed` or after Kết thúc; (k) a
+a real call for that segment runs, no call ever starts before `.installed`, and a call after Kết thúc
+only ever starts for a segment that was already final by then or that only the `<fin>` answer
+finalizes afterward - never for a segment "Bắt đầu"/"Phiên mới" or a rejected key have since
+abandoned; (k) a
 keepalive goes out while paused on an established connection, never more than 10 s after the
 previous one - checked at each keepalive - and never otherwise. It was red against 54b3202 and,
 extended, against 2046102 and 46e9ca0 (each test commit comes before its fix). A failure prints the seed and a shrunk minimal sequence with the state after every step.
@@ -480,6 +487,26 @@ whatever is still queued or in flight (`discardPreviousSession`), and the sessio
 any late result. The invariant test reads the constant. Evidence that `true` holds every invariant:
 the full `SermivaTests` suite plus 5,000- and 10,000-seed fuzz runs with the switch `true` passed,
 reproduced by an independent review.
+
+**A `me` segment finalized just before Kết thúc, decided by the owner on 2026-09-27: yes, translate
+it too.** Live evidence (build bab790b, 2026-09-27, iPhone "Long"): the owner's last sentence, "Tôi
+tắt đó.", was finalized by a genuine `<end>` 188 ms before Kết thúc was tapped, and never got its
+English line - `end()`'s own `stopSessionActivities()` called `MeTranslationQueue.abandonAll()`
+unconditionally, abandoning every request still queued or in flight the instant Kết thúc was
+pressed, whether or not its segment had already finished before the tap. Choice (c) above only ever
+covered the opposite case - a segment the `<fin>` answer finalizes AFTER Kết thúc - and did nothing
+for one already finalized and merely still waiting on translation when the user ended the session.
+The fix: `end()` (`SonioxLiveSession.swift`) no longer calls `abandonAll()` at all; the queue is left
+exactly as it was, so every request still queued or in flight at that moment keeps running and lands
+on the ended transcript, covering every such sentence, not only the last one - "Đang dịch…" only
+shows while a translation is genuinely running, and a failed translation still leaves the target
+empty, unchanged from before. `discardPreviousSession` (Bắt đầu/Phiên mới) and `endImmediately`
+(a rejected key) still call `abandonAll()` themselves, since neither leaves an ended transcript for a
+result to land on. Evidence: `SonioxLiveSessionTests` covers a segment finalized just before end with
+its translation not yet started, one already in flight at end, and several queued at end; the
+invariant test's own oracle (`LifecycleInvariantTests.translationCallStarted`) no longer treats a
+translate call for a segment already final at end time as a violation, and the full fuzz run (5,000
+seeds) still holds.
 
 **Device-only follow-up, pre-existing and unproven** (not fixed; the invariant test does not model
 it): `RealAudioCapture` does not observe `AVAudioEngineConfigurationChange`. If the engine stops for
@@ -657,7 +684,8 @@ segments, never anything else.
 - Found: the strip's primary pill ("Tạm dừng"/"Phiên mới") wrapped its label onto two lines - fixed in
   the same branch this was found on. Also found: the last sentence, "Tôi tắt đó.", was finalized by
   `<end>` at 15:57:23.631, 188 ms before Kết thúc at 15:57:23.819, and never got its English
-  translation - tracked as a separate outcome, not fixed here.
+  translation - fixed in a later outcome on the same branch, see "A me segment finalized just before
+  Kết thúc" above; not yet re-proven live.
 - Pause billing, owner's decision: not measured, and not worth measuring. The whole day of testing
   cost $0.005 (Soniox Console, 2026-09-27 UTC).
 

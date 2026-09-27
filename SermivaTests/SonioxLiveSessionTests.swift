@@ -407,6 +407,92 @@ final class SonioxLiveSessionTests: XCTestCase {
         XCTAssertNil(lastSegments[0].target, "a report for an already-retired request id must be ignored")
     }
 
+    // MARK: - A me segment finalized before Kết thúc must still be
+    // translated after it (owner's outcome, 2026-09-27 live session): choice
+    // (c) already covers a segment the `<fin>` answer finalizes AFTER Kết
+    // thúc, but `end()`'s own `stopSessionActivities()` used to abandon
+    // every request already queued or in-flight at that moment too - even
+    // one for a segment finalized (by a genuine `<end>`) a moment before the
+    // tap, exactly what happened live to "Tôi tắt đó.".
+
+    /// (a) finalized just before end, never even started.
+    func test_meSegmentFinalizedJustBeforeEndAndNotYetStartedIsStillTranslatedAfterEnd() async {
+        let (session, factory, scheduler) = makeSession()
+        startAndEstablish(session, factory: factory)
+        session.setTranslationAvailable(true)
+        var lastSegments: [Segment] = []
+        session.onSegmentsChanged = { lastSegments = $0 }
+        factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens(text: "Tôi tắt đó."))
+
+        session.end { }
+        scheduler.drainAll()
+
+        guard !lastSegments[0].targetAbandoned else {
+            XCTFail("a me segment finalized just before end, whose translation had not even started, must still be translated - not abandoned at Kết thúc")
+            return
+        }
+        await drainOneTranslationRequest(from: session) { id, _ in
+            session.reportTranslationSuccess(id: id, target: "I turned that off.")
+        }
+        XCTAssertEqual(lastSegments[0].target, "I turned that off.")
+        XCTAssertFalse(lastSegments[0].targetAbandoned)
+    }
+
+    /// (b) already in flight (the closure already called `translate`) at end.
+    func test_meSegmentAlreadyInFlightAtEndStillCompletesAfterEnd() async {
+        let (session, factory, scheduler) = makeSession()
+        startAndEstablish(session, factory: factory)
+        session.setTranslationAvailable(true)
+        var lastSegments: [Segment] = []
+        session.onSegmentsChanged = { lastSegments = $0 }
+        factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens(text: "Tôi tắt đó."))
+
+        var iterator = session.makeTranslationRequests().makeAsyncIterator()
+        let request = await iterator.next()!
+        XCTAssertTrue(session.reportTranslationStarted(id: request.id))
+        XCTAssertTrue(lastSegments[0].translationInProgress, "sanity: genuinely in flight before end")
+
+        session.end { }
+        scheduler.drainAll()
+
+        guard !lastSegments[0].targetAbandoned else {
+            XCTFail("a me segment's translation already in flight at end must still be allowed to complete - not abandoned at Kết thúc")
+            return
+        }
+        session.reportTranslationSuccess(id: request.id, target: "I turned that off.")
+        XCTAssertEqual(lastSegments[0].target, "I turned that off.")
+        XCTAssertFalse(lastSegments[0].targetAbandoned)
+    }
+
+    /// (c) several segments queued (none started) at end - all of them, not
+    /// only the last, must still be translated in order.
+    func test_severalMeSegmentsQueuedAtEndAreAllStillTranslatedAfterEnd() async {
+        let (session, factory, scheduler) = makeSession()
+        startAndEstablish(session, factory: factory)
+        session.setTranslationAvailable(true)
+        var lastSegments: [Segment] = []
+        session.onSegmentsChanged = { lastSegments = $0 }
+        factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens(text: "Một"))
+        factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens(text: "Hai"))
+        factory.createdSockets[0].simulateResponse(tokens: meSegmentResponseTokens(text: "Ba"))
+
+        session.end { }
+        scheduler.drainAll()
+
+        guard lastSegments.allSatisfy({ !$0.targetAbandoned }) else {
+            XCTFail("every me segment still queued at end must still be translated - none abandoned at Kết thúc")
+            return
+        }
+        var iterator = session.makeTranslationRequests().makeAsyncIterator()
+        for expectedSource in ["Một", "Hai", "Ba"] {
+            let request = await iterator.next()!
+            XCTAssertEqual(request.source, expectedSource, "queued segments must still be translated in order")
+            XCTAssertTrue(session.reportTranslationStarted(id: request.id))
+            session.reportTranslationSuccess(id: request.id, target: "T:\(expectedSource)")
+        }
+        XCTAssertEqual(lastSegments.map(\.target), ["T:Một", "T:Hai", "T:Ba"])
+    }
+
     /// Stream termination (the view disappearing, or the task cancelled)
     /// abandons whatever is still queued or in-flight and clears the
     /// indicator - exercised here by letting the returned `AsyncStream`
