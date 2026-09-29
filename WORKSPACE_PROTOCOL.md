@@ -13,8 +13,8 @@ Dẫn chiếu các quy định đã có, không chép lại. Nếu có xung đ�
 ## Trạng thái
 
 - Owner: Long.
-- Version: 2.
-- Ngày rà soát: 2026-09-24.
+- Version: 3.
+- Ngày rà soát: 2026-09-29.
 - Readers: Lead; Supervisor khi được giao nhiệm vụ.
 
 ## Đặc điểm và mức nghi thức
@@ -61,12 +61,18 @@ Luật bền vững:
 - Reviewer là seat mới, không tham gia viết phần được review, không fork ngữ cảnh kết luận của Lead. Brief nêu điều cần kiểm chứng, không mớm kết luận.
 - Brief giao outcome, phạm vi, ràng buộc và bằng chứng; Peer tự chọn cách làm.
 - Sau hai vòng REOPEN trên cùng một việc, vòng kế tiếp dùng seat Engineer mới, brief mang theo trạng thái
-  nhánh. Nếu lỗi mới vẫn cùng loại, seat đó chạy Opus 5.5 thay cho Sonnet 5. Lead ghi rõ việc đổi seat và
+  nhánh. Nếu lỗi mới vẫn cùng loại, seat đó chạy Opus 5.5 thay cho Sonnet 5.5. Lead ghi rõ việc đổi seat và
   đổi model trong báo cáo.
 
 Không tự thêm Architect hoặc Reviewer cho một outcome chỉ vì nó là outcome đầu tiên.
 
-Lựa chọn model tại ngày 2026-09-24: Lead = `claude-lead` / Opus 5.5; Engineer = `claude-peer` / Sonnet 5, nâng lên Opus 5.5 theo luật trên; Architect (chỉ đọc) = `claude-peer` / Fable 5.1; Reviewer = `codex-peer` / Sol medium, dự phòng khi hết quota theo mục Review bắt buộc.
+Lựa chọn model tại ngày 2026-09-29 (mức thinking đặt bằng `settings.thinkingOptionId` khi tạo seat):
+- Lead = `claude-lead` / Opus 5.5 `high`.
+- Engineer = `claude-peer` / Sonnet 5.5 `high`; nâng lên Opus 5.5 theo luật trên (`medium`, lên `high` khi bản sửa chỉ dừng ở một lớp). Chỉ chuyển sang Fable 5.1 khi Opus 5.5 ở `xhigh` vướng cùng một vấn đề hai lần.
+- Architect (chỉ đọc) = `claude-peer` / Fable 5.1.
+- Reviewer = `codex-peer` / Sol `medium`, dự phòng khi hết quota theo mục Review bắt buộc. Không review bằng Sonnet.
+
+Hai nhãn trong prompt Lead có nghĩa ở repo này: [Sol] = `claude-peer/claude-sonnet-5-5` ở `high`, [Opus] = `claude-peer/claude-opus-5-5`. Seat đang chạy không đổi được model; nâng model nghĩa là seat mới.
 Đổi model không làm mất luật độc lập phía trên. Quota và vận hành seat theo quy định cấp phòng.
 
 ## Review bắt buộc
@@ -76,7 +82,7 @@ Luôn có Reviewer độc lập cho:
 - Đường nhập khóa và Keychain; AVAudioSession và chống vọng.
 - Mục Verify của AGENTS.md hoặc điều ứng dụng khẳng định là đã kiểm.
 
-Khi `codex-peer` hết quota: review bằng một seat Reviewer `claude-peer` / Opus 5.5 mới, chưa tham gia vòng
+Khi `codex-peer` hết quota: review bằng một seat Reviewer `claude-peer` / Opus 5.5 `xhigh` mới, chưa tham gia vòng
 nào trước đó của cùng việc, và ghi rõ ngoại lệ cùng họ nhà cung cấp trong báo cáo. Khi quota trở lại, một
 seat Sol soát hẹp những luật rủi ro nhất trên main sau khi merge; lượt đó không chặn merge, có phát hiện thì
 sửa bằng commit mới.
