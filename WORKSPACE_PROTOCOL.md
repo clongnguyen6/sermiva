@@ -13,8 +13,8 @@ Dẫn chiếu các quy định đã có, không chép lại. Nếu có xung đ�
 ## Trạng thái
 
 - Owner: Long.
-- Version: 3.
-- Ngày rà soát: 2026-09-29.
+- Version: 4.
+- Ngày rà soát: 2026-09-30.
 - Readers: Lead; Supervisor khi được giao nhiệm vụ.
 
 ## Đặc điểm và mức nghi thức
@@ -41,14 +41,17 @@ Các quyền owner giữ trong AGENTS.md áp dụng nguyên trạng. Thay đổi
 
 ## Lead được viết gì
 
-Lead điều phối, phân xử và nghiệm thu; giao cả tài liệu và sửa nhỏ cho Engineer.
-Chỉ có hai ngoại lệ:
+Lead điều phối, phân xử và nghiệm thu; giao việc sửa code, kể cả sửa nhỏ, cho Engineer.
+Chỉ có ba ngoại lệ:
 
 1. Revert thay đổi chính Lead đã nhận, khi revert là cách sửa.
 2. Sửa một dòng phát hiện lúc verify, khi rẻ hơn một vòng giao việc và chạy lại
    check sau đó.
+3. Sửa nhỏ tài liệu hoặc cấu hình không đổi hành vi chạy (comment, docs, README,
+   cấu hình lint hay editor).
 
-Ngoài hai ngoại lệ này, im lặng là từ chối quyền viết.
+Ngoài ba ngoại lệ này, im lặng là từ chối quyền viết. Lead ghi rõ trong báo cáo
+mọi thay đổi do chính mình viết.
 Ngoại lệ không miễn review bắt buộc; Lead không tự nghiệm thu phần mình viết
 trên bề mặt cần Reviewer.
 
@@ -121,7 +124,11 @@ Lead báo ngắn: phán quyết, candidate, bằng chứng, giới hạn, việc
 - Test tự đặt hợp đồng stream Soniox chưa được xác nhận: REOPEN theo ranh giới
   adapter trong AGENTS.md; không củng cố giả định bằng thêm test.
 
-Đây là các nguy cơ suy ra từ hợp đồng hiện tại, chưa phải sự cố đã quan sát ở repo.
+- Báo cáo nêu hash commit mà `git show` không tìm thấy: REOPEN báo cáo, không tự
+  đoán hash đúng. Hash phải chép nguyên từ output của git.
+
+Các mục trên là nguy cơ suy ra từ hợp đồng hiện tại, chưa phải sự cố đã quan sát ở repo;
+riêng mục hash đã gặp ở caro-game ngày 2026-09-10.
 
 ## Tiến hóa protocol
 
